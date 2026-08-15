@@ -32,9 +32,39 @@ volatile uint8_t g_tx_enable    = 1;
 
 int main(void)
 {
+	uint32_t tick = 0;
+
 	printk("BMS ready\n");
 
 	while (1) {
+		/*
+		 * Read every injectable input on each cycle.
+		 *
+		 * This is what a real BMS does, and it is also what keeps these
+		 * symbols in the ELF at all. Zephyr compiles with -fdata-sections
+		 * and links with --gc-sections, so each global lands in its own
+		 * .data.g_* section and the linker discards any section nothing
+		 * references. `volatile` does not save them: volatile constrains
+		 * the compiler, and the collection happens in the linker.
+		 *
+		 * A discarded symbol means write_symbol has no address to write,
+		 * and the injection mechanism silently has nothing to act on.
+		 * scripts/boot-check.sh asserts all three survive, so this fails
+		 * at the boot check rather than halfway through a scenario.
+		 */
+		int32_t temp_dC = g_cell_temp_dC;
+		int32_t pack_mv = g_pack_mv;
+		uint8_t tx_on   = g_tx_enable;
+
+		/* Once a second, so the values are observable on the console
+		   without burying the banner. */
+		if (tx_on && (tick % 10U) == 0U) {
+			printk("bms temp=%d.%d C pack=%d mV\n",
+			       temp_dC / 10, (temp_dC < 0 ? -temp_dC : temp_dC) % 10,
+			       pack_mv);
+		}
+
+		tick++;
 		k_sleep(K_MSEC(100));
 	}
 

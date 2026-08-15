@@ -71,8 +71,18 @@ for sym in g_cell_temp_dC g_pack_mv g_tx_enable; do
 done
 [ -z "$missing" ] || die "injectable symbol(s) absent from the ELF:$missing
 
-The compiler discarded them. Check that each is declared \`volatile\` and has
-external linkage (no \`static\`) in firmware/bms/src/main.c."
+Without an address to resolve, write_symbol has nothing to write and fault
+injection silently does nothing. In likely order:
+
+  1. The linker garbage-collected them. Zephyr compiles with -fdata-sections
+     and links with --gc-sections, so an unreferenced global is dropped even
+     when declared \`volatile\` -- volatile binds the compiler, and the
+     collection happens in the linker. Confirm with:
+       grep -A400 'Discarded input sections' $BUILD/zephyr/zephyr.map
+     Fix by having the firmware actually read the value, which a real ECU
+     does anyway.
+  2. Declared \`static\`, so it has no external linkage to resolve.
+  3. Renamed in the firmware but not in this check."
 
 # ---------------------------------------------------------------------------
 # 3. Boot it
