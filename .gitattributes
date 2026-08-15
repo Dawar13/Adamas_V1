@@ -1,0 +1,23 @@
+# Line endings are load-bearing here, not cosmetic.
+#
+# The toolchain runs on Linux (natively, or under WSL2 on Windows). A shell
+# script checked out with CRLF fails with "bad interpreter: /usr/bin/env
+# bash^M", and a Renode .resc or .repl with CRLF produces parse errors that
+# point at the wrong thing entirely. Pin LF everywhere so a clean clone on
+# Windows behaves exactly like a clean clone on Linux.
+* text=auto eol=lf
+
+*.sh    text eol=lf
+*.resc  text eol=lf
+*.repl  text eol=lf
+*.robot text eol=lf
+*.py    text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+
+# Binaries: never touch.
+*.elf  binary
+*.bin  binary
+*.hex  binary
+*.dbc  binary
+*.png  binary
