@@ -1,0 +1,30 @@
+# Build output — firmware binaries are produced, never committed.
+build/
+*.elf
+*.bin
+*.hex
+*.map
+
+# Node
+node_modules/
+dist/
+.astro/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Emulator / toolchain caches
+renode-cache/
+.renode/
+
+# Harness scratch output. Committed run history lives in app/project/runs/.
+harness/out/
+*.robot.generated

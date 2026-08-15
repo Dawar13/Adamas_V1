@@ -1,0 +1,71 @@
+name: boot-check
+
+# Phase 0 gate: real firmware must build and boot in the emulator on every push.
+# If this is red, nothing above it can be trusted.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  boot-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The change report in Phase 4 diffs against a parent commit. A
+          # shallow clone has no history to diff.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # Three separate caches, deliberately not combined.
+      #
+      # Going red is this project's normal duty cycle -- a failing boot-check is
+      # the tool doing its job. A single combined cache is saved only when the
+      # whole job succeeds, so a run of red days would leave every red run
+      # re-downloading the entire toolchain. Split, each piece is restored
+      # independently and survives its neighbours failing.
+
+      - name: Cache Renode
+        uses: actions/cache@v4
+        with:
+          path: ~/bench-tools
+          key: renode-1.16.1-${{ runner.os }}
+
+      - name: Cache Zephyr SDK
+        uses: actions/cache@v4
+        with:
+          path: ~/zephyr-sdk-0.16.8
+          key: zephyr-sdk-0.16.8-${{ runner.os }}
+
+      - name: Cache west workspace
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/zephyrproject
+            ~/bench-venv
+          key: west-v3.5.0-${{ runner.os }}-${{ hashFiles('scripts/setup.sh') }}
+          restore-keys: |
+            west-v3.5.0-${{ runner.os }}-
+
+      - name: Install pinned toolchain
+        run: ./scripts/setup.sh
+
+      - name: Boot check
+        run: ./scripts/boot-check.sh
+
+      # Uploaded on failure too -- the UART log and the Renode log are the whole
+      # diagnosis, and re-running locally to get them is the slow path.
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: boot-check-logs
+          path: harness/out/
+          if-no-files-found: warn

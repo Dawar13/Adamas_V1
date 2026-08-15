@@ -1,0 +1,65 @@
+// Nucleo-H743ZI with CAN, for SIL execution under Renode.
+//
+// Renode 1.16.1 ships no `platforms/boards/nucleo_h743zi.repl`. It ships
+// `platforms/cpus/stm32h743.repl` (the die) and `platforms/boards/nucleo_h753zi.repl`
+// (the same Nucleo-144 carrier around the H753 die). This file is the missing
+// combination: the stock H743 CPU description plus the Nucleo-144 board wiring,
+// taken from the stock H753 board file.
+//
+// The `using` path is resolved against the Renode installation root, so this
+// inherits the stock CPU description rather than forking a copy of it. Renode
+// upgrades therefore surface here as a diff to review, not as silent drift.
+//
+// What the stock CPU file already provides, and why we do not redeclare it:
+//
+//   flashBank1  0x08000000  1 MiB   - where the ELF lands
+//   flashBank2  0x08100000  1 MiB
+//   itcm        0x00000000  64 KiB
+//   dtcm        0x20000000  128 KiB
+//   axiSram     0x24000000  512 KiB - Zephyr's main SRAM for this board
+//   sram1..4, backupSram
+//   usart3      0x40004800          - Zephyr's console for nucleo_h743zi
+//                                     (ST-Link virtual COM port)
+//   fdcan1      0x4000A000  CAN.MCAN, Line0 -> nvic@19, Line1 -> nvic@21
+//   fdcan2      0x4000A400  CAN.MCAN
+//   canMessageRAM 0x4000AC00 +0x2800 - shared message RAM for both FDCAN cores
+//
+// NOTE ON PERIPHERAL NAMING: the CAN controller is `fdcan1`, not `can0`. The
+// harness refers to it as `sysbus.fdcan1`. Peripheral names here must match the
+// emulator's actual names, never a tidier invention -- a name that does not
+// resolve is a run that cannot happen.
+
+using "platforms/cpus/stm32h743.repl"
+
+// ---------------------------------------------------------------------------
+// Nucleo-144 carrier board. Same layout as the stock nucleo_h753zi.repl.
+// ---------------------------------------------------------------------------
+
+GreenLED: Miscellaneous.LED @ gpioPortB 0
+
+YellowLED: Miscellaneous.LED @ gpioPortE 1
+
+RedLED: Miscellaneous.LED @ gpioPortB 14
+
+UserButton1: Miscellaneous.Button @ gpioPortC 13
+    -> gpioPortC@13
+
+gpioPortB:
+    0 -> GreenLED@0
+    14 -> RedLED@0
+
+gpioPortE:
+    1 -> YellowLED@0
+
+// The Nucleo-144 carries an LAN8742A PHY on RMII. Zephyr's networking stack is
+// not enabled in the BMS build, but the PHY is modelled so that a board without
+// it does not read as a board that has one.
+phy: Network.EthernetPhysicalLayer @ ethernet 0
+    BasicControl: 0x3100
+    BasicStatus: 0x782D
+    Id1: 0x0007
+    Id2: 0xC130
+    AutoNegotiationAdvertisement: 0x01E1
+    AutoNegotiationLinkPartnerBasePageAbility: 0x0001
+    AutoNegotiationExpansion: 0x0064
+    AutoNegotiationNextPageTransmit: 0x2001

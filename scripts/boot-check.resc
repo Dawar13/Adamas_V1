@@ -1,0 +1,24 @@
+:name: BMS boot check
+:description: Boots the real BMS firmware on an emulated Nucleo-H743ZI and captures its console UART.
+
+# Paths are Renode monitor variables so this script is usable both standalone
+# and from scripts/boot-check.sh, which overrides them with absolute paths via
+# `-e`. `?=` assigns only if unset, so the caller always wins.
+$platform?=@platforms/nucleo_h743zi_can.repl
+$elf?=@firmware/bms/build/zephyr/zephyr.elf
+$uartLog?=@/tmp/bench-bms-uart.log
+
+mach create "bms"
+machine LoadPlatformDescription $platform
+sysbus LoadELF $elf
+
+# A file backend, not showAnalyzer: this has to work headless in CI, where
+# there is no window to show. The banner is asserted from this file.
+sysbus.usart3 CreateFileBackend $uartLog true
+
+# Virtual time, not wall-clock. `RunFor` advances the emulation by exactly two
+# emulated seconds and stops, so this check produces the same result on a busy
+# CI runner as on an idle laptop. Determinism starts here.
+emulation RunFor "00:00:02"
+
+quit
