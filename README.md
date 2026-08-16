@@ -21,5 +21,7 @@ rig. SIL catches logic and integration bugs before they burn a slot in the HIL q
 an emulated UART. That is the Phase 0 proof everything else stands on.
 
 See [docs/STATUS.md](docs/STATUS.md) for what is actually built and verified today,
-[docs/BUILD-SPEC.md](docs/BUILD-SPEC.md) for the full specification, and
+[docs/PROJECT.md](docs/PROJECT.md) for the full specification, and
 [docs/TOOLCHAIN.md](docs/TOOLCHAIN.md) for the pinned versions and why each is pinned.
+
+Phase documents live alongside: [docs/PHASE-1.md](docs/PHASE-1.md).
