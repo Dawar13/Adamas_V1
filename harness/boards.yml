@@ -1,0 +1,77 @@
+# Board targets — the per-board detail everything downstream reads.
+#
+# THIS FILE IS DATA, NOT ENGINE CODE. It lives under harness/ because the spec
+# places it here, but it is the same kind of thing as catalog.yml and
+# network.yml: a saved project's arrangement. The rule "the engine contains no
+# project data" (PROJECT.md §2.7) is a rule about *code*, and is verified by
+# grepping harness/**.py — not this file. The whole point of boards.yml is to
+# be the one place a peripheral name is allowed to appear, so that no peripheral
+# name ever has to appear in Python.
+#
+# PERIPHERAL NAMES ARE RENODE'S NAMES, NOT ZEPHYR'S. They differ, and the
+# emulator only answers to its own. Getting this wrong produces a name that
+# resolves to nothing, which is a run that cannot happen:
+#
+#   chip        Zephyr devicetree      Renode peripheral
+#   S32K388     flexcan0               can0
+#   S32K388     lpuart2                lpuart2
+#   STM32H743   fdcan1                 fdcan1
+#
+# TIERS (PROJECT.md §2.1): verified | modelled | declared
+#   verified  real firmware ran on it in a full scenario run, with evidence
+#   modelled  the emulator supports it; we have not verified it end to end
+#   declared  definable, but no execution path exists — refuses to run
+
+bms_s32k:
+  repl: platforms/boards/bms_s32k.repl
+  zephyr_board: mr_canhubk3
+  can_peripheral: sysbus.can0
+  uart_peripheral: sysbus.lpuart2
+  # S32K3 has no boot ROM parsing the IVT under emulation, so the vector table
+  # offset must be set explicitly from the ELF or the core never starts
+  # correctly. Renode's own scripts/single-node/nxp-s32k388_zephyr.resc does
+  # exactly this. Without it the CPU runs from a garbage vector table.
+  vector_table_symbol: _vector_table
+  tier: modelled
+  notes: |
+    NXP S32K388, quad Cortex-M7 (cpu1..3 halted at reset; we run single-core).
+    Firmware is built for Zephyr's mr_canhubk3 board (S32K344) and executed on
+    Renode's S32K388 model. The two are the same S32K3xx family and the
+    peripheral addresses that matter are identical:
+      flexcan0 0x40304000 = can0 · lpuart2 0x40330000 = lpuart2
+    Renode's flash and SRAM regions are supersets of the S32K344's.
+
+    Observed: boots and prints its banner on lpuart2.
+    Not yet verified: a full scenario run. Stays `modelled` until then.
+
+vcu_s32k:
+  repl: platforms/boards/vcu_s32k.repl
+  zephyr_board: mr_canhubk3
+  can_peripheral: sysbus.can0
+  uart_peripheral: sysbus.lpuart2
+  vector_table_symbol: _vector_table
+  tier: modelled
+
+chg_s32k:
+  repl: platforms/boards/chg_s32k.repl
+  zephyr_board: mr_canhubk3
+  can_peripheral: sysbus.can0
+  uart_peripheral: sysbus.lpuart2
+  vector_table_symbol: _vector_table
+  tier: modelled
+
+# Phase 0's target, kept because it works. PROJECT.md §7: do not discard a
+# working target speculatively.
+nucleo_h743zi:
+  repl: platforms/nucleo_h743zi_can.repl
+  zephyr_board: nucleo_h743zi
+  can_peripheral: sysbus.fdcan1
+  uart_peripheral: sysbus.usart3
+  # Cortex-M ordinary boot: the vector table sits at the start of flash and the
+  # core finds it without help. No explicit offset needed.
+  vector_table_symbol: null
+  tier: modelled
+  notes: |
+    Verified in Phase 0 to boot real firmware deterministically (two clean
+    clones, byte-identical UART output). That is a boot proof, not a scenario
+    proof, so it is `modelled` rather than `verified`.

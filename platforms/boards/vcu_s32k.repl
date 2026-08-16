@@ -1,0 +1,3 @@
+// VCU ECU — board layer. See platforms/boards/bms_s32k.repl for why these
+// board files are near-empty and why they exist anyway.
+using "../cpus/s32k388.repl"

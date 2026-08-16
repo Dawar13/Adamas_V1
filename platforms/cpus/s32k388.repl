@@ -1,0 +1,50 @@
+// NXP S32K388 — our chip layer.
+//
+// Inherits Renode 1.16.1's stock `platforms/cpus/nxp-s32k388.repl` and applies
+// the corrections we have verified. Inheriting rather than forking means a
+// Renode upgrade surfaces here as a reviewable diff instead of silent drift.
+//
+// What the stock file provides (do not redeclare):
+//   cpu0..cpu3   Cortex-M7, cpu1..3 halted at reset (we run single-core)
+//   nvic0..3     one NVIC per core
+//   program_flash 0x00400000  8 MiB    - where the ELF lands
+//   data_flash    0x10000000  128 KiB
+//   itcm0         0x00000000  32 KiB
+//   dtcm0         0x20000000  64 KiB
+//   sram          0x20400000  768 KiB  - Zephyr's main SRAM
+//   can0..can7    CAN.S32K3XX_FlexCAN, can0 @ 0x40304000
+//   lpuart0..15   UART.NXP_LPUART, lpuart2 @ 0x40330000
+//   stm0..3, pit0..3, rtc, siul2, mscm, mc_me, edma
+//
+// ---------------------------------------------------------------------------
+// CORRECTION: SysTick frequency
+// ---------------------------------------------------------------------------
+// The stock file sets systickFrequency: 320000000 on every NVIC. Zephyr's
+// S32K344 configuration reports CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC=160000000
+// and drives the ARM SysTick (CONFIG_CORTEX_M_SYSTICK=y).
+//
+// The firmware computes its SysTick reload from 160 MHz. Renode counting that
+// reload at 320 MHz delivers every tick in half the intended virtual time, so
+// firmware time advances at 2x virtual time. Measured before this correction:
+// a 1 Hz print loop emitted 6 lines in 3 s of virtual time instead of 3.
+//
+// This matters more here than it would elsewhere. Bench's output is a measured
+// reaction latency in milliseconds; a 2x clock error silently doubles or halves
+// every number the product exists to report, while everything still looks like
+// it works. That is the silent-wrong-answer class this tool must never have.
+//
+// 160 MHz is the value the firmware actually believes, so it is the value the
+// emulator must use.
+using "platforms/cpus/nxp-s32k388.repl"
+
+nvic0:
+    systickFrequency: 160000000
+
+nvic1:
+    systickFrequency: 160000000
+
+nvic2:
+    systickFrequency: 160000000
+
+nvic3:
+    systickFrequency: 160000000

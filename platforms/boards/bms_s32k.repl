@@ -1,0 +1,15 @@
+// BMS ECU — board layer.
+//
+// Inherits our corrected S32K388 chip description. Deliberately near-empty:
+// because sensor values are injected at variable level (PROJECT.md §6), there
+// is nothing board-specific left for the emulator to model. The file exists
+// anyway so a real customer board has somewhere to put its additions, and so
+// every node on the canvas maps to a board file of its own.
+//
+// Peripherals this node uses, by their REAL Renode names:
+//   can0     CAN.S32K3XX_FlexCAN @ 0x40304000  (Zephyr calls this flexcan0)
+//   lpuart2  UART.NXP_LPUART     @ 0x40330000  (Zephyr's console for this board)
+//
+// Those names are recorded in harness/boards.yml and read from there. They
+// never appear in engine code.
+using "../cpus/s32k388.repl"
