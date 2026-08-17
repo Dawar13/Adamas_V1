@@ -25,9 +25,9 @@ __pycache__/
 renode-cache/
 .renode/
 
-# Harness scratch output. Committed run history lives in app/project/runs/.
+# Per-run scratch output: generated .resc, event logs, emulator logs, consoles,
+# results.json and traces. Reproducible from the scenario plus the pinned
+# toolchain, so it is not history. Committed run history arrives in Phase 2 under
+# app/project/runs/.
 harness/out/
 *.robot.generated
-
-# Per-run output. Committed run history lives in app/project/runs/ (Phase 2).
-harness/out/
