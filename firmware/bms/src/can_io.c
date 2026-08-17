@@ -171,6 +171,13 @@ static void can_tx(uint32_t id, const uint8_t *data, uint8_t dlc)
 	 * so it never waits for the wire. */
 	rc = can_send(can_dev, &f, K_MSEC(2), tx_done, NULL);
 	if (rc != 0) {
+		/* A refusal means the frame never reached the wire. It is counted
+		 * and reported in the periodic status line rather than silently
+		 * discarded, because a test asserting on a dropped frame fails for
+		 * a reason unrelated to the logic under test. If this counter is
+		 * ever non-zero, widen tx-buffers in the board overlay rather than
+		 * lengthening this timeout -- the control loop must not wait on
+		 * the wire. */
 		tx_refused++;
 	}
 }

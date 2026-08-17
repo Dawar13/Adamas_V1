@@ -108,7 +108,12 @@ emit("VECTOR_SYMBOL", b.get("vector_table_symbol") or "")
 PYEOF
 }
 
-eval "$(read_node)"
+# Check the resolution succeeded before eval'ing its output. Without this,
+# a failed lookup produces an empty eval and the next line trips `set -u`
+# with "APP: unbound variable", burying the real message ("no node 'x' in
+# network.yml") under a shell error about a symptom.
+NODE_VARS="$(read_node)" || exit 1
+eval "$NODE_VARS"
 
 BUILD="$BENCH_REPO/$APP/build"
 INJECTABLES="$BENCH_REPO/$APP/injectables.txt"

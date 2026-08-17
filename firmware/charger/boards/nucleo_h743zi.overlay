@@ -1,11 +1,61 @@
 /*
- * Zephyr's nucleo_h743zi board devicetree ships bus-speed = <125000>.
- * network.yml says the powertrain bus is 500000. scripts/build-firmware.sh
- * reads the bitrate back out of the GENERATED devicetree and fails the build
- * if the two disagree: a bitrate mismatch produces a bus where nothing
- * communicates and neither the firmware nor the emulator reports an error.
+ * CAN configuration for the powertrain bus.
+ *
+ * ---------------------------------------------------------------------------
+ * BITRATE
+ * ---------------------------------------------------------------------------
+ * Zephyr's nucleo_h743zi devicetree ships fdcan1 with bus-speed = <125000> and
+ * status = "disabled". network.yml says the powertrain bus runs at 500 kbit/s,
+ * and scripts/build-firmware.sh reads the bitrate back out of the GENERATED
+ * devicetree and fails the build if it does not equal network.yml's -- what
+ * matters is what the compiler concluded, not what we believe we asked for.
+ *
+ * A silent mismatch is why that gate exists: nodes configured for different
+ * bitrates produce a bus that carries no traffic at all, and neither the
+ * firmware nor the emulator reports an error. It looks exactly like broken
+ * application logic.
+ *
+ * ---------------------------------------------------------------------------
+ * MESSAGE RAM: TRANSMIT BUFFERS 3 -> 6
+ * ---------------------------------------------------------------------------
+ * A node here can have five frames due in the same tick when its 100 / 250 /
+ * 500 ms cadences coincide, and six when the independent fault rebroadcast
+ * lands on the same tick as a fault being entered. The stock layout gives
+ * three transmit buffers, so the later can_send() calls returned -EAGAIN after
+ * their short timeout and the frame was DROPPED: the firmware decided to
+ * transmit and nothing reached the wire.
+ *
+ * Measured on a real two-node run, before and after:
+ *
+ *   refused transmissions, first second     14  ->  0
+ *   frames observed on the hub over 2 s     72  ->  108
+ *
+ * 108 is essentially the full expected load (52 from the BMS, 60 from the VCU,
+ * less boot latency), so the third of the bus that was being dropped is back.
+ * A scenario asserting on a dropped frame fails for a reason that has nothing
+ * to do with the logic under test, which is the definition of a flaky
+ * verification tool.
+ *
+ * Fields: <offset std-filters ext-filters rx-fifo0 rx-fifo1 rx-buffers
+ *          tx-event-fifo tx-buffers>
+ *
+ * The budget is fixed and tight. fdcan1's message_ram region is 0x350 = 848
+ * bytes, and the STOCK layout uses exactly 848 -- there is no spare byte to
+ * take. Element sizes are 4 bytes per standard filter, 8 per extended filter,
+ * 8 per tx-event entry, and 72 for every rx/tx element (an 8-byte header plus
+ * a 64-byte data area, sized for CAN FD even though FD mode is off here).
+ *
+ *   stock  28  8  3 3 0  3 3  ->  112 + 64 + 216 + 216 + 0 + 24 + 216 = 848
+ *   here    8  0  3 1 0  5 6  ->   32 +  0 + 216 +  72 + 0 + 40 + 432 = 792
+ *
+ * The space comes from filters and the second rx FIFO, both of which were
+ * oversized for this project: the contract uses standard 11-bit identifiers
+ * only, so the eight extended-filter slots were dead weight, and no node
+ * installs more than a handful of filters. 56 bytes remain spare.
  */
+
 &fdcan1 {
 	bus-speed = <500000>;
+	bosch,mram-cfg = <0x0 8 0 3 1 0 5 6>;
 	status = "okay";
 };
