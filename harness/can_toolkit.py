@@ -310,6 +310,43 @@ def _node(name, what):
 
 # --- the event log -----------------------------------------------------------
 
+def _one_line(s):
+    """Flatten a field so it cannot introduce an event-log line.
+
+    THIS IS A SECURITY BOUNDARY, not formatting.
+
+    The event log is the engine's ONLY record of what happened, and the host
+    parses every line in it as an observation. Some fields carry text that came
+    from a scenario file -- a mark's words, an assertion's label. If such text
+    could contain a newline, a scenario could append lines of its own, and the
+    parser would read them as genuine events.
+
+    That is not theoretical. A one-line change to a mark's text was shown to
+    fabricate a TX frame, a STIM stimulus and an EXPECT_MET resolution, turning
+    a run in which the firmware never faulted into a PASS with a 0.4 ms
+    "measured" reaction and a matching candump trace entry. A fault that was
+    never injected, reporting PASS, is the worst failure this tool can have.
+
+    Applied to the whole of `rest` rather than only to the text fields: the
+    structured fields we generate ourselves never legitimately contain a control
+    character, so there is nothing to lose and one fewer path to audit.
+    """
+    out = []
+    for ch in s:
+        o = ord(ch)
+        if ch == '\n':
+            out.append('\\n')
+        elif ch == '\r':
+            out.append('\\r')
+        elif ch == '\t':
+            out.append('\\t')
+        elif o < 0x20 or o == 0x7f:
+            out.append('\\x%02x' % o)
+        else:
+            out.append(ch)
+    return ''.join(out)
+
+
 def _write(us, kind, rest):
     f = _LOG['file']
     if f is None:
@@ -320,7 +357,7 @@ def _write(us, kind, rest):
     if rest == '':
         f.write('%d %s\n' % (us, kind))
     else:
-        f.write('%d %s %s\n' % (us, kind, rest))
+        f.write('%d %s %s\n' % (us, kind, _one_line(rest)))
     f.flush()
     _LOG['lines'] = _LOG['lines'] + 1
 

@@ -1,0 +1,42 @@
+# NEGATIVE TEST — this scenario is SUPPOSED to be refused before it runs.
+# =============================================================================
+# Run by scripts/check-negative.sh, which asserts the engine exits 2 (unusable
+# inputs) and writes no results.json at all.
+#
+# WHAT IT ATTACKS
+# -----------------------------------------------------------------------------
+# A window of zero milliseconds observes nothing, so nothing it reports can be
+# true. Before the fix, `expect_no_can` with `for_ms: 0` armed a prohibition, ran
+# no window, and then passed with the reason "no matching frame occurred in the
+# window" — while the forbidden identifier was on the bus for the entire run. A
+# scenario whose only claim was such a prohibition passed and exited 0.
+#
+# It was also order-dependent inside a single microsecond: the same construct
+# could pass or fail depending on whether a frame happened to be emitted just
+# after the arm. Non-reproducible as well as wrong.
+#
+# 0x400 is chosen deliberately: catalog.yml gives it a sender that transmits it
+# every 20 ms, so the claim below is false throughout the run.
+#
+# THE FIX being regression-tested is `_as_window_ms()` in harness/run_scenarios.py,
+# applied to timeout_ms, within_ms, for_ms and period_ms.
+#
+# EXPECTED RESULT: refused at compile time, exit 2, no verdict produced.
+# =============================================================================
+
+id: zero-length-window
+title: a prohibition observed over no time at all
+description: >
+  Claims a continuously-transmitted identifier is absent, over a window of zero
+  milliseconds. The engine must refuse this rather than agree with it.
+
+steps:
+  - wait_uart:
+      node: bms
+      text: "BMS ready"
+      timeout_ms: 100
+
+  - expect_no_can:
+      id: 0x400
+      for_ms: 0
+      label: "claims a busy identifier is absent, over zero time"

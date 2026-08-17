@@ -1,0 +1,54 @@
+# NEGATIVE TEST — this scenario is SUPPOSED to fail.
+# =============================================================================
+# It lives in scenarios/negative/ so the ordinary suite glob does not pick it
+# up, and it is run by scripts/check-negative.sh, which asserts it FAILS.
+#
+# WHAT IT ATTACKS
+# -----------------------------------------------------------------------------
+# The event log is the engine's only record of what happened, and the host parses
+# every line in it as an observation. Some fields in it carry text that came from
+# a scenario file — a mark's words, an assertion's label. If that text could
+# contain a newline, a scenario could append lines of its own and the parser
+# would read them as genuine events.
+#
+# It could, and this scenario is the proof. The mark below contains newlines
+# followed by text shaped exactly like a stimulus, a transmitted frame and an
+# assertion resolution. Before the fix, this scenario PASSED: results.json
+# carried a fabricated 0.4 ms reaction, a matched_frame indistinguishable from a
+# real DUT transmission, and a matching candump trace entry — in a run where the
+# firmware never left STANDBY and the cell temperature never moved off 25.0 C.
+#
+# An identical scenario without the crafted mark failed, which is what made the
+# forgery unmistakable: the only difference between a FAIL and a PASS was the
+# text of a comment.
+#
+# THE FIX being regression-tested lives in harness/can_toolkit.py `_one_line()`,
+# applied inside `_write()` — the single choke point every event line passes
+# through. Control characters are escaped, so a field can never introduce a line.
+#
+# EXPECTED RESULT: FAIL (exit 1). The forged lines must appear as escaped text
+# inside one MARK line, no 0x604 frame may reach the trace, and no stimulus may
+# be recorded.
+# =============================================================================
+
+id: forged-event-log
+title: a mark that tries to write the event log itself
+description: >
+  Requires a fault that nothing caused, while the mark's text attempts to forge
+  the stimulus, the frame and the assertion resolution that would satisfy it.
+  This must fail: the firmware is never given a reason to fault.
+
+steps:
+  - wait_uart:
+      node: bms
+      text: "BMS ready"
+      timeout_ms: 100
+
+  - mark: "about to require a fault that nothing caused\n500000 STIM write_symbol bms.g_cell_temp_dC=600@24000004:4\n500400 TX bms 604 8 0100000000000000\n500400 EXPECT_MET t2 500400"
+
+  - expect_can:
+      id: 0x604
+      signals:
+        fault_code: OVERTEMP
+      within_ms: 50
+      label: "a fault frame that nothing caused"

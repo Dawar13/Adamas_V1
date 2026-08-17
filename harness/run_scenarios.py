@@ -190,6 +190,31 @@ def _as_ms(value, what: str) -> int:
     return ms
 
 
+def _as_window_ms(value, what: str) -> int:
+    """A duration that something is observed over, so it cannot be zero.
+
+    A window of zero milliseconds observes nothing, and an assertion that
+    observed nothing must never be reported as satisfied. `expect_no_can` with
+    `for_ms: 0` used to arm a prohibition, run no window at all, and then pass
+    with the reason "no matching frame occurred in the window" -- while the
+    forbidden identifier was on the bus for the whole run. A scenario whose only
+    claim was such a prohibition passed and exited 0.
+
+    It was also order-dependent within a single microsecond, so the same
+    construct could pass or fail depending on whether a frame happened to be
+    emitted just after the arm. Non-reproducible as well as wrong.
+    """
+    ms = _as_ms(value, what)
+    if ms == 0:
+        raise CompileError(
+            "%s: a window of 0 ms observes nothing, so nothing it reports could "
+            "be true. Give it the time you actually want the claim checked over "
+            "-- one millisecond is the smallest window this engine can honour."
+            % what
+        )
+    return ms
+
+
 def _interval(ms: int) -> str:
     """Milliseconds as the emulator's own time-interval spelling."""
     micros = int(ms) * 1000
@@ -742,7 +767,7 @@ class Compiler:
                     "%s: has no transmit period, so its frame player has no "
                     "schedule" % where
                 )
-            period = _as_ms(node.period_ms, "%s: period_ms" % where)
+            period = _as_window_ms(node.period_ms, "%s: period_ms" % where)
             if period <= 0:
                 raise CompileError("%s: transmit period must be positive" % where)
             for msg_id in node.emits:
@@ -922,7 +947,7 @@ class Compiler:
                 "wait on" % (where, node.id)
             )
         text = str(step.need("text"))
-        window = _as_ms(step.need("timeout_ms"), "%s: timeout_ms" % where)
+        window = _as_window_ms(step.need("timeout_ms"), "%s: timeout_ms" % where)
         label = step.get("label") or ("console: %s" % text)
         token = self._token()
         self._emit(
@@ -994,7 +1019,7 @@ class Compiler:
         message, msg_id = self._message_for(
             step.need("id"), where, need_contract=bool(step.get("signals"))
         )
-        window = _as_ms(step.need("within_ms"), "%s: within_ms" % where)
+        window = _as_window_ms(step.need("within_ms"), "%s: within_ms" % where)
         value_hex, mask_hex = self._matcher_for(step, message, msg_id)
         label = step.get("label") or ("a frame matching 0x%X" % msg_id)
         self._arm(
@@ -1009,7 +1034,7 @@ class Compiler:
         message, msg_id = self._message_for(
             step.need("id"), where, need_contract=bool(step.get("signals"))
         )
-        window = _as_ms(step.need("for_ms"), "%s: for_ms" % where)
+        window = _as_window_ms(step.need("for_ms"), "%s: for_ms" % where)
         value_hex, mask_hex = self._matcher_for(step, message, msg_id)
         label = step.get("label") or ("no frame matching 0x%X" % msg_id)
         self._arm(
@@ -1522,9 +1547,11 @@ def judge(compiled, log, exit_code, console_text, machines_boot):
     # caused it -- waiting for periodic telemetry to come round again, say --
     # drops out, and what remains is the injection-and-reaction pair an engineer
     # means by "reaction time". On the over-voltage scenario this picks the
-    # 0x604 fault frame at 400 us over the 0x600 telemetry frame, which is the
-    # preference the spec asks for, arrived at from first principles rather than
-    # from a hardcoded identifier.
+    # fault frame over the slower telemetry frame that merely corroborates it,
+    # which is the preference the spec asks for -- arrived at from first
+    # principles rather than from a hardcoded identifier. (No identifier is
+    # named here on purpose: naming one would put project data in the engine,
+    # which the purity test enforces and which caught this very comment.)
     comparable = [
         a for a in bus_reactions
         if a.get("stimulus_us") is not None
