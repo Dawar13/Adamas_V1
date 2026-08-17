@@ -1,0 +1,121 @@
+# bus-flood — critical traffic survives saturation.
+# =============================================================================
+# THIS FILE IS PROJECT DATA. The identifier flooded, the payload, and the
+# threshold injected at the end all come from catalog.yml and from the firmware.
+#
+# WHAT IT ASSERTS
+# -----------------------------------------------------------------------------
+# Two hundred copies of vcu_command arrive at one instant. 0x200 is the most
+# dominant identifier this vehicle defines and the pack's own telemetry, 0x600,
+# is among the least, so this is the worst pairing on the bus. The burst is also
+# more than ten times the depth of the receive queue the pack's firmware
+# declares:
+#
+#     CAN_MSGQ_DEFINE(bms_rx_msgq, 16);      /* firmware/bms/src/can_io.c */
+#
+# Three claims, in the order they are checked:
+#
+#   the pack's periodic telemetry still reaches the bus after the burst
+#   the burst itself raises no fault — traffic is not a safety event
+#   a real fault, injected while the receive path is still stuffed, still gets
+#     its frame out inside the same 50 ms budget it gets on a quiet bus
+#
+# The third is the one that matters. The first two would pass on a firmware
+# whose safety path had quietly stopped running.
+#
+# WHAT IT DOES NOT ASSERT — READ THIS BEFORE QUOTING THE RESULT
+# -----------------------------------------------------------------------------
+# The burst is delivered into every other controller's receive path at a single
+# virtual instant. That saturates the DUT's receive queue and its filter path,
+# which is what the three claims above are about. It is NOT a model of CAN
+# arbitration, error frames or bus-off recovery: no electrical layer is being
+# exercised and none is being claimed. For scale only, two hundred eight-byte
+# frames are about 51 ms of continuous wire time at this bus's 500 kbit/s — but
+# they are injected instantaneously, not spread over 51 ms.
+#
+# THE PAYLOAD IS DELIBERATELY INERT. drive_state is PARKED and the torque
+# request is zero, so the burst is pure traffic: it commands nothing, and any
+# behaviour change observed can only be the volume of frames rather than their
+# content. The heartbeat byte is 0xFF so the flooded frames are distinguishable
+# from ordinary traffic in the candump trace.
+# =============================================================================
+
+id: bus-flood
+title: A burst that fills the receive queue ten times over changes nothing that matters
+description: >
+  Flood the bus with two hundred copies of the most dominant identifier on it,
+  at one instant, and require that the pack's own telemetry still gets through
+  and that no fault is raised. Then flood it again and inject a genuine
+  over-temperature into the stuffed receive path: the fault frame must still
+  appear inside the same 50 ms budget it would have on an idle bus.
+
+steps:
+
+  # 1. Nothing is asserted until the device under test says it is up.
+  - wait_uart:
+      node: bms
+      text: "BMS ready"
+      timeout_ms: 100
+
+  # 2. The baseline. The pack is publishing before the flood, so "still
+  #    publishing" afterwards is a comparison rather than an assumption.
+  - expect_can:
+      id: 0x600
+      within_ms: 150
+      label: "the pack is publishing telemetry before the flood"
+
+  - mark: "200 frames on the vehicle command identifier, all at once"
+
+  # 3. The flood. Written as raw payload bytes on purpose: this step is about
+  #    the volume of frames, not about what they mean.
+  - flood:
+      id: 0x200
+      count: 200
+      data_hex: "00000000ff000000"
+
+  # 4. First claim: the pack's own periodic frame still reaches the bus. Its
+  #    period is 100 ms, so a 150 ms window must contain one.
+  - expect_can:
+      id: 0x600
+      within_ms: 150
+      label: "the pack's telemetry survives the burst"
+
+  # 5. Second claim: traffic is not a safety event. Fed from the whole bus, so a
+  #    fault frame from any node would trip this.
+  - expect_no_can:
+      id: 0x604
+      for_ms: 300
+      label: "saturation raises no fault"
+
+  - mark: "a second burst, and a real fault injected into the middle of it"
+
+  # 6. The third claim, and the reason this scenario exists. The burst goes in
+  #    first, then 60.0 C into the hottest cell with the receive path still
+  #    holding the overflow. Both stimuli land at the same virtual instant.
+  - flood:
+      id: 0x200
+      count: 200
+      data_hex: "00000000ff000000"
+
+  - write_symbol:
+      node: bms
+      symbol: g_cell_temp_dC
+      value: 600
+
+  # 7. Same identifier, same signal, same 50 ms budget as on a quiet bus — see
+  #    overtemp-fault.yml, which measures exactly this reaction with nothing else
+  #    happening. A slower reaction here would mean the receive burst had
+  #    displaced the safety path.
+  - expect_can:
+      id: 0x604
+      signals:
+        fault_code: OVERTEMP
+      within_ms: 50
+      label: "the fault frame still gets out under saturation, within 50 ms"
+
+  # 8. And the pack is still talking afterwards: a fault frame from a node that
+  #    then fell off the bus would not be a working failsafe.
+  - expect_can:
+      id: 0x600
+      within_ms: 150
+      label: "the pack is still publishing telemetry after both bursts"

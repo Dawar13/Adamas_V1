@@ -1,0 +1,130 @@
+# boot-sequence — the pack comes up in the right order, and comes up safe.
+# =============================================================================
+# THIS FILE IS PROJECT DATA. The banners are the boot_text values network.yml
+# declares for each node; the remaining console lines are the pack firmware's
+# own bring-up trace, in the order firmware/bms/src/main.c prints them:
+#
+#     printk("BMS ready\n");            <- first thing main() does
+#     bms_can_init()                    -> "bms can ready init_res=0"
+#                                          "bms can_start rc=0"
+#     the 10 ms control loop starts     -> "bms state INIT -> STANDBY @10 ms"
+#
+# WHAT IT ASSERTS
+# -----------------------------------------------------------------------------
+#   every stage of the pack's bring-up is reached, in the order listed
+#   the pack is not on the bus before it has announced itself
+#   the contactor is OPEN once the loop is running: nothing closes on its own
+#   the other two nodes reach their entry points as well
+#   no fault is raised anywhere in startup
+#
+# The last one has teeth. A cold boot is where a heartbeat timeout is easiest to
+# get wrong: the pack's rule 4 window is 300 ms and a naive implementation would
+# arm it before the first vehicle frame ever arrived, faulting every cold boot
+# where the pack wins the race to the bus. firmware/bms/src/safety.c guards it
+# with `vcu_seen` precisely so that does not happen, and the 300 ms prohibition
+# at the end of this scenario is what checks that guard is really there.
+#
+# HOW STRONG THE ORDERING CLAIM IS — SAID PLAINLY
+# -----------------------------------------------------------------------------
+# A console does not un-print, so a wait is satisfied by text already on the
+# console. That means these steps prove each stage HAD been printed by the time
+# it was awaited, in this order, with the microsecond each was first seen
+# recorded in results.json. It is not a proof that the firmware could not have
+# printed them in some other order inside the first tick.
+#
+# The one ordering fact asserted strictly is the bus one: the banner is required
+# at 50 ms while the pack's telemetry identifier is required to be ABSENT
+# afterwards, and its first frame is due only at 100 ms. Announce, then transmit.
+# =============================================================================
+
+id: boot-sequence
+title: Startup reaches every stage in order and leaves the contactor open
+description: >
+  Watch the pack come up: banner, CAN controller ready, controller started,
+  state machine out of INIT. Require that it puts nothing on its telemetry
+  identifier before that, that the contactor is open once the loop is running,
+  that the other two nodes reach their entry points, and that no fault is raised
+  anywhere in startup — including across the window where an unguarded heartbeat
+  timeout would fire.
+
+steps:
+
+  # 1. The pack reaches its application entry point. This is the boot_text
+  #    network.yml declares for it, and it is the first line main() prints.
+  - wait_uart:
+      node: bms
+      text: "BMS ready"
+      timeout_ms: 50
+      label: "the pack reaches its application entry point"
+
+  # 2. Announce, then transmit. The pack's telemetry period is 100 ms and its
+  #    first frame is not due until then, so nothing may be on that identifier
+  #    yet. This is the one strictly ordered claim in the scenario.
+  - expect_no_can:
+      id: 0x600
+      for_ms: 40
+      label: "the pack has not started transmitting before it is up"
+
+  # 3. The CAN controller initialised. A pack that cannot talk is a pack whose
+  #    every later assertion would fail for the wrong reason, so the bring-up is
+  #    checked here rather than inferred later.
+  - wait_uart:
+      node: bms
+      text: "bms can ready init_res=0"
+      timeout_ms: 50
+      label: "its CAN controller initialised"
+
+  # 4. And went on the bus.
+  - wait_uart:
+      node: bms
+      text: "bms can_start rc=0"
+      timeout_ms: 50
+      label: "its CAN controller started"
+
+  # 5. The control loop is running: the state machine has left INIT for STANDBY,
+  #    which is the first thing it does once the loop ticks.
+  - wait_uart:
+      node: bms
+      text: "bms state INIT -> STANDBY"
+      timeout_ms: 50
+      label: "the control loop is running: INIT -> STANDBY"
+
+  # 6. The safety claim about startup. Nothing has requested drive and nothing
+  #    has requested a charge session, so the main contactor must be open. A
+  #    contactor that closes on its own at power-up is the single worst startup
+  #    defect a pack can have.
+  - expect_can:
+      id: 0x602
+      signals:
+        contactor_state: OPEN
+      within_ms: 150
+      label: "the contactor is open at startup"
+
+  # 7. Now it is publishing, which is what step 2 said it had not been doing.
+  - expect_can:
+      id: 0x600
+      within_ms: 150
+      label: "the pack publishes telemetry once it is up"
+
+  # 8, 9. The rest of the world reaches its entry points too. Their banners are
+  #       also boot_text from network.yml, and a scenario that asserted only the
+  #       device under test would report a healthy bus with two dead nodes on it.
+  - wait_uart:
+      node: vcu
+      text: "VCU ready"
+      timeout_ms: 50
+      label: "the vehicle controller reaches its entry point"
+
+  - wait_uart:
+      node: charger
+      text: "CHG ready"
+      timeout_ms: 50
+      label: "the charger reaches its entry point"
+
+  # 10. Nothing about a normal startup is a fault — and this window is long
+  #     enough to cover the heartbeat timeout that an unguarded implementation
+  #     would fire during it.
+  - expect_no_can:
+      id: 0x604
+      for_ms: 300
+      label: "no fault is raised anywhere in startup"

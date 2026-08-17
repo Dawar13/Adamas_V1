@@ -1,0 +1,150 @@
+# overtemp-boundary — 55.0 C is legal, 55.1 C is not.
+# =============================================================================
+# THIS FILE IS PROJECT DATA. Ids and signal names come from catalog.yml, node
+# names from network.yml, and the threshold below from the firmware itself.
+#
+# WHY THIS SCENARIO EXISTS AT ALL
+# -----------------------------------------------------------------------------
+# It is the one test in the suite that can detect firmware/bms-broken.
+#
+# firmware/bms/src/bms.h defines the rule:
+#
+#     #define BMS_OVERTEMP_LIMIT_dC       550     /* 55.0 C */
+#
+# and firmware/bms/src/safety.c implements it as one comparison:
+#
+#     return c->temp_dC > BMS_OVERTEMP_LIMIT_dC;      /* strictly greater */
+#
+# firmware/bms-broken changes that single character to `>=`. Every other
+# scenario in this suite injects a comfortably-over temperature — 60.0 C — and
+# both binaries fault on it, identically, so every one of them passes against
+# the defective firmware. Only the boundary separates them.
+#
+# That is the whole argument for boundary testing, and it is why the suite was
+# incomplete without this file: a test that only ever asks the easy question
+# cannot tell a correct implementation from a broken one, however green it looks.
+#
+# THE QUALIFIER IS THE SPECIFICATION, NOT THE NUMBER
+# -----------------------------------------------------------------------------
+#     boundary   EXCLUSIVE at the top — 550 dC is exactly 55.0 C and is legal
+#     states     ANY — over-temperature has no state qualifier
+#     latching   yes — the pack cooling down cannot clear it
+#
+# A firmware that wrote `>=` would trip a pack sitting exactly on its rated
+# limit: a spurious fault, a contactor opened mid-ride, and a vehicle recovered
+# on a truck. One character.
+#
+# WHY THE LEGAL HALF IS NOT A VACUOUS PASS
+# -----------------------------------------------------------------------------
+# "No fault frame appeared" is also what you would see if the injection never
+# happened, so the legal half is pinned down two further ways:
+#
+#   the symbol is read back out of the running machine at its declared width —
+#     that bit pattern IS what check_cell_overtemp() compares;
+#   the injection mechanism is proven live by the second half, which faults on a
+#     value written the same way one tenth of a degree later. A write_symbol
+#     that quietly hit nothing could not produce that fault, so the two halves
+#     hold each other up.
+#
+# The read-back sits after the first prohibition window rather than beside its
+# own stimulus: armed in the same microsecond as the write it would record a
+# zero-millisecond "reaction", and a zero in the reaction figures makes the
+# instrument lie about how fast this firmware is.
+# =============================================================================
+
+id: overtemp-boundary
+title: 55.0 C is a legal cell temperature, 55.1 C faults
+description: >
+  Walk the over-temperature limit across its exclusive boundary. At exactly
+  550 dC the pack must stay quiet on the fault identifier, with the reading
+  confirmed by a read-back of the rule's own input. One tenth of a degree
+  higher the fault frame must carry OVERTEMP. The fault must then survive the
+  pack cooling to 25.0 C, because rule 1 is latched. This is the scenario that
+  separates firmware/bms from firmware/bms-broken.
+
+steps:
+
+  # 1. Nothing is asserted until the device under test says it is up.
+  - wait_uart:
+      node: bms
+      text: "BMS ready"
+      timeout_ms: 100
+
+  - mark: "hottest cell driven to exactly 55.0 C, the limit itself"
+
+  # 2. The legal half of the boundary. 550 dC is a pack sitting on its rated
+  #    limit, which is warm but not a fault.
+  - write_symbol:
+      node: bms
+      symbol: g_cell_temp_dC
+      value: 550
+
+  # 3. The claim. Fed from the whole bus, so a fault frame from any node trips it.
+  - expect_no_can:
+      id: 0x604
+      for_ms: 300
+      label: "55.0 C is legal: no fault frame for 300 ms"
+
+  # 4. The rule's own input, read straight out of the running machine. Without
+  #    this, step 3 passing would be indistinguishable from an injection that
+  #    never landed.
+  - expect_symbol:
+      node: bms
+      symbol: g_cell_temp_dC
+      equals: 550
+      label: "the value the rule compares really is 55.0 C"
+
+  # 5. The rest of the observation, past the read-back. The two prohibitions
+  #    together watch the fault identifier for 600 ms with the pack held exactly
+  #    on the limit — longer than the firmware's 500 ms fault rebroadcast, so a
+  #    pack that HAD faulted at the boundary could not hide between two
+  #    restatements of it.
+  - expect_no_can:
+      id: 0x604
+      for_ms: 300
+      label: "still legal 600 ms in: nothing about 55.0 C is a fault"
+
+  - mark: "one tenth of a degree above the limit"
+
+  # 6. The illegal half. 551 dC, nothing else changed.
+  - write_symbol:
+      node: bms
+      symbol: g_cell_temp_dC
+      value: 551
+
+  # 7. The reaction, and the headline number. 50 ms is five of the firmware's
+  #    10 ms control ticks.
+  - expect_can:
+      id: 0x604
+      signals:
+        fault_code: OVERTEMP
+      within_ms: 50
+      label: "55.1 C faults with OVERTEMP within 50 ms"
+
+  # 8. The pack's own thermal telemetry corroborates the reading it faulted on.
+  #    Only cell_temp_dC is named, so only its 16 bits are compared — bms_temps
+  #    also carries the session extremes, and an unmasked comparison would be
+  #    wrong for a reason unrelated to the firmware under test.
+  - expect_can:
+      id: 0x601
+      signals:
+        cell_temp_dC: 551
+      within_ms: 300
+      label: "the pack publishes the 55.1 C it faulted on"
+
+  - mark: "pack cooled to 25.0 C, the fault must not clear"
+
+  # 9. The latch. Rule 1 is latched, so cooling cannot clear it: the 500 ms
+  #    rebroadcast must still carry OVERTEMP. A firmware that re-evaluated the
+  #    rule would fall silent here.
+  - write_symbol:
+      node: bms
+      symbol: g_cell_temp_dC
+      value: 250
+
+  - expect_can:
+      id: 0x604
+      signals:
+        fault_code: OVERTEMP
+      within_ms: 600
+      label: "OVERTEMP stays latched after the pack cools to 25.0 C"

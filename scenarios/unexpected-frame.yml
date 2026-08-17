@@ -1,0 +1,121 @@
+# unexpected-frame — an identifier this vehicle does not define changes nothing.
+# =============================================================================
+# THIS FILE IS PROJECT DATA. 0x123 is deliberately NOT in catalog.yml: that is
+# the entire point of the scenario, and it is why this step writes its payload
+# out as raw bytes — a message the contract does not define has no signals to
+# name, and inventing names for it would be fabricating a contract.
+#
+# WHAT IT ASSERTS
+# -----------------------------------------------------------------------------
+# firmware/bms/src/can_io.c installs two exact-match filters and nothing else:
+#
+#     .id = BMS_MSG_VCU_COMMAND_ID,    .mask = CAN_STD_ID_MASK
+#     .id = BMS_MSG_CHARGER_STATUS_ID, .mask = CAN_STD_ID_MASK
+#
+# so every other identifier on the bus is filtered out in the controller and
+# never reaches the CPU. A stray tester, a node from a different vehicle
+# programme, a leftover identifier from a previous platform: none of them may
+# fault the pack, and none of them may disturb its state.
+#
+# THE CONTROL AT THE END IS THE WHOLE SCENARIO
+# -----------------------------------------------------------------------------
+# "No fault after an unknown frame" is exactly what a firmware with a completely
+# dead receive path also looks like — and a dead receive path would be a far
+# worse defect than the one being tested, hiding behind a green result. So the
+# last two steps put a DEFINED identifier back on the bus and require the pack to
+# act on it. Ignoring the unknown is only meaningful if acting on the known still
+# works.
+# =============================================================================
+
+id: unexpected-frame
+title: An undefined identifier is ignored, and the receive path still works afterwards
+description: >
+  Put an identifier the contract does not define on the bus while the pack is
+  idle. No fault may be raised, the pack's telemetry must continue, and its
+  contactor must not move. Then command drive on an identifier the contract does
+  define, and require the pack to act on it — proving the silence above was a
+  decision and not a dead receive path.
+
+steps:
+
+  # 1. Nothing is asserted until the device under test says it is up.
+  - wait_uart:
+      node: bms
+      text: "BMS ready"
+      timeout_ms: 100
+
+  # 2. The baseline state, on the wire rather than assumed, and taken before this
+  #    scenario has done anything at all — so it is a starting picture rather
+  #    than a reaction to a stimulus.
+  - expect_can:
+      id: 0x602
+      signals:
+        contactor_state: OPEN
+      within_ms: 150
+      label: "the pack starts idle: contactor open"
+
+  - mark: "pack held idle: charge port idle, vehicle parked"
+
+  # 3. A quiet, unambiguous world for the rest of the scenario. With nothing
+  #    requested, a closed contactor at the end can only be the drive request.
+  - node_signal:
+      node: charger
+      id: 0x300
+      signals:
+        charge_state: IDLE
+
+  - node_signal:
+      node: vcu
+      id: 0x200
+      signals:
+        drive_state: PARKED
+
+  - mark: "0x123 appears on the bus: an identifier this vehicle does not define"
+
+  # 4. The stimulus. Delivered into every other controller's receive path, so the
+  #    pack's controller genuinely sees it arrive and genuinely filters it out.
+  #    Raw bytes, because there is no contract to name signals with.
+  - can_send:
+      node: bms_diag
+      id: 0x123
+      data_hex: "0badc0de0badc0de"
+
+  # 5. The claim: no fault. Fed from the whole bus, so a fault frame from any
+  #    node would trip this.
+  - expect_no_can:
+      id: 0x604
+      for_ms: 300
+      label: "an undefined identifier raises no fault"
+
+  # 6. The pack is not merely quiet on 0x604 — it is alive and still publishing.
+  - expect_can:
+      id: 0x600
+      within_ms: 150
+      label: "the pack keeps publishing its telemetry"
+
+  # 7. And nothing it controls moved. An unknown frame that closed a contactor
+  #    would be a far more interesting failure than one that raised a fault.
+  - expect_can:
+      id: 0x602
+      signals:
+        contactor_state: OPEN
+      within_ms: 150
+      label: "the contactor did not move"
+
+  - mark: "an identifier that IS defined, on the same receive path"
+
+  # 8. The control. If this fails, the three assertions above prove nothing:
+  #    they would be satisfied just as well by a pack that had stopped listening
+  #    to the bus entirely.
+  - node_signal:
+      node: vcu
+      id: 0x200
+      signals:
+        drive_state: DRIVE
+
+  - expect_can:
+      id: 0x602
+      signals:
+        contactor_state: CLOSED
+      within_ms: 500
+      label: "a defined identifier still moves the pack: the receive path is alive"

@@ -1,0 +1,150 @@
+# overvolt-boundary — the inclusive boundary is legal, one millivolt above is not.
+# =============================================================================
+# THIS FILE IS PROJECT DATA. Ids and signal names come from catalog.yml, node
+# names from network.yml, and the threshold below from the firmware itself.
+#
+# WHAT IT ASSERTS, AND WHY IT IS WORTH ASSERTING
+# -----------------------------------------------------------------------------
+# firmware/bms/src/bms.h defines the rule:
+#
+#     #define BMS_OVERVOLT_LIMIT_mV       84000   /* 84.000 V */
+#
+# and firmware/bms/src/safety.c implements it as one comparison:
+#
+#     return c->pack_mv > BMS_OVERVOLT_LIMIT_mV;      /* strictly greater */
+#
+# The QUALIFIER is the specification, not the number:
+#
+#     boundary   INCLUSIVE at the top — 84000 mV is a legal, fully charged pack
+#     states     ANY — unlike under-voltage, this rule has no state qualifier,
+#                which is why this scenario arranges no vehicle state at all
+#     latching   yes — the pack coming back down cannot clear it
+#
+# 84000 and 84001 are one millivolt apart, and that is the point. This is the
+# pair that separates `>` from `>=`. A firmware that wrote `>=` would fault a
+# perfectly good fully charged pack — a warranty return for every vehicle that
+# finishes a charge — and every scenario that injected a comfortably-over value
+# would still pass. Only the boundary catches it.
+#
+# WHY THE LEGAL HALF IS NOT A VACUOUS PASS
+# -----------------------------------------------------------------------------
+# "No fault frame appeared" is also what you would see if the injection never
+# happened, so the legal half is pinned down two more ways:
+#
+#   the symbol is read back out of the running machine's memory at its own
+#     declared width — that bit pattern IS what check_pack_overvolt() compares,
+#     so this is a direct reading of the rule's own input;
+#   the injection mechanism is proven live by the SECOND half of the scenario,
+#     which faults on a value written the same way one millivolt later. A
+#     write_symbol that quietly hit nothing could not produce that fault, so the
+#     two halves hold each other up.
+#
+# The read-back is deliberately placed after the prohibition window rather than
+# immediately after the write. Armed in the same microsecond as its own
+# stimulus it would record a zero-millisecond "reaction", and a zero in the
+# reaction figures makes the instrument lie about how fast the firmware is.
+# =============================================================================
+
+id: overvolt-boundary
+title: 84.000 V is a legal pack, 84.001 V faults
+description: >
+  Walk the over-voltage limit across its inclusive boundary. At exactly
+  84000 mV the pack must stay quiet on the fault identifier, with the reading
+  confirmed by a read-back of the rule's own input. One millivolt higher the
+  fault frame must carry OVERVOLT, and the pack's telemetry must corroborate the
+  reading it faulted on. The fault must then survive the pack returning to
+  72.000 V, because rule 2 is latched.
+
+steps:
+
+  # 1. Nothing is asserted until the device under test says it is up. The text
+  #    is the boot_text network.yml declares for that node.
+  - wait_uart:
+      node: bms
+      text: "BMS ready"
+      timeout_ms: 100
+
+  - mark: "pack driven to exactly 84.000 V, the inclusive limit"
+
+  # 2. The legal half of the boundary. 84000 mV is what a full pack reads.
+  - write_symbol:
+      node: bms
+      symbol: g_pack_mv
+      value: 84000
+
+  # 3. The claim: the boundary value itself raises nothing. Fed from the whole
+  #    bus, so a fault frame from any node would trip it.
+  - expect_no_can:
+      id: 0x604
+      for_ms: 300
+      label: "84.000 V is legal: no fault frame for 300 ms"
+
+  # 4. The rule's own input, read straight out of the running machine at the
+  #    symbol's declared width. Without this, step 3 passing would be
+  #    indistinguishable from an injection that never landed.
+  - expect_symbol:
+      node: bms
+      symbol: g_pack_mv
+      equals: 84000
+      label: "the value the rule compares really is 84.000 V"
+
+  # 5. The rest of the boundary observation, on the far side of the read-back.
+  #    Together the two prohibitions watch the fault identifier for 600 ms with
+  #    the pack held at exactly the limit — longer than the firmware's 500 ms
+  #    fault rebroadcast period, so a pack that HAD faulted at the boundary could
+  #    not stay hidden between two restatements of it.
+  #
+  #    Splitting the observation here is also what keeps the read-back honest.
+  #    Armed in the same microsecond as any stimulus it would record a
+  #    zero-millisecond "reaction", and a zero in the reaction figures makes the
+  #    instrument lie about how fast this firmware is.
+  - expect_no_can:
+      id: 0x604
+      for_ms: 300
+      label: "still legal 600 ms in: nothing about 84.000 V is a fault"
+
+  - mark: "one millivolt above the limit"
+
+  # 5. The illegal half. One millivolt higher, nothing else changed.
+  - write_symbol:
+      node: bms
+      symbol: g_pack_mv
+      value: 84001
+
+  # 6. The reaction, and the headline number for this scenario. 50 ms is five of
+  #    the firmware's 10 ms control ticks: the rule is evaluated on the tick, and
+  #    the fault frame goes out on the event path ahead of that tick's telemetry.
+  - expect_can:
+      id: 0x604
+      signals:
+        fault_code: OVERVOLT
+      within_ms: 50
+      label: "84.001 V faults with OVERVOLT within 50 ms"
+
+  # 7. The pack's own telemetry corroborates the reading it faulted on. Only
+  #    pack_voltage_mv is named, so only its 24 bits are compared — bms_status
+  #    also carries a rolling heartbeat, and an unmasked comparison would be
+  #    wrong for a reason that has nothing to do with the firmware under test.
+  - expect_can:
+      id: 0x600
+      signals:
+        pack_voltage_mv: 84001
+      within_ms: 150
+      label: "the pack publishes the 84.001 V it faulted on"
+
+  - mark: "pack back to 72.000 V, the fault must not clear"
+
+  # 8. The latch. Rule 2 is latched, so a healthy pack cannot clear it: the
+  #    500 ms rebroadcast must still be carrying OVERVOLT. A firmware that
+  #    re-evaluated the rule would fall silent here.
+  - write_symbol:
+      node: bms
+      symbol: g_pack_mv
+      value: 72000
+
+  - expect_can:
+      id: 0x604
+      signals:
+        fault_code: OVERVOLT
+      within_ms: 600
+      label: "OVERVOLT stays latched after the pack returns to 72.000 V"

@@ -149,28 +149,137 @@ standard's 11-bit ID bound, which is protocol, not project data.
 The guard is enforced by a test, and it works: it caught a real signal name in a comment written
 into `catalog.py` while fixing the audit findings above.
 
+### §1.3–1.7 The engine
+
+`harness/can_toolkit.py` (1217 lines, IronPython 2 inside Renode) provides virtual-time frame
+players on `ClockEntry`, injection via `MCAN.OnFrameReceived`, per-node send taps, and
+whole-bus matchers fed from the `CANHub`'s own `FrameTransmitted` event — so an assertion
+sees every frame on the bus, not only the device under test.
+
+`harness/run_scenarios.py` (1900 lines) compiles the three YAML inputs into one Renode
+script, runs it, and parses the event log into `results.json`, a candump trace and
+`replay.txt`. `scripts/run.sh` is the entry point.
+
+Three real ECU firmwares (`bms` the DUT, `vcu`, `charger`) plus `bms-broken`.
+
+**Nine scenarios, all passing:**
+
+```
+boot-sequence            PASS   (no bus reaction to time)
+bus-flood                PASS   reaction  50.3 ms / 150 ms
+charge-loss-recovery     PASS   fastest bus reaction 200.3 ms, no comparable deadline
+heartbeat-loss           PASS   reaction 250.7 ms / 600 ms
+overtemp-boundary        PASS   reaction   0.4 ms /  50 ms
+overtemp-fault           PASS   reaction   0.4 ms /  50 ms
+overvolt-boundary        PASS   reaction   0.4 ms /  50 ms
+undervolt-running-only   PASS   reaction   0.4 ms /  50 ms
+unexpected-frame         PASS   reaction 250.3 ms / 500 ms
+```
+
+### The broken firmware — §1.6 proved
+
+Swapping `firmware/bms-broken` in via `--topology` (nothing in the repo modified):
+
+```
+overtemp-boundary        PASS -> FAIL      the defect is caught
+the other eight          PASS -> PASS      unchanged
+```
+
+The three failures are specific and could only come from execution:
+
+```
+55.0 C is legal: no fault frame for 300 ms   -> a matching frame occurred at 100400 us
+still legal 600 ms in                        -> a matching frame occurred at 500300 us
+55.1 C faults with OVERTEMP within 50 ms     -> nothing matched within the window
+```
+
+The third is the subtle one and it is correct: the broken firmware had already faulted and
+latched at exactly 550, so there is no new fault transition when 551 arrives.
+
+### Determinism — §11 proved
+
+Three consecutive runs of `overtemp-boundary`:
+
+```
+every assertion's armed / met / latency    identical across all three
+event log      sha256 beed78618b50178d...  identical
+candump trace  sha256 9147255332523037...  identical
+```
+
 ### Phase 1 exit criteria
 
 - [x] Target board confirmed present in the local Renode install; choice recorded
-- [ ] Three firmwares build; every injectable symbol asserted present in the ELF
-- [ ] `can_toolkit.py` loads — **not written yet**
-      (the underlying gate, *two machines demonstrably exchange a frame*, is met)
-- [ ] `run_scenarios.py` produces a real verdict from a real emulator run
-- [ ] All 8 scenarios pass
-- [ ] The broken firmware produces different failures than the good one
-- [ ] `results.json`, candump traces and `replay.txt` written every run
-- [ ] Two consecutive clean runs produce byte-identical latencies
+- [x] Three firmwares build; every injectable symbol asserted present in the ELF
+- [x] `can_toolkit.py` loads; two machines demonstrably exchange a frame
+- [x] `run_scenarios.py` produces a real verdict from a real emulator run
+- [x] All scenarios pass — nine of nine
+- [x] The broken firmware produces different failures than the good one
+- [x] `results.json`, candump traces and `replay.txt` written every run
+- [x] Two consecutive clean runs produce byte-identical latencies (three were run)
 - [x] `grep -r` over `harness/` finds no project data
 - [x] `docs/STATUS.md` updated with what was observed
 
-### Known, not yet addressed
+**Adversarial verification is still outstanding.** The workflow building the engine failed
+before reaching its verify phase, so the strongest checks — trying to make the engine
+report a false pass — have not run. Until they do, Phase 1 is functionally complete but not
+audited, and Phase 2 has not been started.
 
-- Zephyr's `nucleo_h743zi` devicetree ships CAN `bus-speed = <125000>`; `network.yml` specifies
-  500000. Each firmware needs an overlay forcing 500000, and the build must fail on a mismatch.
-  Confirmed working in a probe (`bus-speed = <0x7a120>` in the generated devicetree).
-- Zephyr 3.5 requires `CAN_FILTER_DATA` on a receive filter for it to match data frames. `flags = 0`
-  matches nothing and `can_add_rx_filter` returns `-EINVAL`, which reads like a broken platform and
-  is not.
+### Findings during §1.3–1.7
+
+**A third of the CAN traffic was being dropped.** The BMS can have five frames due in one
+tick when its 100/250/500 ms cadences coincide, six when the fault rebroadcast lands on the
+same tick as a fault being entered. The stock message RAM layout gives three transmit
+buffers, so later `can_send()` calls returned `-EAGAIN` and the frame was dropped: 14
+refusals in the first second, 72 frames on the bus instead of 108. It would have surfaced
+as scenarios failing intermittently, with the safety logic as the obvious suspect rather
+than a queue three deep. Widened to six by reclaiming filter slots the project does not
+use; the budget was already exactly full at 848 bytes.
+
+**Three defects in latency reporting, all of the same kind.** A latency and a deadline can
+only be quoted as a ratio if they share an origin — `latency_us` is measured from the last
+stimulus, `window_ms` from where the assertion was armed. `overvolt-boundary` reported
+"300.3 ms / 150 ms budget" and still passed, because it had in fact answered 300 µs after
+being armed. The verdict was right and the headline was indefensible.
+
+The fix is one rule: quote the pair only when the causing stimulus lies inside the
+assertion's own window. That rule also selects the right assertion without the engine
+knowing which identifier means "fault", which it must not know — on `overvolt-boundary` it
+picks the `0x604` fault frame at 400 µs over the `0x600` telemetry frame. Separately,
+`fastest_reaction` now draws only from assertions with a frame behind them, so an
+`expect_symbol` resolving instantly cannot contribute a 0 ms "reaction" nothing achieved.
+Where no comparable pair exists the engine prints the measurement and withholds the ratio.
+
+**The suite could not detect the broken firmware.** `bms-broken` inverts only the
+temperature comparison, and every scenario injected 60.0 °C — comfortably over, where both
+binaries behave identically. `overvolt-boundary` tests the voltage boundary, which the
+defect does not touch. All eight scenarios passed against the defective firmware. Fixed by
+adding `scenarios/overtemp-boundary.yml`: 550 dC legal, 551 dC faults. A suite that only
+asks the easy question cannot tell a correct implementation from a broken one, however
+green it looks.
+
+**`scripts/boot-check.sh` named things it should not have.** It hardcoded the node, banner,
+application path, board and UART — written in Phase 0, before `boards.yml` existed. It had
+become a second, silently diverging definition of how a node builds, and the
+S32K→STM32H743 retarget left it asserting the old board. It is also what CI runs. Now it
+resolves the DUT from `network.yml` and delegates to `build-firmware.sh`, inheriting the
+bitrate and symbol-retention gates too.
+
+**Role bindings moved into project data.** `node_silence` and `node_signal` have to know
+which global carries the transmit gate and which carries a signal. That is project
+knowledge, and a naming convention baked into the engine would write to whatever happened
+to match, so `network.yml` states it per node (`tx_enable_symbol`, `signal_symbols`).
+Promoting a scripted node to real means adding those lines and editing no scenario.
+
+### Carried forward
+
+- Zephyr 3.5 requires `CAN_FILTER_DATA` on a receive filter for it to match data frames.
+  `flags = 0` matches nothing and `can_add_rx_filter` returns `-EINVAL`, which reads like a
+  broken platform and is not.
+- The 0.4 ms reaction figures are best case for a 10 ms control tick: reaction time depends
+  on where in the tick the injection lands. Deterministic, but not a firmware property to
+  quote in isolation.
+- `firmware/vcu` prints `can_ready=0` on its console while transmitting normally. A
+  mislabelled debug print, not a fault.
 
 ---
 

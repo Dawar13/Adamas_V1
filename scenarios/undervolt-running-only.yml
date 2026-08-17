@@ -1,0 +1,195 @@
+# undervolt-running-only — the same voltage, two verdicts, decided by the state.
+# =============================================================================
+# THIS FILE IS PROJECT DATA. Ids and signal names come from catalog.yml, node
+# names from network.yml, and the threshold and the state qualifier below from
+# the firmware itself.
+#
+# WHAT IT ASSERTS, AND WHY IT IS WORTH ASSERTING
+# -----------------------------------------------------------------------------
+# firmware/bms/src/bms.h defines the rule:
+#
+#     #define BMS_UNDERVOLT_LIMIT_mV      60000   /* 60.000 V */
+#
+# and firmware/bms/src/safety.c implements it with its qualifier attached:
+#
+#     if (c->state != BMS_STATE_RUNNING) {
+#             return false;
+#     }
+#     return c->pack_mv < BMS_UNDERVOLT_LIMIT_mV;      /* strictly less */
+#
+#     boundary   INCLUSIVE at the bottom — 60000 mV is legal
+#     states     RUNNING ONLY — this is the rule, not a detail of it
+#     latching   yes
+#
+# THE STATE QUALIFIER IS THE WHOLE RULE. 55.0 V sitting in standby is a flat
+# battery: faulting there would latch the vehicle out of service for a condition
+# that a charge cycle fixes, and the rider would be sent to a workshop for a pack
+# that is merely empty. Under load the identical reading means the pack is
+# collapsing and the contactor has to open. So this scenario injects ONE voltage
+# TWICE and requires two different verdicts, which is the only way to test a
+# qualifier: a scenario that only ever injected while driving would pass just as
+# happily against a firmware that had dropped the state check entirely.
+#
+# HOW EACH STATE IS ESTABLISHED, RATHER THAN ASSUMED
+# -----------------------------------------------------------------------------
+# Both halves need the pack demonstrably IN the state the qualifier names, and
+# the contactor is only a proxy for that: it is open in standby and open in a
+# fault, closed while running and closed while charging. So the state itself is
+# read off the device under test's own console, which names it outright — in
+# standby, from the periodic status line that carries the state, the contactor
+# and the fault code together.
+#
+# WHY THE PACK IS RESTORED BEFORE DRIVE IS REQUESTED
+# -----------------------------------------------------------------------------
+# The pack goes back to 72.000 V before the drive request, so the vehicle comes
+# up on a healthy pack and the low voltage is injected only once HV is already
+# live. Otherwise the fault would fire during the precharge dwell and the
+# measured reaction would be the length of that dwell rather than the reaction
+# time of the rule.
+# =============================================================================
+
+id: undervolt-running-only
+title: 55.0 V is a flat battery when parked and a fault when driving
+description: >
+  Inject 55.0 V — five volts under the limit — while the pack is idle, and
+  require no fault at all, with the pack's own console confirming it sits in
+  standby with the contactor open and no fault code. Restore the pack, bring HV
+  up, then inject exactly the same 55.0 V under load and require the fault frame
+  to carry UNDERVOLT inside 50 ms. The fault must then survive the pack
+  recovering, because rule 3 is latched.
+
+steps:
+
+  # 1. Nothing is asserted until the device under test says it is up.
+  - wait_uart:
+      node: bms
+      text: "BMS ready"
+      timeout_ms: 100
+
+  # 2. The starting picture, on the bus: nothing has been requested, so the main
+  #    contactor is open. Asserted before anything is injected, so it is a
+  #    baseline rather than a reaction to something this scenario did.
+  - expect_can:
+      id: 0x602
+      signals:
+        contactor_state: OPEN
+      within_ms: 150
+      label: "the pack starts with the contactor open"
+
+  - mark: "vehicle parked and no charge session: the pack is idle"
+
+  # 3. Hold the world in the state this rule's qualifier is about. The charge
+  #    port reports idle so no session starts, and the vehicle asks for nothing.
+  #    Neither step says anything about how either node comes to be on the bus.
+  - node_signal:
+      node: charger
+      id: 0x300
+      signals:
+        charge_state: IDLE
+
+  - node_signal:
+      node: vcu
+      id: 0x200
+      signals:
+        drive_state: PARKED
+
+  - mark: "injecting 55.0 V into a pack that is not under load"
+
+  # 4. Five volts below the limit — comfortably illegal as a number, and
+  #    perfectly legal in this state.
+  - write_symbol:
+      node: bms
+      symbol: g_pack_mv
+      value: 55000
+
+  # 5. The first half of the claim.
+  - expect_no_can:
+      id: 0x604
+      for_ms: 300
+      label: "a flat pack that is not driving is not a safety event"
+
+  # 6. The rule's own input, read back out of the running machine at the symbol's
+  #    declared width, so the silence above cannot be a stimulus that went
+  #    missing. Placed after the window rather than in the same microsecond as
+  #    its own write: a check armed at the instant of its stimulus would record a
+  #    zero-millisecond reaction, and a zero in the reaction figures makes the
+  #    instrument lie.
+  - expect_symbol:
+      node: bms
+      symbol: g_pack_mv
+      equals: 55000
+      label: "the value the rule compares really is 55.0 V"
+
+  # 7. And the state qualifier itself, from the device's own mouth: standby,
+  #    contactor open, no fault, while it is reading 55.0 V. This is the
+  #    assertion the whole standby half rests on — the contactor alone could not
+  #    tell standby apart from a fault.
+  - wait_uart:
+      node: bms
+      text: "state=STANDBY contactor=OPEN fault=NONE"
+      timeout_ms: 600
+      label: "the pack reports standby, contactor open, no fault"
+
+  - mark: "pack restored, then the rider requests drive"
+
+  # 8. Healthy pack first, so the vehicle comes up cleanly and the reaction
+  #    measured below is the rule's, not the precharge dwell's.
+  - write_symbol:
+      node: bms
+      symbol: g_pack_mv
+      value: 72000
+
+  - node_signal:
+      node: vcu
+      id: 0x200
+      signals:
+        drive_state: DRIVE
+
+  # 9. HV comes up: the drive request has to arrive and the precharge dwell has
+  #    to finish. The pack names the state it has reached, so the second half of
+  #    the claim is made in the state the rule actually applies in.
+  - wait_uart:
+      node: bms
+      text: "bms state PRECHARGE -> RUNNING"
+      timeout_ms: 500
+      label: "the pack is running: HV up, contactor closed"
+
+  - mark: "the same 55.0 V, now under load"
+
+  # 10. The second half of the claim: one voltage, the other verdict. This is the
+  #     headline reaction for this scenario.
+  - write_symbol:
+      node: bms
+      symbol: g_pack_mv
+      value: 55000
+
+  - expect_can:
+      id: 0x604
+      signals:
+        fault_code: UNDERVOLT
+      within_ms: 50
+      label: "55.0 V under load faults with UNDERVOLT within 50 ms"
+
+  # 11. The pack's telemetry corroborates the reading it faulted on.
+  - expect_can:
+      id: 0x600
+      signals:
+        pack_voltage_mv: 55000
+      within_ms: 150
+      label: "the pack publishes the 55.0 V it faulted on"
+
+  - mark: "pack recovers to 72.000 V, the fault must not clear"
+
+  # 12. The latch. Only fault_code is named, so the rolling fault_counter is
+  #     outside the mask and cannot make a correct frame miss.
+  - write_symbol:
+      node: bms
+      symbol: g_pack_mv
+      value: 72000
+
+  - expect_can:
+      id: 0x604
+      signals:
+        fault_code: UNDERVOLT
+      within_ms: 600
+      label: "UNDERVOLT stays latched after the pack recovers"

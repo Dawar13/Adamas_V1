@@ -1,0 +1,104 @@
+# overtemp-fault — the first safety rule, end to end.
+# =============================================================================
+# THIS FILE IS PROJECT DATA. Everything specific to this vehicle lives here and
+# in catalog.yml / network.yml; the engine that runs it holds none of it.
+#
+# WHAT IT ASSERTS, AND WHY IT IS WORTH ASSERTING
+# -----------------------------------------------------------------------------
+# firmware/bms/src/bms.h defines the rule:
+#
+#     #define BMS_OVERTEMP_LIMIT_dC       550     /* 55.0 C */
+#
+# and firmware/bms/src/safety.c implements it as ONE comparison:
+#
+#     return c->temp_dC > BMS_OVERTEMP_LIMIT_dC;      /* strictly greater */
+#
+# STRICTLY greater, ANY state, LATCHED. 550 (55.0 C) is legal; 551 is not. The
+# handler raises fault_code = OVERTEMP, latches, opens the contactor, and sets
+# fault_event_pending; can_io.c sends 0x604 on the very next transmit stage,
+# ahead of that tick's telemetry, because that frame is what the reaction
+# latency is measured on.
+#
+# 600 dC = 60.0 C is 5 degrees clear of the limit: this scenario is about the
+# reaction, not about the boundary. The boundary belongs to the sweep that
+# walks 549 / 550 / 551, where the `>` versus `>=` mistake shows up.
+#
+# HOW THE FAULT GETS IN
+# -----------------------------------------------------------------------------
+# write_symbol resolves g_cell_temp_dC in the running machine's ELF symbol
+# table and writes it, exactly as a temperature sensor's driver would. The
+# firmware re-reads that global on its 10 ms tick and cannot tell the two apart.
+# An unresolved symbol fails this scenario outright — a fault that was never
+# injected, reported as a PASS, is the worst bug a verification tool can have.
+#
+# WHAT IT DOES NOT SAY
+# -----------------------------------------------------------------------------
+# Nowhere does this file mention whether a node has firmware behind it or is a
+# frame player. The compiler resolves that from network.yml. Promoting any node
+# from scripted to real must not require touching this file.
+# =============================================================================
+
+id: overtemp-fault
+title: Over-temperature raises a latched fault on the bus
+description: >
+  Inject 60.0 C into the pack's hottest-cell reading and require the fault
+  frame, carrying fault_code OVERTEMP, on the bus inside 50 ms. The pack is
+  first observed quiet on that identifier for 100 ms, so a fault frame that
+  arrives afterwards can only be the one the injection caused.
+
+steps:
+
+  # 1. Nothing is asserted until the device under test says it is up. The text
+  #    is the boot_text network.yml declares for that node.
+  - wait_uart:
+      node: bms
+      text: "BMS ready"
+      timeout_ms: 500
+
+  - mark: "pack nominal, watching the fault identifier"
+
+  # 2. The control: no fault frame at all while the pack is healthy. Fed from
+  #    the whole bus, not just from this node, so a fault frame from anywhere
+  #    would trip it. Without this, the expectation below could be satisfied by
+  #    a fault that was already there.
+  - expect_no_can:
+      id: 0x604
+      for_ms: 100
+      label: "no fault frame while the pack is within limits"
+
+  - mark: "injecting 60.0 C into the hottest cell"
+
+  # 3. The stimulus. 600 deci-degrees C, through the ELF symbol table, into the
+  #    running machine's memory. The latency below is measured from here.
+  - write_symbol:
+      node: bms
+      symbol: g_cell_temp_dC
+      value: 600
+
+  # 4. The reaction. fault_code is the only signal named, so only its bits are
+  #    compared: bms_fault also carries fault_counter, which advances on every
+  #    transmission, and an unmasked comparison would be wrong for a reason that
+  #    has nothing to do with the firmware under test.
+  - expect_can:
+      id: 0x604
+      signals:
+        fault_code: OVERTEMP
+      within_ms: 50
+      label: "fault frame reports OVERTEMP within 50 ms"
+
+  # 5. The latch. The temperature is put back to a legal 25.0 C, and the fault
+  #    must still be on the bus afterwards: rule 1 is latched, and only a reset
+  #    clears it. A firmware that re-evaluated the rule would go quiet here.
+  - mark: "temperature back to 25.0 C, the fault must not clear"
+
+  - write_symbol:
+      node: bms
+      symbol: g_cell_temp_dC
+      value: 250
+
+  - expect_can:
+      id: 0x604
+      signals:
+        fault_code: OVERTEMP
+      within_ms: 600
+      label: "fault stays latched after the temperature returns to normal"

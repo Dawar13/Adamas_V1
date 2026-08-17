@@ -1,0 +1,142 @@
+# heartbeat-loss — the failsafe fires after three missed beats, and not before.
+# =============================================================================
+# THIS FILE IS PROJECT DATA. Ids and signal names come from catalog.yml, node
+# names from network.yml, and the window and its qualifiers from the firmware.
+#
+# WHAT IT ASSERTS, AND WHY IT IS WORTH ASSERTING
+# -----------------------------------------------------------------------------
+# firmware/bms/src/bms.h defines the window:
+#
+#     #define BMS_VCU_TIMEOUT_MS          300U    /* three missed 100 ms beats */
+#
+# and firmware/bms/src/safety.c implements it with both of its qualifiers:
+#
+#     if (c->state != BMS_STATE_RUNNING) { return false; }
+#     if (!c->vcu_seen)                  { return false; }
+#     return c->vcu_age_ms >= BMS_VCU_TIMEOUT_MS;      /* window elapsed */
+#
+#     boundary   >= — a timeout is a duration, and "300 ms without a beat"
+#                means the 300 ms window has elapsed. The age is counted in
+#                whole 10 ms ticks, so it fires exactly 300 ms after the last
+#                frame that arrived.
+#     states     RUNNING ONLY — a quiet vehicle controller while parked or
+#                charging is normal; a quiet one while the wheels are being
+#                driven means nobody is arbitrating torque.
+#     latching   yes — the beats coming back cannot clear it.
+#
+# BOTH EDGES OF THE WINDOW ARE CHECKED. Requiring only that the fault
+# eventually arrives would pass against a firmware that failed the vehicle on
+# the first missed beat — an ECU that trips on one dropped frame is unusable on
+# a real bus, and it is a one-character mistake away from correct. So this
+# scenario forbids the fault for the first 150 ms of silence and only then
+# requires it. Half a window of patience, then the verdict.
+#
+# THE FAILSAFE IS NOT THE FRAME. The frame is how we observe it; the failsafe is
+# the contactor opening, and that is asserted separately on bms_limits.
+#
+# HOW THE BEATS STOP
+# -----------------------------------------------------------------------------
+# node_silence takes the node off the bus. Nothing here says how — the topology
+# resolves that, and this file would read identically if the node it silences
+# had no firmware behind it at all.
+# =============================================================================
+
+id: heartbeat-loss
+title: A vehicle controller that stops beating while driving opens the contactor
+description: >
+  Bring HV up, then take the vehicle controller off the bus. For the first
+  150 ms of silence no fault may be raised — one or two missed beats are not a
+  failure. By 300 ms after the last beat the fault frame must carry
+  HEARTBEAT_LOST and the contactor must open. Restoring the beats must not clear
+  it, because rule 4 is latched.
+
+steps:
+
+  # 1. Nothing is asserted until the device under test says it is up.
+  - wait_uart:
+      node: bms
+      text: "BMS ready"
+      timeout_ms: 100
+
+  - mark: "no charge session; the rider requests drive"
+
+  # 2. This rule only applies while driving, so the pack must genuinely be
+  #    driving: the charge port stays idle, and the vehicle asks for drive.
+  - node_signal:
+      node: charger
+      id: 0x300
+      signals:
+        charge_state: IDLE
+
+  - node_signal:
+      node: vcu
+      id: 0x200
+      signals:
+        drive_state: DRIVE
+
+  # 3. HV comes up: the drive request has to arrive and the precharge dwell has
+  #    to finish. The state is read off the device under test's own console,
+  #    which names it outright — a closed contactor would only be a proxy, since
+  #    it is equally closed while charging, and this rule does not apply there.
+  - wait_uart:
+      node: bms
+      text: "bms state PRECHARGE -> RUNNING"
+      timeout_ms: 500
+      label: "the pack is running: the state this rule applies in"
+
+  # 4. The control. While the beats keep arriving there is no fault to see, so
+  #    a fault frame after the silence can only be the one the silence caused.
+  - expect_no_can:
+      id: 0x604
+      for_ms: 150
+      label: "no fault while the beats keep arriving"
+
+  - mark: "the vehicle controller goes off the bus"
+
+  # 6. The stimulus. The measured reaction below runs from here.
+  - node_silence:
+      node: vcu
+      silence: true
+
+  # 7. The near edge of the window: one or two missed beats are not a failure.
+  #    The last beat arrived at most 100 ms before the silence, so the earliest
+  #    a correct firmware can fault is 200 ms after it — this window closes at
+  #    150 ms and cannot clip a correct reaction.
+  - expect_no_can:
+      id: 0x604
+      for_ms: 150
+      label: "one or two missed beats do not fault the vehicle"
+
+  # 8. The far edge: by three missed beats the verdict must be on the bus. Only
+  #    fault_code is named, so the rolling fault_counter is outside the mask.
+  - expect_can:
+      id: 0x604
+      signals:
+        fault_code: HEARTBEAT_LOST
+      within_ms: 200
+      label: "three missed beats raise HEARTBEAT_LOST"
+
+  # 9. The failsafe itself. The fault frame is how the decision is observed; the
+  #    contactor opening is the decision.
+  - expect_can:
+      id: 0x602
+      signals:
+        contactor_state: OPEN
+      within_ms: 150
+      label: "the contactor opens: torque is nobody's to command"
+
+  - mark: "the beats come back; the fault must not clear"
+
+  # 10. The latch. A returning heartbeat is exactly the condition that would
+  #     clear a non-latching rule, and this one must not clear: only a reset
+  #     ends a latched fault.
+  - node_silence:
+      node: vcu
+      silence: false
+
+  - expect_can:
+      id: 0x604
+      signals:
+        fault_code: HEARTBEAT_LOST
+      within_ms: 600
+      label: "HEARTBEAT_LOST stays latched once the beats return"

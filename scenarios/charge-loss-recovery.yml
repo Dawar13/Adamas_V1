@@ -1,0 +1,191 @@
+# charge-loss-recovery — the one rule that is allowed to change its mind.
+# =============================================================================
+# THIS FILE IS PROJECT DATA. Ids and signal names come from catalog.yml, node
+# names from network.yml, and the window and its qualifiers from the firmware.
+#
+# WHAT IT ASSERTS, AND WHY IT IS WORTH ASSERTING
+# -----------------------------------------------------------------------------
+# firmware/bms/src/bms.h defines the window:
+#
+#     #define BMS_CHARGE_TIMEOUT_MS       300U
+#
+# and firmware/bms/src/safety.c implements the only NON-LATCHING rule in this
+# firmware:
+#
+#     if (c->state != BMS_STATE_CHARGING) { return false; }
+#     return c->charge_age_ms >= BMS_CHARGE_TIMEOUT_MS;
+#
+#     boundary   >= — the 300 ms window has elapsed, counted in whole 10 ms
+#                ticks from the last frame that reported an ACTIVE session
+#                (HANDSHAKE, CONSTANT_CURRENT or CONSTANT_VOLTAGE — the rule is
+#                about the loss of POWER, not the loss of frames)
+#     states     CHARGING ONLY
+#     latching   NO. This is the rule, not a detail of it.
+#
+# A charger that stops talking mid-session is not a battery fault: the pack is
+# fine, the charger is gone. So the contactor opens and CHARGE_LOST goes on the
+# bus, but nothing latches and the node stays in its charging state. When power
+# comes back, the age is reset by the receive path, the rule goes false, and the
+# same handler that raised the fault clears it and closes the contactor again. No
+# reset, no workshop visit, no rider stranded at a charge point because a charger
+# dropped a cable.
+#
+# THE TWO TRAPS THIS FILE IS BUILT AROUND
+# -----------------------------------------------------------------------------
+# 1. A CLOSED CONTACTOR IS AMBIGUOUS. The pack closes it while charging AND
+#    while driving. If the vehicle is left to its own devices it will ask for
+#    drive partway through this scenario, the pack will come up as a driving pack,
+#    and "the contactor closed again" would be satisfied by a recovery that never
+#    happened. So the vehicle is commanded SHUTDOWN and held there: with no drive
+#    request possible, a closed contactor can only be the charge session.
+#
+# 2. RECOVERY IS A SILENCE, NOT A FRAME. There is no fault_code NONE frame: the
+#    rebroadcast only ever carries an ACTIVE fault, so a cleared fault shows up
+#    as an ABSENCE on 0x604. An absence is also what a dead node looks like, so
+#    recovery is asserted three ways, and all three must hold:
+#
+#      the pack says so     — "bms charge restored" is printed by the recovery
+#                             branch of handle_charge_lost() and by nothing else,
+#                             so it is direct evidence that THIS rule cleared
+#                             itself rather than the session being torn down and
+#                             rebuilt around it
+#      the contactor closes — the observable consequence
+#      0x604 goes quiet     — for longer than the 500 ms rebroadcast period, so a
+#                             firmware that had latched would be caught restating
+#                             the fault
+#
+# WHY THE SESSION IS PINNED TO CONSTANT_CURRENT
+# -----------------------------------------------------------------------------
+# The charger is told to deliver, and held there, for two reasons. It keeps the
+# session from wandering into a completed charge partway through the scenario for
+# reasons of its own. And it makes the return of power a return of POWER: the
+# charger comes back delivering, which is precisely the condition rule 5 keys on,
+# so the recovery that gets tested is the rule's own recovery path.
+#
+# node_silence and node_signal say nothing about how either node comes to be on
+# the bus. This file would read identically if neither had firmware behind it.
+# =============================================================================
+
+id: charge-loss-recovery
+title: A charger that vanishes mid-session opens the contactor, and closing it again needs no reset
+description: >
+  Bring a charge session up with the vehicle commanded down, so a closed
+  contactor can only mean charging. Take the charger off the bus: one missed
+  status frame must not be a fault, but 300 ms without power must raise
+  CHARGE_LOST and open the contactor. Give the power back, and the pack must
+  recover by itself — saying so on its console, closing the contactor, and never
+  restating the fault — with no reset anywhere in the scenario.
+
+steps:
+
+  # 1. Nothing is asserted until the device under test says it is up.
+  - wait_uart:
+      node: bms
+      text: "BMS ready"
+      timeout_ms: 100
+
+  - mark: "vehicle commanded down, charger delivering"
+
+  # 2. Trap 1: with drive impossible, a closed contactor can only be the charge
+  #    session. A parked vehicle would not be enough — parked vehicles get asked
+  #    to move.
+  - node_signal:
+      node: vcu
+      id: 0x200
+      signals:
+        drive_state: SHUTDOWN
+
+  # 3. The charger delivers, and keeps delivering, so the session cannot end for
+  #    reasons of its own partway through this scenario.
+  - node_signal:
+      node: charger
+      id: 0x300
+      signals:
+        charge_state: CONSTANT_CURRENT
+
+  # 4. The pack names the state it has reached. A closed contactor would only be
+  #    a proxy for it; the console says it outright.
+  - wait_uart:
+      node: bms
+      text: "bms state PRECHARGE -> CHARGING"
+      timeout_ms: 500
+      label: "the pack is charging: the state this rule applies in"
+
+  # 5. The control: nothing on the fault identifier while power is flowing, so a
+  #    fault frame later can only be the one the loss of power caused. This
+  #    window also lands the stimulus below clear of the charger's own 200 ms
+  #    status period, so the reaction is measured against a fresh session frame
+  #    rather than against one that was already 200 ms old.
+  - expect_no_can:
+      id: 0x604
+      for_ms: 300
+      label: "no fault while the charger is delivering"
+
+  - mark: "the charger stops delivering: off the bus mid-session"
+
+  # 6. The stimulus. The measured reaction below runs from here.
+  - node_silence:
+      node: charger
+      silence: true
+
+  # 7. The near edge. The charger's status frames are 200 ms apart, so one
+  #    dropped frame must not be a fault: the earliest a correct firmware can
+  #    fault is 300 ms after the last frame that reported an active session.
+  - expect_no_can:
+      id: 0x604
+      for_ms: 150
+      label: "a single missed status frame is not a loss of power"
+
+  # 8. The far edge. Only fault_code is named, so the rolling fault_counter is
+  #    outside the mask and cannot make a correct frame miss.
+  - expect_can:
+      id: 0x604
+      signals:
+        fault_code: CHARGE_LOST
+      within_ms: 200
+      label: "300 ms without power raises CHARGE_LOST"
+
+  # 9. The consequence: the contactor opens, exactly as it would for a latching
+  #    fault. Opening the contactor and latching the node are different things,
+  #    and this rule does only the first.
+  - expect_can:
+      id: 0x602
+      signals:
+        contactor_state: OPEN
+      within_ms: 150
+      label: "the contactor opens even though nothing has latched"
+
+  - mark: "power comes back"
+
+  # 10. The recovery stimulus.
+  - node_silence:
+      node: charger
+      silence: false
+
+  # 11. Recovery, from the pack's own mouth. This line is printed by the recovery
+  #     branch of handle_charge_lost() and by nothing else in this firmware, so it
+  #     is the one observation that distinguishes "rule 5 cleared itself" from
+  #     "the session was torn down and a new one built".
+  - wait_uart:
+      node: bms
+      text: "bms charge restored"
+      timeout_ms: 400
+      label: "the pack reports the charge restored, with no reset"
+
+  # 12. And the observable consequence on the bus.
+  - expect_can:
+      id: 0x602
+      signals:
+        contactor_state: CLOSED
+      within_ms: 200
+      label: "the contactor closes again on its own"
+
+  # 13. Longer than the fault rebroadcast period, so a firmware that had latched
+  #     CHARGE_LOST would be caught restating it here. This is the assertion that
+  #     distinguishes rule 5 from the other four.
+  - expect_no_can:
+      id: 0x604
+      signals:
+        fault_code: CHARGE_LOST
+      for_ms: 600
+      label: "CHARGE_LOST is not restated once power is back"

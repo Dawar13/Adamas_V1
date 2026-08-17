@@ -48,6 +48,28 @@
 #   dut              exactly one node is the device under test
 #   position         canvas coordinates for the Design view only; no runtime
 #                    meaning whatsoever
+#
+# -----------------------------------------------------------------------------
+# THE TWO ROLE BINDINGS — what makes `real` and `scripted` interchangeable
+# -----------------------------------------------------------------------------
+#   tx_enable_symbol  the global whose zero stops ALL transmission from this
+#                     node. `node_silence` writes it on a real node and stops
+#                     the frame player on a scripted one.
+#   signal_symbols    signal name -> the global that carries it in the firmware.
+#                     `node_signal` writes those globals on a real node and
+#                     repaints the player's payload on a scripted one.
+#
+# Both are real-node-only fields, and they exist so that the SCENARIO never has
+# to know which kind of node it is talking to (N5). The engine cannot guess
+# which global carries a role — that is project knowledge, and a convention
+# baked into the engine would write to whatever happened to match — so it is
+# stated here, once, per node. Promoting a scripted node to real means adding
+# these two lines and editing no scenario.
+#
+# Every name below is a line in that node's firmware/<node>/injectables.txt,
+# which is also what the build asserts survived into the ELF. A symbol the
+# linker collected has no address to write, and write_symbol fails the scenario
+# outright rather than injecting nothing and reporting PASS.
 # =============================================================================
 
 buses:
@@ -68,6 +90,8 @@ nodes:
     boot_text: "BMS ready"
     buses: [powertrain]
     dut: true
+    # firmware/bms/src/main.c: 0 stops every transmission, checked on every cycle.
+    tx_enable_symbol: g_tx_enable
     position: { x: 100, y: 80 }
 
   # Vehicle control unit. Real firmware: it is the BMS's main conversation
@@ -78,6 +102,10 @@ nodes:
     elf: firmware/vcu/build/zephyr/zephyr.elf
     boot_text: "VCU ready"
     buses: [powertrain]
+    # Silencing this node is what stops the heartbeat the BMS times out on.
+    tx_enable_symbol: g_tx_enable
+    signal_symbols:
+      drive_state: g_drive_state     # vcu_command.drive_state (0x200)
     position: { x: 100, y: 240 }
 
   # On-board charger. Real firmware: charge-session faults are the second
@@ -88,6 +116,11 @@ nodes:
     elf: firmware/charger/build/zephyr/zephyr.elf
     boot_text: "CHG ready"
     buses: [powertrain]
+    # Silencing this node is what takes the charging power away mid-session.
+    tx_enable_symbol: g_tx_enable
+    signal_symbols:
+      charge_state:      g_charge_state_force   # charger_status.charge_state (0x300)
+      charge_plug_state: g_plug_state_force     # charger_limits.charge_plug_state (0x301)
     position: { x: 100, y: 400 }
 
   # ---------------------------------------------------------------------------

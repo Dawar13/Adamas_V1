@@ -28,3 +28,6 @@ renode-cache/
 # Harness scratch output. Committed run history lives in app/project/runs/.
 harness/out/
 *.robot.generated
+
+# Per-run output. Committed run history lives in app/project/runs/ (Phase 2).
+harness/out/
