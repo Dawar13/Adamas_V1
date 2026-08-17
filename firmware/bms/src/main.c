@@ -362,11 +362,12 @@ static void console_status(const bms_t *c)
 	int32_t frac  = (t < 0 ? -t : t) % 10;
 
 	printk("bms t=%u ms state=%s contactor=%s fault=%s temp=%d.%d C "
-	       "pack=%d mV cur=%d mA soc=%u%% rx=%u/%u txerr=%u\n",
+	       "pack=%d mV cur=%d mA soc=%u%% rx=%u/%u refused=%u failed=%u\n",
 	       c->now_ms, bms_state_name(c->state), contactor_name(c->contactor),
 	       bms_fault_name(c->fault_code), whole, frac,
 	       c->pack_mv, c->pack_ma, c->soc_pct,
-	       c->rx_vcu_count, c->rx_chg_count, bms_can_tx_errors());
+	       c->rx_vcu_count, c->rx_chg_count,
+	       bms_can_tx_refused(), bms_can_tx_failed());
 }
 
 /* ===========================================================================

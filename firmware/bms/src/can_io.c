@@ -39,11 +39,23 @@ static const struct device *const can_dev = DEVICE_DT_GET(DT_CHOSEN(zephyr_canbu
  * 16 frames is four ticks' worth of the fastest sender on this bus. */
 CAN_MSGQ_DEFINE(bms_rx_msgq, 16);
 
-/* Frames the controller would not accept (no free TX mailbox within the
- * timeout). Written from the send path and from the completion callback,
- * read by the console. Reported rather than hidden: a silently dropped frame
- * on a verification target is a lie waiting to happen. */
-static volatile uint32_t tx_errors;
+/* Two different failures, counted separately because they mean opposite
+ * things and conflating them hides both:
+ *
+ *   tx_refused  can_send() would not take the frame -- no free TX mailbox
+ *               within the timeout. The frame never reached the wire and the
+ *               fault is ours: we are offering frames faster than the
+ *               controller drains them.
+ *
+ *   tx_failed   the frame was accepted and then failed in transmission --
+ *               no acknowledgement, arbitration lost repeatedly, bus error.
+ *               The fault is the bus's: nobody is listening, or two nodes are
+ *               fighting over the same identifier.
+ *
+ * Both are reported on the console rather than swallowed. A silently dropped
+ * frame on a verification target is a false PASS waiting to happen. */
+static volatile uint32_t tx_refused;
+static volatile uint32_t tx_failed;
 
 /* The five cadence timers. They live here, not in bms_t, because they belong
  * to the wire and not to the battery. Separate accumulators rather than one
@@ -138,7 +150,7 @@ static void tx_done(const struct device *dev, int error, void *user_data)
 	ARG_UNUSED(user_data);
 
 	if (error != 0) {
-		tx_errors++;
+		tx_failed++;
 	}
 }
 
@@ -159,7 +171,7 @@ static void can_tx(uint32_t id, const uint8_t *data, uint8_t dlc)
 	 * so it never waits for the wire. */
 	rc = can_send(can_dev, &f, K_MSEC(2), tx_done, NULL);
 	if (rc != 0) {
-		tx_errors++;
+		tx_refused++;
 	}
 }
 
@@ -406,9 +418,14 @@ void bms_can_service_rx(bms_t *c)
 	}
 }
 
-uint32_t bms_can_tx_errors(void)
+uint32_t bms_can_tx_refused(void)
 {
-	return tx_errors;
+	return tx_refused;
+}
+
+uint32_t bms_can_tx_failed(void)
+{
+	return tx_failed;
 }
 
 /* ===========================================================================

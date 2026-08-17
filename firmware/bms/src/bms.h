@@ -292,6 +292,7 @@ void bms_safety_run(bms_t *c);
 int  bms_can_init(void);              /* device, both filters, can_start   */
 void bms_can_service_rx(bms_t *c);    /* drain received frames into state  */
 void bms_can_service_tx(bms_t *c);    /* the five cadence timers + events  */
-uint32_t bms_can_tx_errors(void);     /* frames the controller refused     */
+uint32_t bms_can_tx_refused(void);    /* controller would not take it      */
+uint32_t bms_can_tx_failed(void);     /* accepted, then failed on the wire */
 
 #endif /* BMS_H_ */
