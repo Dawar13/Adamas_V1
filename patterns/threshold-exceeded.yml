@@ -1,0 +1,87 @@
+# threshold-exceeded — a monitored value crosses a safety limit.
+# =============================================================================
+# PATTERNS ARE UNIVERSAL AND SHIP WITH THE TOOL. There is no project data in
+# this file: no message id, no signal name, no threshold, no node name. Those
+# arrive as parameters from a scenario, which is where one project's judgement
+# lives. A pattern describes a SHAPE; a scenario binds it to a vehicle.
+#
+# DERIVED, NOT INVENTED. This shape was read off the Phase 1 scenarios rather
+# than imagined: overtemp-fault, overtemp-boundary and overvolt-boundary are all
+# instances of it, and their common verb sequence is
+#
+#     wait_uart -> write_symbol -> expect_no_can -> expect_symbol
+#               -> write_symbol -> expect_can    -> write_symbol -> expect_can
+#
+# WHY THE BOUNDARY IS THE WHOLE POINT
+# -----------------------------------------------------------------------------
+# All eight of the original Phase 1 scenarios passed against a firmware whose
+# over-temperature comparison had been inverted from `>` to `>=`, because every
+# one of them injected a value comfortably past the limit, where both
+# implementations behave identically. Coverage of the rule was total and
+# discrimination was zero.
+#
+# The two adjacent values at the boundary carry the entire discrimination power
+# of a sweep over this pattern. Everything further out confirms the obvious.
+# The generator therefore REFUSES to expand a sweep that omits them.
+# =============================================================================
+
+id: threshold-exceeded
+name: Sensor value exceeds a limit
+description: |
+  A monitored value crosses a safety threshold. The firmware must raise a fault
+  within a deadline, and the boundary reading itself is legal — the fault occurs
+  strictly above the limit.
+
+  The legal half of the boundary needs guarding: "no fault frame appeared" is
+  also what an injection that never landed looks like. This pattern therefore
+  reads the value back out of the running machine, so the assertion rests on the
+  rule's own input rather than on the absence of evidence.
+
+parameters:
+  - { name: node,     type: node,              doc: the device under test }
+  - { name: symbol,   type: injectable_symbol, doc: the sensor input the rule reads }
+  - { name: limit,    type: number,            doc: the threshold, in the symbol's own units }
+  - { name: unit,      type: string,           doc: for the human-readable label only }
+  - { name: message,  type: message_id,        doc: the frame the fault is announced on }
+  - { name: signal,   type: signal,            doc: the field carrying the fault code }
+  - { name: value,    type: enum_value,        doc: the fault code expected }
+  - { name: deadline, type: duration,          doc: how long the firmware may take }
+  - { name: latching, type: boolean,           doc: whether cooling back down clears it }
+  - { name: healthy,  type: number,            doc: a value comfortably inside the limit }
+
+sweep:
+  around: limit
+  # STRICT: the limit itself is legal, the first faulting value is limit + step.
+  # A pattern whose condition is "the window has elapsed" is non-strict instead;
+  # getting this backwards inverts every expectation in the sweep, which is why
+  # the generator tests it separately.
+  comparison: strict
+  step: 1
+
+# The shape, in the eleven verbs. {{param}} is substituted per test; {{value}}
+# is the swept value for this instance and {{expected}} is legal|fault, decided
+# by the generator from `comparison` and never by this file.
+steps:
+  - wait_uart:     { node: "{{node}}", text: "{{boot_text}}", timeout_ms: 100 }
+  - mark:          "{{symbol}} driven to {{value}} {{unit}} — expected {{expected}}"
+  - write_symbol:  { node: "{{node}}", symbol: "{{symbol}}", value: "{{value}}" }
+
+  # The rule's own input, read back from the running machine. This is what makes
+  # the legal half of the boundary meaningful rather than vacuous.
+  - expect_symbol: { node: "{{node}}", symbol: "{{symbol}}", equals: "{{value}}",
+                     label: "the value the rule compares really is {{value}} {{unit}}" }
+
+  # Exactly one of the following two is emitted, chosen by {{expected}}.
+  - when_legal:
+      - expect_no_can: { id: "{{message}}", for_ms: "{{observe_ms}}",
+                         label: "{{value}} {{unit}} is legal: no fault frame" }
+  - when_fault:
+      - expect_can:    { id: "{{message}}", signals: { "{{signal}}": "{{value_name}}" },
+                         within_ms: "{{deadline}}",
+                         label: "{{value}} {{unit}} faults with {{value_name}}" }
+      # Latching is a property of the rule, so the check belongs to the pattern.
+      - when_latching:
+          - write_symbol: { node: "{{node}}", symbol: "{{symbol}}", value: "{{healthy}}" }
+          - expect_can:   { id: "{{message}}", signals: { "{{signal}}": "{{value_name}}" },
+                            within_ms: "{{latch_ms}}",
+                            label: "the fault stays latched after the value returns" }

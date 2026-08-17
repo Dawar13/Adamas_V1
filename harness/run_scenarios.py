@@ -131,6 +131,11 @@ EXIT_PASS = 0
 EXIT_FAIL = 1
 EXIT_USAGE = 2
 EXIT_REFUSED = 3
+#: A dry run compiled a script and executed nothing, so it has no verdict. It
+#: must not share PASS's code: a caller that tells pass from fail by exit status
+#: -- the contract scripts/run.sh advertises -- could not otherwise distinguish
+#: "the firmware passed" from "nothing ran".
+EXIT_DRY_RUN = 4
 
 
 class CompileError(Exception):
@@ -422,15 +427,15 @@ class Step:
 #
 # A verification tool must never silently test less than the author wrote.
 STEP_KEYS = {
-    "mark":          None,          # a bare string, not a mapping
+    "mark":          {"text"},       # also accepted as a bare string
     "run_for":       {"ms"},
-    "wait_uart":     {"node", "text", "timeout_ms"},
+    "wait_uart":     {"node", "text", "timeout_ms", "label"},
     "write_symbol":  {"node", "symbol", "value", "size"},
     "expect_symbol": {"node", "symbol", "equals", "size", "label"},
     "expect_can":    {"id", "signals", "within_ms", "label"},
     "expect_no_can": {"id", "signals", "for_ms", "label"},
     "can_send":      {"node", "id", "signals", "data_hex"},
-    "flood":         {"id", "count", "data_hex", "node"},
+    "flood":         {"node", "id", "count", "data_hex", "signals"},
     "node_signal":   {"node", "id", "signals"},
     "node_silence":  {"node", "silence"},
 }
@@ -1478,6 +1483,49 @@ def _fmt_ms(micros):
     return text if text else "0"
 
 
+def _matched_before(frames, wanted_id, arm, stimulus_us) -> bool:
+    """Was this assertion's own masked pattern already on the bus beforehand?
+
+    The mask comes from the EXPECT_ARM line the emulator wrote, so this compares
+    exactly what was armed rather than re-deriving it and risking a difference.
+
+    A True here means the match cannot be attributed to the stimulus: the same
+    pattern was already being transmitted, so the measured interval is an
+    emitter's phase offset rather than a reaction. Used to disqualify an
+    assertion from carrying the headline, never to change its verdict -- the
+    assertion may be perfectly correct about what is on the bus, it just is not
+    evidence of a reaction.
+    """
+    # EXPECT_ARM <token> <id_hex> <value_hex> <mask_hex> <within_us> <label...>
+    if arm is None or len(arm.fields) < 4:
+        return False
+    try:
+        value = bytes.fromhex(arm.fields[2])
+        mask = bytes.fromhex(arm.fields[3])
+    except (ValueError, IndexError):
+        return False
+    if not mask or not any(mask):
+        # No mask means "any frame with this id". Such an assertion is satisfied
+        # by ordinary periodic traffic by construction, so it can never be
+        # evidence of a reaction.
+        return True
+
+    for frame in frames:
+        if frame["us"] >= stimulus_us:
+            break
+        if frame["id"] != wanted_id or frame["kind"] not in FIRMWARE_FRAME_KINDS:
+            continue
+        try:
+            data = bytes.fromhex(frame["data"])
+        except ValueError:
+            continue
+        if len(data) < len(mask):
+            continue
+        if all((data[i] & mask[i]) == (value[i] & mask[i]) for i in range(len(mask))):
+            return True
+    return False
+
+
 def judge(compiled, log, exit_code, console_text, machines_boot):
     """Every verdict in one place, from what was observed and nothing else."""
     hard = []
@@ -1567,6 +1615,26 @@ def judge(compiled, log, exit_code, console_text, machines_boot):
                     if frame["us"] == hit.us and frame["id"] == wanted:
                         record["matched_frame"] = frame
                         break
+
+                # WAS THIS A REACTION, OR TRAFFIC THAT WAS ALREADY HAPPENING?
+                #
+                # A match after a stimulus is not evidence the stimulus caused
+                # it. A node that emits the same masked pattern on a fixed period
+                # satisfies the expectation whenever the window happens to catch
+                # it, and the "latency" then measures that emitter's phase offset,
+                # not the firmware reacting to anything.
+                #
+                # The engine cannot know causation, but it can rule it out: if the
+                # same masked pattern was ALREADY on the bus before the stimulus,
+                # the match cannot be attributed to the stimulus. That is exactly
+                # what a well-written scenario asserts by hand with a prohibition
+                # first -- so verify it from the log rather than trust it, and it
+                # falls out of the data with no knowledge of which identifier
+                # means what.
+                if record.get("stimulus_us") is not None:
+                    record["pattern_present_before_stimulus"] = _matched_before(
+                        frames, wanted, arm, record["stimulus_us"]
+                    )
         assertions.append(record)
 
     for write in compiled.symbol_writes:
@@ -1633,6 +1701,9 @@ def judge(compiled, log, exit_code, console_text, machines_boot):
         if a.get("stimulus_us") is not None
         and a.get("armed_us") is not None
         and a["stimulus_us"] >= a["armed_us"]
+        # ...and the pattern was not already on the bus before the stimulus, or
+        # the interval measures an emitter's phase, not a reaction.
+        and not a.get("pattern_present_before_stimulus")
     ]
 
     headline = comparable[0] if comparable else None
@@ -1897,6 +1968,23 @@ def main(argv=None):
     results_file = out_dir / "results.json"
     trace_file = out_dir / ("trace_%s.log" % scenario.id)
     replay_file = out_dir / "replay.txt"
+    incomplete_marker = out_dir / "INCOMPLETE"
+
+    # A run directory must never carry a previous run's answer.
+    #
+    # The directory is keyed on the scenario id, so a re-run lands in the same
+    # place. If this run refuses, crashes or is interrupted, whatever was here
+    # before would still be sitting there: a results.json saying PASS, beside a
+    # replay note describing a different run. Neither a reader nor a later
+    # storage layer can tell that from a fresh result.
+    #
+    # Observed for real. Two runs whose emulator output was byte-identical to a
+    # good run died in post-processing and left a directory holding an event log
+    # and a trace but no results.json -- and a measurement script then read the
+    # missing file as "a different answer" rather than "no answer at all".
+    for stale in (results_file, replay_file, incomplete_marker):
+        if stale.exists():
+            stale.unlink()
 
     try:
         emulator = Emulator(out_dir, args.wsl_distro)
@@ -1914,7 +2002,7 @@ def main(argv=None):
     if args.dry_run:
         say("\n  compiled only. No emulator ran, so there is no verdict.")
         say("  script: %s\n" % resc)
-        return EXIT_PASS
+        return EXIT_DRY_RUN
 
     versions = pinned_versions()
     observed, banner = emulator.version()

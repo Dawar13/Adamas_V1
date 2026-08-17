@@ -108,5 +108,40 @@ class TestToolkitCannotBeForged(unittest.TestCase):
         self.assertIn("ord(ch)", body)
 
 
+class TestStepKeysAcceptEveryShippedScenario(unittest.TestCase):
+    """The allowed-key table must be derived, not guessed.
+
+    A first version of STEP_KEYS omitted `label` from wait_uart, and three
+    shipped scenarios stopped compiling: the guard meant to catch a mistyped key
+    rejected a correct one instead. A table maintained by hand beside eleven
+    verbs will drift, so this pins it against the scenarios that actually exist.
+    """
+
+    def test_every_key_used_by_a_shipped_scenario_is_accepted(self):
+        import yaml
+        from harness.yaml_strict import StrictBoolLoader
+
+        offenders = []
+        for path in sorted((REPO_ROOT / "scenarios").rglob("*.yml")):
+            doc = yaml.load(path.read_text(encoding="utf-8"), Loader=StrictBoolLoader)
+            for index, step in enumerate(doc.get("steps") or []):
+                for verb, params in step.items():
+                    if not isinstance(params, dict):
+                        continue
+                    allowed = rs.STEP_KEYS.get(verb)
+                    if allowed is None:
+                        continue
+                    for key in sorted(set(params) - allowed):
+                        offenders.append(
+                            "%s step %d: %s does not accept %r"
+                            % (path.name, index + 1, verb, key)
+                        )
+        self.assertEqual(offenders, [], "; ".join(offenders))
+
+    def test_every_verb_has_an_entry(self):
+        # A verb missing from the table is silently unguarded.
+        self.assertEqual(sorted(rs.STEP_KEYS), sorted(rs.VERBS))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -962,8 +962,25 @@ def _addr_int(v, what, tag):
 
 
 def _width(declared, from_elf, node, symbol, what):
+    """Decide how many bytes to touch at a symbol, and refuse to overrun it.
+
+    A scenario may state `size:` when the ELF has no size for the symbol, but it
+    may NOT use it to write wider than the symbol really is. An oversized width
+    writes past the end of the named global and silently corrupts whichever one
+    the linker happened to place next to it -- the firmware then misbehaves for a
+    reason found nowhere in the scenario, which is the worst kind of bug to chase
+    and precisely the silent corruption this tool exists to detect rather than
+    cause.
+
+    _WIDTH_OK alone was not enough: it only asked whether the number was a width
+    the bus can address in one access, never whether it fitted the target.
+    """
     if declared > 0:
         w = declared
+        if from_elf > 0 and w > from_elf:
+            _fail(what, 'declared-width-exceeds-symbol:%s.%s=%d>%d'
+                  % (_s(node), _s(symbol), w, from_elf))
+            return from_elf
     else:
         w = from_elf
     if w not in _WIDTH_OK:
