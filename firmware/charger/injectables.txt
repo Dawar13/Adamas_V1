@@ -1,0 +1,17 @@
+# Symbols the harness may write on this node, one per line.
+#
+# Read twice: firmware/injectables.cmake turns each into -Wl,--undefined=<sym>
+# so the linker cannot collect it, and scripts/build-firmware.sh asserts each
+# one really landed in the ELF.
+
+# 0 stops all transmission (node_silence). A 0 -> 1 edge also restarts the
+# charge session from UNPLUGGED, so the handshake is walked again.
+g_tx_enable
+
+# Force the physical connector state. 0xFF = automatic (the default).
+# 0..3 = charge_plug_state enum from catalog.yml.
+g_plug_state_force
+
+# Force the session state. 0xFF = automatic (the default).
+# 0..7 = charge_state enum from catalog.yml.
+g_charge_state_force

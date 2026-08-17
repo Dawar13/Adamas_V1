@@ -1,0 +1,20 @@
+/*
+ * CAN bitrate for the powertrain bus.
+ *
+ * Zephyr's nucleo_h743zi board devicetree ships fdcan1 with
+ * bus-speed = <125000> and status = "disabled". network.yml says the
+ * powertrain bus runs at 500 kbit/s, and scripts/build-firmware.sh reads the
+ * bitrate back out of the GENERATED devicetree and fails the build if it does
+ * not equal network.yml's — what matters is what the compiler concluded, not
+ * what we believe we asked for.
+ *
+ * A silent mismatch is the reason that gate exists: nodes configured for
+ * different bitrates produce a bus that carries no traffic at all, and
+ * neither the firmware nor the emulator reports an error anywhere. It looks
+ * exactly like broken application logic.
+ */
+
+&fdcan1 {
+	bus-speed = <500000>;
+	status = "okay";
+};

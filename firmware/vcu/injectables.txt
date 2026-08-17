@@ -1,0 +1,19 @@
+# Symbols the harness may write into this node's running memory.
+#
+# One list, two uses: CMakeLists.txt emits -Wl,--undefined=<sym> for each so the
+# linker cannot collect it, and scripts/build-firmware.sh asserts each survived
+# into the ELF. Both must hold, or write_symbol would silently write nothing.
+#
+# ASCII ONLY. CMake's file(STRINGS) extracts ASCII runs and treats any non-ASCII
+# byte as a string terminator, so a non-ASCII character inside a comment splits
+# the line and the tail is read back as a symbol name.
+
+# 0 stops ALL transmission from this node. node_silence writes this to make the
+# VCU go quiet, which is how the BMS heartbeat timeout gets exercised.
+g_tx_enable
+
+# The vehicle-level mode published in vcu_command.drive_state (enum drive_state
+# in catalog.yml: PARKED READY DRIVE REVERSE LIMP SHUTDOWN). Writing it puts the
+# vehicle into a chosen state and pins it there, overriding the built-in
+# deterministic schedule.
+g_drive_state

@@ -1,0 +1,14 @@
+/*
+ * Zephyr's nucleo_h743zi board dts ships fdcan1 with bus-speed = <125000> and
+ * status = "disabled". network.yml's powertrain bus is 500000.
+ *
+ * Gate 1 of scripts/build-firmware.sh reads bus-speed back out of the
+ * GENERATED devicetree and fails the build if it disagrees with network.yml:
+ * a bitrate mismatch produces a bus where nothing communicates and neither the
+ * firmware nor the emulator reports an error.
+ */
+
+&fdcan1 {
+	bus-speed = <500000>;
+	status = "okay";
+};
