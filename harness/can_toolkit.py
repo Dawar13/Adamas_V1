@@ -148,7 +148,12 @@ _FORBID_ORDER = []
 
 _UARTS = {}          # node -> dict(tail, keep)
 
-_HUB = {'obj': None, 'name': None, 'tapped': False, 'per_node': False}
+# 'names' holds every hub already tapped. A single boolean here used to make
+# bench_tap a silent no-op for the SECOND bus in a project: its frames reached
+# no matcher, no count and no trace, with nothing said. 'obj'/'name' remain the
+# first hub, which is what the delivery trace attaches to.
+_HUB = {'obj': None, 'name': None, 'names': {}, 'tapped': False,
+        'per_node': False}
 
 _STATE = {
     'primary': None,
@@ -571,21 +576,31 @@ def mc_bench_tap(hub_name):
     Prefers the hub's own event, which sees every frame from every attached
     controller. Falls back to per-node send taps only when there is no hub at
     all, and never runs both: one bus frame must produce exactly one line."""
-    if _HUB['tapped']:
-        return
     pair = _find_hub(hub_name)
     if pair is not None:
         hub, nm = pair[0], pair[1]
+        # Tapping the same hub twice would double every frame; tapping a
+        # DIFFERENT hub is a second bus and must actually happen.
+        if _HUB['names'].has_key(str(nm)):
+            return
         try:
             hub.FrameReceived += _on_hub_frame
         except Exception, e:
             _fail('bench_tap', 'cannot-subscribe-hub:' + str(e))
         if _STATE['trace_delivery']:
             _subscribe_delivery(hub)
-        _HUB['obj'] = hub
-        _HUB['name'] = nm
+        _HUB['names'][str(nm)] = 1
+        if _HUB['obj'] is None:
+            _HUB['obj'] = hub
+            _HUB['name'] = nm
         _HUB['tapped'] = True
         print 'bench: tapped hub ' + str(nm)
+        return
+
+    if _HUB['tapped']:
+        # A hub was tapped already and this name resolved to nothing. Falling
+        # back to per-node taps now would double-count the bus that IS tapped.
+        _fail('bench_tap', 'hub-not-found:' + str(hub_name))
         return
 
     # No hub: tap every registered controller directly. Coverage is then only as

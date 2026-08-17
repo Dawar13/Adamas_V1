@@ -66,6 +66,7 @@ the instrument lie.
 from __future__ import annotations
 
 import argparse
+import difflib
 import hashlib
 import json
 import os
@@ -94,6 +95,11 @@ TIER_VERIFIED = "verified"
 TIER_MODELLED = "modelled"
 TIER_DECLARED = "declared"
 TIER_ORDER = (TIER_VERIFIED, TIER_MODELLED, TIER_DECLARED)
+
+# Event kinds that represent a frame some NODE transmitted, as opposed to one the
+# harness injected. Only these can be a firmware reaction: measuring against our
+# own injection would be measuring the tool's echo, not the firmware.
+FIRMWARE_FRAME_KINDS = ("TX", "TXN")
 
 VERBS = (
     "wait_uart",
@@ -396,6 +402,63 @@ class Step:
         if not isinstance(self.params, dict):
             return []
         return sorted(k for k in self.params if k not in allowed)
+
+
+# Every key each verb accepts. Anything else in a step is refused.
+#
+# THIS IS A FALSE-PASS GUARD, not tidiness. An unrecognised key used to be
+# ignored in silence, and the dangerous case is a typo in an OPTIONAL key:
+#
+#     expect_can:
+#       id:      <some identifier>
+#       signal:  ...              <- the optional key 'signals', misspelled
+#       within_ms: 50
+#
+# Because the key is optional, the mistyped block was simply dropped, and the
+# assertion weakened from "this identifier carrying these particular values" to
+# "any frame with this identifier at all" -- which any periodic emitter of that
+# identifier satisfies regardless of its contents. The scenario still passed, and
+# its label still claimed the stronger check had been made.
+#
+# A verification tool must never silently test less than the author wrote.
+STEP_KEYS = {
+    "mark":          None,          # a bare string, not a mapping
+    "run_for":       {"ms"},
+    "wait_uart":     {"node", "text", "timeout_ms"},
+    "write_symbol":  {"node", "symbol", "value", "size"},
+    "expect_symbol": {"node", "symbol", "equals", "size", "label"},
+    "expect_can":    {"id", "signals", "within_ms", "label"},
+    "expect_no_can": {"id", "signals", "for_ms", "label"},
+    "can_send":      {"node", "id", "signals", "data_hex"},
+    "flood":         {"id", "count", "data_hex", "node"},
+    "node_signal":   {"node", "id", "signals"},
+    "node_silence":  {"node", "silence"},
+}
+
+
+def _check_step_keys(step) -> None:
+    """Refuse any key a verb does not recognise, naming the near miss."""
+    allowed = STEP_KEYS.get(step.verb)
+    if allowed is None:
+        return
+    unknown = step.unknown_keys(allowed)
+    if not unknown:
+        return
+
+    # Point at the intended key when the typo is obvious: the author is looking
+    # for their own mistake, and "did you mean signals" ends the search.
+    hints = []
+    for key in unknown:
+        near = difflib.get_close_matches(key, sorted(allowed), n=1, cutoff=0.6)
+        hints.append("%r%s" % (key, " (did you mean %r?)" % near[0] if near else ""))
+
+    raise CompileError(
+        "%s: %r does not accept %s. It accepts: %s.\n"
+        "An unrecognised key is refused rather than ignored: a mistyped optional "
+        "key would quietly weaken the assertion while its label went on claiming "
+        "the stronger check."
+        % (step.where, step.verb, ", ".join(hints), ", ".join(sorted(allowed)))
+    )
 
 
 class Scenario:
@@ -1218,6 +1281,7 @@ class Compiler:
             "node_silence": self._verb_node_silence,
         }
         for step in self.scenario.steps:
+            _check_step_keys(step)
             self._emit("# step %d: %s" % (step.index + 1, step.verb))
             handlers[step.verb](step)
         self._emit()
@@ -1527,7 +1591,19 @@ def judge(compiled, log, exit_code, console_text, machines_boot):
     # a reaction aggregate. An expect_symbol that resolves in the same
     # microsecond as its stimulus would otherwise contribute a 0 us "fastest
     # reaction" -- a number nothing on the bus ever achieved.
-    bus_reactions = [a for a in reacted if a["matched_frame"] is not None]
+    # A REACTION is something the FIRMWARE did. Only frames a node transmitted
+    # count -- TX from the device under test, TXN from another real node.
+    #
+    # An INJ frame is one the harness itself put on the bus. Counting it as a
+    # reaction lets the tool measure its own echo: an assertion satisfied by our
+    # own injection reports a latency of roughly zero, and that zero was being
+    # headlined and averaged into the fastest-reaction figure as though the
+    # firmware had answered instantly. The firmware may not have run at all.
+    bus_reactions = [
+        a for a in reacted
+        if a["matched_frame"] is not None
+        and a["matched_frame"].get("kind") in FIRMWARE_FRAME_KINDS
+    ]
 
     # The headline pairs a measured latency with a deadline, so the two have to
     # share an origin or the ratio is nonsense. latency_us is measured from the
@@ -1638,7 +1714,27 @@ def pinned_versions():
     return out
 
 
-def write_replay(path: Path, scenario, command, resc, versions, observed, inputs, hub):
+TIER_NOTES = {
+    TIER_VERIFIED: "real firmware ran on these boards with evidence",
+    TIER_MODELLED: "the emulator supports these boards; not verified end to end, "
+                   "so this result is shown and is not authoritative",
+}
+
+
+def _tier_note(tier: str) -> str:
+    """One wording, shared by every artefact that carries a verdict.
+
+    results.json and replay.txt used to be able to disagree about how
+    authoritative a run was, because only one of them mentioned the tier at all.
+    """
+    return TIER_NOTES.get(tier, "")
+
+
+def write_replay(path: Path, scenario, command, resc, versions, observed, inputs,
+                 hub, tier, tier_note):
+    # The tier belongs on every artefact that carries a verdict, not only on
+    # the console (PROJECT.md 2.1). A reproduction note found on its own, months
+    # later, must still say whether the result it reproduces was authoritative.
     lines = [
         "Reproduction note -- everything needed to get this run again.",
         "=" * 74,
@@ -1646,6 +1742,8 @@ def write_replay(path: Path, scenario, command, resc, versions, observed, inputs
         "scenario   %s" % scenario.id,
         "file       %s" % scenario.path,
         "hub        %s" % hub,
+        "run tier   %s" % tier,
+        "           %s" % tier_note,
         "",
         "Run it again, from the repository root:",
         "",
@@ -1890,10 +1988,29 @@ def main(argv=None):
         resc,
     ):
         inputs[_repo_relative(target)] = _sha256(target)
+
+    # THE FIRMWARE IS THE MOST IMPORTANT INPUT AND WAS MISSING.
+    #
+    # Every other input was hashed, but not the binaries under test, so two
+    # different firmwares at the same path produced byte-identical provenance and
+    # a byte-identical reproduction note. The one thing a reader most needs to
+    # pin down -- WHICH BUILD produced this verdict -- was the one thing not
+    # recorded, and PROJECT.md §11 names it explicitly.
+    #
+    # It is also what makes the good-versus-broken comparison legible after the
+    # fact: the two runs differ in exactly one hash, and the results say so.
+    #
+    # Hashed by content, not by path, because the path is identical in the case
+    # that matters.
+    for node in net.real_nodes():
+        elf = (REPO_ROOT / str(node.elf)).resolve()
+        key = "firmware:%s" % node.id
+        inputs[key] = _sha256(elf) if elf.is_file() else "MISSING:%s" % node.elf
     observed = {"emulator": banner or "unknown"}
     write_replay(
         replay_file, scenario, emulator.command_text(launcher),
         emulator.path(resc), versions, observed, inputs, hub,
+        compiled.tier, _tier_note(compiled.tier),
     )
 
     results = {
@@ -1912,12 +2029,7 @@ def main(argv=None):
         },
         "run": {
             "tier": compiled.tier,
-            "tier_note": {
-                TIER_VERIFIED: "real firmware ran on these boards with evidence",
-                TIER_MODELLED: "the emulator supports these boards; not verified "
-                               "end to end, so this result is shown and is not "
-                               "authoritative",
-            }.get(compiled.tier, ""),
+            "tier_note": _tier_note(compiled.tier),
             "hub": hub,
             "bus": bus_name,
             "machines": compiled.machines,
