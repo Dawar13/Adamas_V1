@@ -437,6 +437,55 @@ class Network:
                     "%s: 'default_signals' must be a mapping of signal name to "
                     "starting value, got %s" % (where, type(defaults).__name__)
                 )
+            for name, value in _as_dict(defaults).items():
+                _validate_default_shape(where, name, value)
+
+    # -- starting payloads ------------------------------------------------
+
+    def _validate_default_signals(self, carries, tables, resolve):
+        """Check every ``default_signals`` entry against the contract.
+
+        ``carries`` maps message id to the signal names that message declares,
+        or to None where the catalog representation did not say. ``tables`` and
+        ``resolve`` are the two ways a symbolic value can be checked; either may
+        be None when the representation carries no symbolic tables at all.
+
+        A starting payload that names a signal no message carries, or a symbol
+        no table defines, is refused here. It has to be: nothing downstream
+        would notice. The frame player would transmit a fabricated payload, or
+        the mistake would surface much later, far from the file that caused it.
+        """
+        for node in self.scripted_nodes():
+            if not node.default_signals:
+                continue
+            where = self._node_where(node)
+
+            reachable = set()
+            unstated = []
+            for msg_id in node.emits:
+                names = carries.get(msg_id)
+                if names is None:
+                    unstated.append(msg_id)
+                else:
+                    reachable |= names
+
+            for name, value in node.default_signals.items():
+                if name not in reachable:
+                    if unstated:
+                        raise NetworkError(
+                            "%s: sets a starting value for %r, which this catalog "
+                            "cannot confirm: %s declare no 'signals', so a name no "
+                            "message carries would pass unnoticed. Cross-check "
+                            "against a catalog that carries its signal definitions."
+                            % (where, name, _listing([_hex(i) for i in unstated]))
+                        )
+                    raise NetworkError(
+                        "%s: sets a starting value for %r, which is not a signal of "
+                        "any message it emits; those messages carry %s"
+                        % (where, name, _listing(sorted(reachable)))
+                    )
+                if isinstance(value, str):
+                    _check_symbol(where, name, value, tables, resolve)
 
     # -- accessors --------------------------------------------------------
 
@@ -494,7 +543,8 @@ class Network:
     def validate_against(self, catalog):
         """Join the topology to the CAN contract and refuse any mismatch.
 
-        The two files are joined by node identity, so three things must hold:
+        The two files are joined by node identity and by signal identity, so
+        four things must hold:
 
         * no message id is claimed by two different senders -- a bus cannot
           carry the same identifier from two sources without the receiver
@@ -502,15 +552,27 @@ class Network:
         * no message id is defined twice at all;
         * every ``sender`` in the catalog is a node declared here, and every id
           a scripted node claims to emit exists in the catalog and is owned by
-          that node.
+          that node;
+        * every name in a scripted node's ``default_signals`` is a signal of a
+          message that node emits, and every symbolic starting value resolves
+          through the enum table keyed by that signal's own name (R2).
+
+        That last one is not decoration. A starting payload is the first thing
+        on the bus, and nothing downstream re-checks it: a name no message
+        carries is transmitted as a fabricated payload, and a symbol no table
+        defines either lands as the wrong state or blows up much later, far from
+        the file that caused it.
 
         ``catalog`` may be a loaded catalog object exposing ``messages`` (as a
         method or an attribute) or the raw parsed document; message rows may be
-        mappings or objects. Returns ``self`` so calls can be chained.
+        mappings or objects. Symbolic values are checked through the catalog's
+        own ``resolve_enum`` when it has one, and against the document's
+        ``enums`` section otherwise. Returns ``self`` so calls can be chained.
         """
         rows = _catalog_rows(catalog, self.source)
 
         owner = {}  # message id -> sender
+        carries = {}  # message id -> signal names it declares, or None if unstated
         for index, row in enumerate(rows):
             where = "catalog message #%d" % index
             raw_id = _field(row, "id")
@@ -545,6 +607,7 @@ class Network:
                     % (label, previous, sender)
                 )
             owner[msg_id] = sender
+            carries[msg_id] = _row_signal_names(row, label)
 
         for node in self.scripted_nodes():
             for msg_id in node.emits:
@@ -558,6 +621,12 @@ class Network:
                         "%s: emits %s, but the catalog gives that message the sender "
                         "%r" % (self._node_where(node), _hex(msg_id), owner[msg_id])
                     )
+
+        resolve = getattr(catalog, "resolve_enum", None)
+        if not callable(resolve):
+            resolve = None
+        tables = _enum_tables(catalog, self.source) if resolve is None else None
+        self._validate_default_signals(carries, tables, resolve)
         return self
 
     def __repr__(self) -> str:
@@ -570,6 +639,147 @@ class Network:
 
 def _listing(items) -> str:
     return ", ".join(items) if items else "(none)"
+
+
+# ---------------------------------------------------------------------------
+# starting payloads: shape, and resolution against the contract
+# ---------------------------------------------------------------------------
+
+
+def _validate_default_shape(where: str, name, value) -> None:
+    """Check one ``default_signals`` entry without needing the contract."""
+    if not _nonempty_str(name):
+        raise NetworkError(
+            "%s: 'default_signals' has the key %r; every key must be the name of "
+            "a signal the contract defines" % (where, name)
+        )
+    if isinstance(value, bool):
+        # A value here is a number or the symbolic NAME the contract defines,
+        # never a flag. YAML 1.1 collapses several legitimate symbol spellings
+        # into booleans, so a boolean at this point is either that corruption
+        # arriving from some other loader or a value no encoder can pack -- and
+        # both of them resolve to 0 or 1 if they are waved through.
+        raise NetworkError(
+            "%s: 'default_signals' gives %r the boolean %r. A starting value is a "
+            "number or a symbolic name; write the number, or quote the symbol so "
+            "it stays text" % (where, name, value)
+        )
+    if not (_is_int(value) or isinstance(value, str)):
+        raise NetworkError(
+            "%s: 'default_signals' gives %r the value %r; a starting value must be "
+            "an integer or a symbolic name" % (where, name, value)
+        )
+
+
+def _check_symbol(where: str, name: str, symbol: str, tables, resolve) -> None:
+    """Refuse a symbolic starting value the contract cannot resolve (R2)."""
+    if resolve is not None:
+        try:
+            resolve(name, symbol)
+        except NetworkError:
+            raise
+        except Exception as exc:  # the catalog's own refusal, whatever its type
+            raise NetworkError(
+                "%s: starting value for %r does not resolve: %s" % (where, name, exc)
+            ) from None
+        return
+
+    if tables is None:
+        raise NetworkError(
+            "%s: gives %r the symbolic starting value %r, and this catalog carries "
+            "no symbolic tables to resolve it against. Cross-check against a "
+            "catalog that does, or write the raw number" % (where, name, symbol)
+        )
+
+    table = tables.get(name)
+    if table is None:
+        raise NetworkError(
+            "%s: gives %r the symbolic starting value %r, but the catalog defines "
+            "no enum table keyed %r. Enum tables resolve BY SIGNAL NAME ONLY: the "
+            "table key and the signal name must be the same string. Tables the "
+            "catalog defines: %s"
+            % (where, name, symbol, name, _listing(sorted(map(str, tables))))
+        )
+
+    exact, flattened, display = table
+    if symbol in exact or symbol.strip().lower() in flattened:
+        return
+    raise NetworkError(
+        "%s: gives %r the symbolic starting value %r, which the enum table %r does "
+        "not define. It defines: %s"
+        % (where, name, symbol, name, _listing(display))
+    )
+
+
+def _symbol_index(key: str, table: Mapping, source: str):
+    """Index one raw enum table as ``(exact spellings, flattened, display)``.
+
+    Tables are written ``<int>: SYMBOL``, so the symbols are the values. A
+    caller that parsed the contract with a stock YAML 1.1 loader hands us
+    symbols that were already collapsed into booleans; the spellings that
+    collapse into each are recovered here rather than reported as unknown
+    symbols, because the fault is in that caller's loader, not in the topology.
+    """
+    exact = set()
+    flattened = set()
+    display = []
+    for symbol in table.values():
+        if isinstance(symbol, bool):
+            flattened |= yaml_11_bool_spellings(symbol)
+            display.append("<%r, flattened by a YAML 1.1 loader>" % symbol)
+        elif isinstance(symbol, str):
+            exact.add(symbol.strip())
+            display.append(symbol.strip())
+        else:
+            raise NetworkError(
+                "%s: enum table %r maps to %r; every entry must read "
+                "'<int>: SYMBOLIC_NAME'" % (source, key, symbol)
+            )
+    return exact, flattened, sorted(display)
+
+
+def _enum_tables(catalog, source: str):
+    """Symbolic tables from a raw catalog document, or None if it carries none."""
+    if not isinstance(catalog, Mapping):
+        return None
+    raw = catalog.get("enums")
+    if raw is None:
+        return None
+    if not isinstance(raw, Mapping):
+        raise NetworkError(
+            "%s: the catalog's 'enums' must be a mapping of signal name to table, "
+            "got %s" % (source, type(raw).__name__)
+        )
+    tables = {}
+    for key, table in raw.items():
+        if not isinstance(table, Mapping):
+            raise NetworkError(
+                "%s: enum table %r must be a mapping of value to symbolic name, "
+                "got %s" % (source, key, type(table).__name__)
+            )
+        tables[key] = _symbol_index(key, table, source)
+    return tables
+
+
+def _row_signal_names(row, label: str):
+    """The signal names a catalog row declares, or None if the row does not say."""
+    declared = _field(row, "signals")
+    if declared is None:
+        return None
+    if not _is_listish(declared):
+        raise NetworkError(
+            "catalog message %s: 'signals' must be a list, got %s"
+            % (label, type(declared).__name__)
+        )
+    names = set()
+    for index, entry in enumerate(declared):
+        name = _field(entry, "name")
+        if not _nonempty_str(name):
+            raise NetworkError(
+                "catalog message %s: signal #%d has no usable 'name'" % (label, index)
+            )
+        names.add(name.strip())
+    return frozenset(names)
 
 
 def _catalog_rows(catalog, source: str):

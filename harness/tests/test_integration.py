@@ -30,7 +30,9 @@ What is asserted:
     nothing else, including on the sub-byte block (R3).
 """
 
+import re
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -49,6 +51,22 @@ REAL_NETWORK = REPO_ROOT / "network.yml"
 # shifting or in byte order shows up as a changed value rather than a lucky
 # match.
 _ALTERNATING = int("A5" * 64, 16)
+
+
+def _rewrite_default_line(text: str, signal_name: str, value: str):
+    """``text`` with the one line setting ``signal_name`` rewritten to ``value``.
+
+    Returns ``(text, matches)`` so the caller can insist it hit exactly one
+    line. Raw text on purpose: a document round-tripped through the YAML dumper
+    comes back with the value quoted, which hides the flattening hazard these
+    tests exist to catch.
+    """
+    pattern = re.compile(
+        r"^(?P<indent>[ \t]+)%s:[^\n]*$" % re.escape(signal_name), re.MULTILINE
+    )
+    return pattern.subn(
+        lambda m: "%s%s: %s" % (m.group("indent"), signal_name, value), text
+    )
 
 
 def _pattern_value(sig, source: int) -> int:
@@ -405,6 +423,247 @@ class TestRoundTripOverEveryMessage(IntegrationBase):
                         )
                         checked += 1
         self.assertGreater(checked, 0, "no enum-valued signal was exercised")
+
+
+class TestEveryEngineModuleHoldsNoProjectData(IntegrationBase):
+    """R1, across the whole engine rather than one module at a time.
+
+    The per-module tests each scan their own file, so a module added later is
+    scanned by nobody. This scans every ``harness/*.py`` there is, with the
+    forbidden terms derived from the shipped files.
+    """
+
+    def engine_sources(self):
+        found = sorted(p for p in (REPO_ROOT / "harness").glob("*.py"))
+        self.assertGreater(len(found), 1, "no engine modules found to scan")
+        return found
+
+    def test_no_engine_module_names_a_project_entity(self):
+        forbidden = set()
+        for node in self.network.nodes():
+            forbidden.add(str(node.id))
+            if node.board:
+                forbidden.add(str(node.board))
+        for bus in self.network.buses():
+            forbidden.add(str(bus.id))
+        for message in self.catalog.messages():
+            forbidden.add(message.name)
+
+        for path in self.engine_sources():
+            source = path.read_text(encoding="utf-8").lower()
+            for term in sorted(forbidden):
+                with self.subTest(module=path.name, term=term):
+                    self.assertNotIn(
+                        term.lower(),
+                        source,
+                        "%s mentions project entity %r" % (path.name, term),
+                    )
+
+    def test_no_engine_module_names_a_message_id(self):
+        for path in self.engine_sources():
+            source = path.read_text(encoding="utf-8")
+            for message in self.catalog.messages():
+                for spelling in (
+                    "0x%X" % message.id,
+                    "0x%x" % message.id,
+                    str(message.id),
+                ):
+                    with self.subTest(module=path.name, id=spelling):
+                        self.assertNotIn(
+                            spelling,
+                            source,
+                            "%s mentions message id %s" % (path.name, spelling),
+                        )
+
+
+class TestASymbolTheTopologyCouldLegallyWrite(IntegrationBase):
+    """The two files must agree on a symbol YAML 1.1 would flatten.
+
+    network.yml documents that enum-valued starting payloads are written with
+    the NAME catalog.yml defines. Some of those names -- the affirmative and
+    negative words -- are exactly what YAML 1.1 collapses into booleans, and a
+    boolean resolves as 0 or 1, so the node would start in a state nobody asked
+    for with no error anywhere. This rewrites ONE starting value in the shipped
+    topology to such a symbol, taken from the shipped catalog, and checks the
+    whole path: parse, cross-check, encode.
+
+    Nothing here is hard-coded. If the shipped contract stops defining such a
+    symbol the test says so rather than passing quietly.
+    """
+
+    #: Lower-cased spellings YAML 1.1 collapses into booleans.
+    _FLATTENED = frozenset({"true", "false", "yes", "no", "on", "off", "y", "n"})
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.text = REAL_NETWORK.read_text(encoding="utf-8")
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.candidates = []
+        for node in cls.network.scripted_nodes():
+            for msg_id in node.emits:
+                for sig in cls.catalog.signals_of(msg_id):
+                    table = cls.catalog.enum_for(sig.name)
+                    if table is None:
+                        continue
+                    for symbol in table.names():
+                        if symbol.strip().lower() in cls._FLATTENED:
+                            cls.candidates.append(
+                                (node, msg_id, sig.name, symbol, table.by_name[symbol])
+                            )
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def _rewrite(self, signal_name, symbol):
+        """The shipped topology with one starting value rewritten, as raw text."""
+        rewritten, count = _rewrite_default_line(self.text, signal_name, symbol)
+        self.assertEqual(
+            count, 1, "expected exactly one %r line to rewrite" % signal_name
+        )
+        path = Path(self.tmp.name) / ("topology_%s.yml" % symbol.lower())
+        path.write_text(rewritten, encoding="utf-8")
+        return path
+
+    def test_the_contract_defines_such_a_symbol(self):
+        self.assertTrue(
+            self.candidates,
+            "no scripted node can reach a symbol that YAML 1.1 flattens, so the "
+            "checks below would be vacuous; if the contract really no longer "
+            "defines one, delete this class rather than letting it pass quietly",
+        )
+
+    def test_a_flattenable_symbol_survives_the_whole_path(self):
+        for node, msg_id, signal_name, symbol, raw in self.candidates:
+            with self.subTest(node=node.id, signal=signal_name, symbol=symbol):
+                path = self._rewrite(signal_name, symbol)
+
+                # 1. it is still text, not a boolean
+                reloaded = netmod.load(path)
+                value = reloaded.node(node.id).default_signals[signal_name]
+                self.assertIsInstance(
+                    value,
+                    str,
+                    "%r came back as %r; it would resolve as 0/1 and start the "
+                    "node in the wrong state" % (symbol, value),
+                )
+                self.assertEqual(value, symbol)
+
+                # 2. the cross-check accepts it -- it is a legitimate symbol
+                reloaded.validate_against(self.catalog)
+
+                # 3. and it resolves to the state the topology asked for
+                self.assertEqual(
+                    self.catalog.resolve_enum(signal_name, value),
+                    raw,
+                    "%r must resolve to its own value, not to 0" % symbol,
+                )
+                payload, _mask = self.catalog.encode(msg_id, {signal_name: value})
+                self.assertEqual(
+                    self.catalog.decode(msg_id, payload)[signal_name], symbol
+                )
+
+    def test_a_stock_loader_would_have_corrupted_it(self):
+        """Why the loader policy exists, stated over the real files.
+
+        Whether the flattened boolean also lands on the WRONG number depends on
+        where the symbol sits in its table -- that is what makes the failure
+        data-dependent, and why it cannot be left to chance. The engine's own
+        loader must not produce the boolean at all.
+        """
+        import yaml
+
+        for node, _msg_id, signal_name, symbol, raw in self.candidates:
+            with self.subTest(node=node.id, signal=signal_name, symbol=symbol):
+                path = self._rewrite(signal_name, symbol)
+
+                stock = yaml.safe_load(path.read_text(encoding="utf-8"))
+                entry = [n for n in stock["nodes"] if n["id"] == node.id][0]
+                flattened = entry["default_signals"][signal_name]
+                self.assertIsInstance(
+                    flattened,
+                    bool,
+                    "the stock loader no longer flattens %r; the hazard may have "
+                    "moved rather than gone" % symbol,
+                )
+
+                # The engine's loader, on the same bytes.
+                value = netmod.load(path).node(node.id).default_signals[signal_name]
+                self.assertNotIsInstance(value, bool)
+                self.assertEqual(self.catalog.resolve_enum(signal_name, value), raw)
+
+
+class TestStartingPayloadsAreCrossChecked(IntegrationBase):
+    """A wrong name or a wrong symbol must be refused, not carried onto the bus."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.text = REAL_NETWORK.read_text(encoding="utf-8")
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.scripted = cls.network.scripted_nodes()[0]
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def _with_extra_default(self, line):
+        """The shipped topology with one extra line inside the first scripted
+        node's default_signals block."""
+        out = []
+        inserted = False
+        in_node = False
+        for row in self.text.splitlines():
+            out.append(row)
+            if row.strip() == "- id: %s" % self.scripted.id:
+                in_node = True
+            if in_node and not inserted and row.strip() == "default_signals:":
+                indent = len(row) - len(row.lstrip()) + 2
+                out.append(" " * indent + line)
+                inserted = True
+        self.assertTrue(inserted, "could not find a default_signals block to extend")
+        path = Path(self.tmp.name) / "topology_extra.yml"
+        path.write_text("\n".join(out) + "\n", encoding="utf-8")
+        return path
+
+    def test_a_name_no_message_carries_is_refused(self):
+        path = self._with_extra_default("no_such_signal_at_all: 99")
+        net = netmod.load(path)
+        with self.assertRaises(netmod.NetworkError) as ctx:
+            net.validate_against(self.catalog)
+        message = str(ctx.exception)
+        self.assertIn("no_such_signal_at_all", message)
+        self.assertIn(self.scripted.id, message)
+
+    def test_a_symbol_no_table_defines_is_refused(self):
+        # Take a real enum-valued starting value of a scripted node and misspell
+        # its symbol; the cross-check must refuse rather than let a fabricated
+        # state onto the bus.
+        target = None
+        for node in self.network.scripted_nodes():
+            for name, value in node.default_signals.items():
+                if isinstance(value, str) and self.catalog.enum_for(name) is not None:
+                    target = (node, name, value)
+                    break
+            if target:
+                break
+        self.assertIsNotNone(
+            target, "no symbolic starting value in the shipped topology to misspell"
+        )
+        node, name, symbol = target
+        broken = "%s_NOT_A_SYMBOL" % symbol
+        text, count = _rewrite_default_line(self.text, name, broken)
+        self.assertEqual(count, 1, "expected exactly one %r line to rewrite" % name)
+        path = Path(self.tmp.name) / "topology_bad_symbol.yml"
+        path.write_text(text, encoding="utf-8")
+
+        net = netmod.load(path)
+        with self.assertRaises(netmod.NetworkError) as ctx:
+            net.validate_against(self.catalog)
+        message = str(ctx.exception)
+        self.assertIn(broken, message)
+        self.assertIn(node.id, message)
 
 
 if __name__ == "__main__":  # pragma: no cover

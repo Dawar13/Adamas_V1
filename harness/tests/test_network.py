@@ -72,14 +72,47 @@ def base_topology():
 
 
 def base_catalog():
-    """A catalog document matching base_topology()."""
+    """A catalog document matching base_topology().
+
+    The rows carry their signals and the document carries its enum tables,
+    because the cross-check validates ``default_signals`` against both: a
+    starting value naming a signal no message carries, or a symbol no table
+    defines, has to be refused here rather than discovered on the bus.
+    """
     return {
         "messages": [
-            {"id": ID_R1, "name": "msg_from_real", "sender": "node_real"},
-            {"id": ID_R2, "name": "msg_from_other", "sender": "node_other"},
-            {"id": ID_S1, "name": "msg_s_one", "sender": "node_scripted"},
-            {"id": ID_S2, "name": "msg_s_two", "sender": "node_scripted"},
-        ]
+            {
+                "id": ID_R1,
+                "name": "msg_from_real",
+                "sender": "node_real",
+                "signals": [{"name": "sig_real", "start_bit": 0, "length": 8}],
+            },
+            {
+                "id": ID_R2,
+                "name": "msg_from_other",
+                "sender": "node_other",
+                "signals": [{"name": "sig_other", "start_bit": 0, "length": 8}],
+            },
+            {
+                "id": ID_S1,
+                "name": "msg_s_one",
+                "sender": "node_scripted",
+                "signals": [
+                    {"name": "sig_one", "start_bit": 0, "length": 8},
+                    {"name": "sig_mode", "start_bit": 8, "length": 8},
+                ],
+            },
+            {
+                "id": ID_S2,
+                "name": "msg_s_two",
+                "sender": "node_scripted",
+                "signals": [{"name": "sig_two", "start_bit": 0, "length": 16}],
+            },
+        ],
+        # Keyed by SIGNAL NAME, which is the only way a table ever resolves (R2).
+        # MODE_OFF is spelled so that a YAML 1.1 loader would not flatten it;
+        # the flattening hazard has its own fixtures further down.
+        "enums": {"sig_mode": {0: "MODE_OFF", 1: "MODE_RUN", 2: "MODE_HOLD"}},
     }
 
 
@@ -533,13 +566,45 @@ class CatalogObject:
         return list(self._rows)
 
 
+class SignalRow:
+    """Stands in for a signal exposed as an object rather than a mapping."""
+
+    def __init__(self, name):
+        self.name = name
+
+
 class MessageRow:
     """Stands in for a message row exposed as an object rather than a mapping."""
 
-    def __init__(self, msg_id, name, sender):
+    def __init__(self, msg_id, name, sender, signals=()):
         self.id = msg_id
         self.name = name
         self.sender = sender
+        self.signals = [SignalRow(s["name"]) for s in signals]
+
+
+class CatalogWithResolver(CatalogObject):
+    """Stands in for a loaded catalog that resolves symbols itself.
+
+    The engine must prefer this over re-reading an ``enums`` section, and must
+    surface the catalog's own refusal whatever its exception type.
+    """
+
+    def __init__(self, rows, tables):
+        super().__init__(rows)
+        self._tables = tables
+        self.calls = []
+
+    def resolve_enum(self, signal_name, symbolic):
+        self.calls.append((signal_name, symbolic))
+        if isinstance(symbolic, int) and not isinstance(symbolic, bool):
+            return symbolic
+        table = self._tables.get(signal_name)
+        if table is None:
+            raise ValueError("no enum table keyed %r" % signal_name)
+        if symbolic not in table:
+            raise ValueError("unknown symbolic value %r" % symbolic)
+        return table[symbolic]
 
 
 class TestValidateAgainstCatalog(TopologyCase):
@@ -558,7 +623,7 @@ class TestValidateAgainstCatalog(TopologyCase):
 
     def test_accepts_rows_as_objects(self):
         rows = [
-            MessageRow(row["id"], row["name"], row["sender"])
+            MessageRow(row["id"], row["name"], row["sender"], row["signals"])
             for row in base_catalog()["messages"]
         ]
         self.net.validate_against(rows)
@@ -657,6 +722,268 @@ class TestValidateAgainstCatalog(TopologyCase):
 
 
 # ---------------------------------------------------------------------------
+# symbolic values are text, not booleans
+#
+# Regression for a silent, data-dependent corruption: a topology writes an
+# enum-valued signal using the NAME the contract defines, and YAML 1.1 collapses
+# several perfectly ordinary symbol spellings into booleans. A boolean then
+# resolves as 0 or 1, so the node starts in a state nobody asked for, with no
+# error and no warning anywhere. Every topology below is written as RAW TEXT on
+# purpose: a dict round-tripped through the dumper comes back quoted, which
+# hides the very bug these tests exist to catch.
+# ---------------------------------------------------------------------------
+
+
+TOPOLOGY_TEXT = """\
+buses:
+  - { id: %(bus)s, type: can, bitrate: 500000 }
+nodes:
+  - id: node_real
+    type: real
+    board: board_key
+    elf: build/node_real.elf
+    boot_text: REAL UP
+    buses: [%(bus)s]
+    dut: %(dut)s
+  - id: node_scripted
+    type: scripted
+    buses: [%(bus)s]
+    emits: [0x%(emit)X]
+    period_ms: 20
+    default_signals:
+      sig_mode: %(value)s
+"""
+
+#: Spellings the stock loader in use here turns into booleans, in several
+#: casings. Every one of them is a legitimate symbolic name in a CAN contract.
+FLATTENED_SPELLINGS = (
+    "ON", "OFF", "YES", "NO",
+    "on", "off", "yes", "no",
+    "On", "Off", "Yes", "No",
+)
+
+#: The above, plus the single-letter forms YAML 1.1 also lists. PyYAML happens
+#: not to flatten those today, so they are not asserted against the stock loader
+#: -- but they must survive as text either way, because a loader that started
+#: flattening them would corrupt a contract symbol just as silently.
+SYMBOL_SPELLINGS = FLATTENED_SPELLINGS + ("Y", "N", "y", "n")
+
+
+class TestSymbolicValuesSurviveYamlBooleans(TopologyCase):
+    def text(self, value="MODE_OFF", dut="true", emit=ID_S1):
+        return TOPOLOGY_TEXT % {
+            "bus": BUS_A,
+            "dut": dut,
+            "emit": emit,
+            "value": value,
+        }
+
+    def value_of(self, **kwargs):
+        net = network.load(self.write(self.text(**kwargs)))
+        return net.node("node_scripted").default_signals["sig_mode"]
+
+    def test_stock_yaml_would_have_corrupted_these(self):
+        # The canary. If PyYAML ever stops flattening these, the loader policy
+        # below becomes belt and braces rather than load-bearing -- but until
+        # then, this documents exactly what network.load() must NOT do.
+        for spelling in FLATTENED_SPELLINGS:
+            with self.subTest(spelling=spelling):
+                doc = yaml.safe_load("sig_mode: %s\n" % spelling)
+                self.assertIsInstance(doc["sig_mode"], bool)
+
+    def test_symbolic_values_stay_the_text_that_was_written(self):
+        for spelling in SYMBOL_SPELLINGS:
+            with self.subTest(spelling=spelling):
+                value = self.value_of(value=spelling)
+                self.assertIsInstance(
+                    value,
+                    str,
+                    "%r became %r; a symbolic starting value must stay text or it "
+                    "resolves as 0/1 and the node starts in the wrong state"
+                    % (spelling, value),
+                )
+                self.assertEqual(value, spelling)
+
+    def test_a_flattened_symbol_would_resolve_to_the_wrong_state(self):
+        # The audit's scenario, end to end: a table where the symbol is NOT
+        # value 0. If the loader flattened it, resolution would silently yield
+        # the first state instead of the one the topology asked for.
+        table = {"MODE_RUN": 0, "MODE_HOLD": 1, "OFF": 2}
+        # only the two nodes this topology declares
+        rows = [
+            row
+            for row in base_catalog()["messages"]
+            if row["sender"] in ("node_real", "node_scripted")
+            and row["id"] in (ID_R1, ID_S1)
+        ]
+        catalog = CatalogWithResolver(rows, {"sig_mode": table})
+        net = network.load(self.write(self.text(value="OFF")))
+
+        self.assertEqual(net.node("node_scripted").default_signals["sig_mode"], "OFF")
+        net.validate_against(catalog)
+        self.assertIn(("sig_mode", "OFF"), catalog.calls)
+        self.assertEqual(catalog.resolve_enum("sig_mode", "OFF"), 2)
+
+    def test_genuine_booleans_still_parse_as_booleans(self):
+        # The dut flag is schema-typed, so true/false must keep working in the
+        # spellings YAML 1.2 recognises.
+        for spelling in ("true", "True", "TRUE"):
+            with self.subTest(spelling=spelling):
+                net = network.load(self.write(self.text(dut=spelling)))
+                self.assertEqual(net.dut().id, "node_real")
+
+    def test_an_affirmative_word_is_not_a_boolean_flag(self):
+        # Under a stock loader this quietly meant `dut: true`. It is now the
+        # string it was written as, and a flag that is not a boolean is refused.
+        with self.assertRaises(network.NetworkError) as ctx:
+            network.load(self.write(self.text(dut="yes")))
+        self.assertIn("dut", str(ctx.exception))
+
+    def test_boolean_starting_value_refuses_at_load(self):
+        # Belt and braces for a document some OTHER loader parsed: a starting
+        # value is a number or a symbolic name, never a flag.
+        for spelling in ("true", "false"):
+            with self.subTest(spelling=spelling):
+                with self.assertRaises(network.NetworkError) as ctx:
+                    network.load(self.write(self.text(value=spelling)))
+                message = str(ctx.exception)
+                self.assertIn("node_scripted", message)
+                self.assertIn("sig_mode", message)
+
+    def test_non_scalar_starting_value_refuses(self):
+        for value in ("[1, 2]", "{a: 1}", "1.5"):
+            with self.subTest(value=value):
+                with self.assertRaises(network.NetworkError) as ctx:
+                    network.load(self.write(self.text(value=value)))
+                self.assertIn("sig_mode", str(ctx.exception))
+
+    def test_numbers_and_ordinary_symbols_are_untouched(self):
+        self.assertEqual(self.value_of(value="7"), 7)
+        self.assertEqual(self.value_of(value="0x10"), 16)
+        self.assertEqual(self.value_of(value="MODE_HOLD"), "MODE_HOLD")
+
+
+# ---------------------------------------------------------------------------
+# starting payloads are cross-checked against the contract
+#
+# Regression: a name that exists in no message the node emits, and a symbol that
+# exists in no enum table, both used to survive load + cross-check with zero
+# output. Nothing downstream re-checks them, so the frame player would transmit
+# a fabricated payload or fail far away from the file that caused it.
+# ---------------------------------------------------------------------------
+
+
+class TestDefaultSignalsCrossCheck(TopologyCase):
+    def net_with(self, defaults):
+        doc = base_topology()
+        node_of(doc, "node_scripted")["default_signals"] = defaults
+        return self.load(doc)
+
+    def refuses_against(self, defaults, catalog, *needles):
+        net = self.net_with(defaults)
+        with self.assertRaises(network.NetworkError) as ctx:
+            net.validate_against(catalog)
+        message = str(ctx.exception)
+        for needle in needles:
+            self.assertIn(needle, message, "error message was: %s" % message)
+        return message
+
+    def test_a_real_signal_of_an_emitted_message_passes(self):
+        self.net_with({"sig_one": 1, "sig_two": 2}).validate_against(base_catalog())
+
+    def test_a_name_no_emitted_message_carries_refuses(self):
+        message = self.refuses_against(
+            {"sig_one": 0, "no_such_signal_at_all": 99},
+            base_catalog(),
+            "node_scripted",
+            "no_such_signal_at_all",
+        )
+        # and it says what the node could legitimately have set
+        self.assertIn("sig_one", message)
+
+    def test_a_signal_of_another_nodes_message_refuses(self):
+        # sig_other is real, but it belongs to a message this node never emits.
+        self.refuses_against(
+            {"sig_other": 1}, base_catalog(), "node_scripted", "sig_other"
+        )
+
+    def test_an_unknown_symbol_refuses_and_lists_the_table(self):
+        message = self.refuses_against(
+            {"sig_mode": "MODE_HLOD"}, base_catalog(), "sig_mode", "MODE_HLOD"
+        )
+        self.assertIn("MODE_HOLD", message)
+
+    def test_a_known_symbol_passes(self):
+        self.net_with({"sig_mode": "MODE_HOLD"}).validate_against(base_catalog())
+
+    def test_a_symbol_for_a_signal_with_no_table_refuses(self):
+        message = self.refuses_against(
+            {"sig_one": "MODE_HOLD"}, base_catalog(), "sig_one", "MODE_HOLD"
+        )
+        self.assertIn("SIGNAL NAME ONLY", message)
+
+    def test_a_table_keyed_off_the_signal_name_does_not_resolve(self):
+        # R2 restated as a test: renaming the table breaks resolution, and that
+        # must be an error rather than a silent numeric fallback.
+        catalog = base_catalog()
+        catalog["enums"] = {"sig_mode_table": catalog["enums"]["sig_mode"]}
+        self.refuses_against({"sig_mode": "MODE_HOLD"}, catalog, "sig_mode")
+
+    def test_a_symbol_with_no_tables_at_all_refuses(self):
+        catalog = base_catalog()
+        del catalog["enums"]
+        self.refuses_against({"sig_mode": "MODE_HOLD"}, catalog, "sig_mode")
+
+    def test_a_catalog_that_declares_no_signals_cannot_confirm_and_says_so(self):
+        # Honesty: a representation that cannot answer the question must not be
+        # reported as agreement.
+        catalog = base_catalog()
+        for row in catalog["messages"]:
+            del row["signals"]
+        self.refuses_against(
+            {"sig_one": 0}, catalog, "node_scripted", "sig_one", "no 'signals'"
+        )
+
+    def test_a_node_without_defaults_needs_no_signal_definitions(self):
+        # Nothing to check, so an older, thinner catalog is still usable.
+        doc = base_topology()
+        del node_of(doc, "node_scripted")["default_signals"]
+        catalog = base_catalog()
+        for row in catalog["messages"]:
+            del row["signals"]
+        self.load(doc).validate_against(catalog)
+
+    def test_the_catalogs_own_resolver_is_used_when_it_has_one(self):
+        catalog = CatalogWithResolver(
+            base_catalog()["messages"], {"sig_mode": {"MODE_HOLD": 2}}
+        )
+        self.net_with({"sig_mode": "MODE_HOLD"}).validate_against(catalog)
+        self.assertEqual(catalog.calls, [("sig_mode", "MODE_HOLD")])
+
+    def test_the_catalogs_own_refusal_is_surfaced(self):
+        catalog = CatalogWithResolver(
+            base_catalog()["messages"], {"sig_mode": {"MODE_HOLD": 2}}
+        )
+        message = self.refuses_against({"sig_mode": "MODE_GONE"}, catalog, "sig_mode")
+        self.assertIn("MODE_GONE", message)
+
+    def test_a_malformed_signal_row_refuses(self):
+        catalog = base_catalog()
+        catalog["messages"][2]["signals"] = [{"start_bit": 0, "length": 8}]
+        self.refuses_against({"sig_one": 0}, catalog, "name")
+
+    def test_signals_as_a_scalar_refuses(self):
+        catalog = base_catalog()
+        catalog["messages"][2]["signals"] = "sig_one"
+        self.refuses_against({"sig_one": 0}, catalog, "list")
+
+    def test_an_enums_section_of_the_wrong_shape_refuses(self):
+        catalog = base_catalog()
+        catalog["enums"] = ["sig_mode"]
+        self.refuses_against({"sig_one": 0}, catalog, "enums")
+
+
+# ---------------------------------------------------------------------------
 # the engine holds no project data (R1)
 # ---------------------------------------------------------------------------
 
@@ -738,6 +1065,33 @@ class TestShippedProjectData(unittest.TestCase):
         for node in self.net.real_nodes():
             self.assertTrue(node.elf.strip())
             self.assertTrue(node.boot_text.strip())
+
+    def test_no_starting_value_was_flattened_into_a_boolean(self):
+        # If the shipped topology ever writes a symbol that YAML 1.1 collapses,
+        # this is what catches it: a boolean here resolves as 0 or 1 and the
+        # node starts in a state nobody asked for.
+        for node in self.net.scripted_nodes():
+            for name, value in node.default_signals.items():
+                with self.subTest(node=node.id, signal=name):
+                    self.assertNotIsInstance(
+                        value, bool, "%s.%s is a boolean" % (node.id, name)
+                    )
+                    self.assertIsInstance(value, (int, str))
+
+    def test_every_starting_value_is_checked_against_the_catalog(self):
+        # Guards against the cross-check passing vacuously: the shipped topology
+        # must actually exercise it, symbolically as well as numerically.
+        defaults = [
+            (n.id, k, v)
+            for n in self.net.scripted_nodes()
+            for k, v in n.default_signals.items()
+        ]
+        self.assertGreater(len(defaults), 0, "no starting values to check")
+        self.assertTrue(
+            any(isinstance(v, str) for _, _, v in defaults),
+            "no symbolic starting value: the symbol checks would be vacuous",
+        )
+        self.net.validate_against(self.catalog)
 
 
 if __name__ == "__main__":

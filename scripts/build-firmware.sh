@@ -56,7 +56,7 @@ PY="$BENCH_VENV/bin/python"
 # ---------------------------------------------------------------------------
 read_node() {
 	"$PY" - "$NODE" <<'PYEOF'
-import sys, yaml, os
+import sys, yaml, os, shlex
 node_id = sys.argv[1]
 net = yaml.safe_load(open("network.yml", encoding="utf-8"))
 boards = yaml.safe_load(open("harness/boards.yml", encoding="utf-8"))
@@ -89,16 +89,22 @@ bitrate = attached[0].get("bitrate")
 elf = n["elf"]
 app = os.path.dirname(os.path.dirname(os.path.dirname(elf)))  # <app>/build/zephyr/x.elf
 
-print("APP=%s" % app)
-print("ELF=%s" % elf)
-print("ZBOARD=%s" % b["zephyr_board"])
-print("BOOT_TEXT=%s" % n.get("boot_text", ""))
-print("UART=%s" % b["uart_peripheral"])
-print("CAN=%s" % b["can_peripheral"])
-print("REPL=%s" % b["repl"])
-print("BUS_BITRATE=%s" % bitrate)
-print("BOARD_BITRATE=%s" % b.get("can_bitrate", ""))
-print("VECTOR_SYMBOL=%s" % (b.get("vector_table_symbol") or ""))
+# Shell-quote every value: this block is consumed by `eval`, and boot_text
+# legitimately contains spaces ("BMS ready"). Unquoted, `BOOT_TEXT=BMS ready`
+# eval's as an assignment plus a command named `ready`.
+def emit(name, value):
+    print("%s=%s" % (name, shlex.quote(str(value))))
+
+emit("APP", app)
+emit("ELF", elf)
+emit("ZBOARD", b["zephyr_board"])
+emit("BOOT_TEXT", n.get("boot_text", ""))
+emit("UART", b["uart_peripheral"])
+emit("CAN", b["can_peripheral"])
+emit("REPL", b["repl"])
+emit("BUS_BITRATE", bitrate)
+emit("BOARD_BITRATE", b.get("can_bitrate", ""))
+emit("VECTOR_SYMBOL", b.get("vector_table_symbol") or "")
 PYEOF
 }
 

@@ -123,6 +123,12 @@ nodes() · real_nodes() · scripted_nodes() · dut() · bus_members(bus_id)
 
 Validates: every node on a bus has a matching controller; no duplicate message IDs across senders; every real node has an `elf` and `boot_text`.
 
+`validate_against(catalog)` also checks the starting payloads: every name in a scripted node's `default_signals` must be a signal of a message that node emits, and every symbolic value must resolve through the enum table keyed by that signal's own name. Nothing downstream re-checks them — a bad name would be transmitted as a fabricated payload.
+
+### `harness/yaml_strict.py`
+
+One YAML policy for every engine loader. PyYAML implements YAML 1.1, which collapses `ON`/`OFF`/`YES`/`NO` — ordinary enum spellings in a CAN contract, and ordinary starting values in a topology — into booleans. A boolean then resolves as 0 or 1, so a node silently starts in the wrong state. Only `true`/`false` resolve to booleans; every other scalar stays the text that was written. The contract file and the topology file that quotes its symbol names must be parsed under the **same** rules, or a symbol survives in one file and is flattened in the other.
+
 ### `catalog.yml`
 
 Model a real EV two-wheeler powertrain — roughly 16 messages, 38 signals, 8 enum tables across six nodes. It must be recognisable to an EV engineer.
