@@ -15,9 +15,13 @@
 *.yml   text eol=lf
 *.yaml  text eol=lf
 
+# A DBC is a text format, and it is generated from catalog.yml. Keeping it
+# diffable is the point: a reviewer should see the CAN contract change in the
+# pull request, not an opaque "binary file differs".
+*.dbc   text eol=lf
+
 # Binaries: never touch.
 *.elf  binary
 *.bin  binary
 *.hex  binary
-*.dbc  binary
 *.png  binary

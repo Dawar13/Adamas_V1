@@ -1,0 +1,140 @@
+# network.yml — who is on the bus
+# =============================================================================
+# THIS FILE IS PROJECT DATA, NOT ENGINE CODE.
+#
+# It is the topology half of the saved example project: one 500 kbit/s
+# powertrain bus with six nodes on it. catalog.yml says what the frames MEAN;
+# this file says WHO sends them and how each node is brought to life.
+#
+# The two files are joined by node identity:
+#   every `sender:` in catalog.yml must be the `id:` of a node here, and
+#   every node here must send at least one message in catalog.yml.
+# Break that and the compiler has a message with nobody to produce it, or a
+# node with nothing to say. Both are load errors, not warnings.
+#
+# -----------------------------------------------------------------------------
+# THE ONE ABSTRACTION THAT MATTERS: type: real vs type: scripted
+# -----------------------------------------------------------------------------
+#   type: real      There is a compiled binary. Renode boots it and executes it
+#                   instruction by instruction. Needs board / elf / boot_text.
+#                   Its bus traffic is whatever its firmware decides to send —
+#                   we do not script it, we observe it.
+#
+#   type: scripted  There is no firmware. A frame player puts the node's
+#                   messages on the bus on a fixed period. Needs emits /
+#                   period_ms / default_signals. Bus-visible, nothing behind it.
+#
+# Scenarios must never mention the difference. `node_silence` stops the player
+# for a scripted node and writes the tx-enable global for a real one; the
+# scenario says only "silence the charger". That is what makes the onboarding
+# path work: a customer hands us one ECU binary, we script the rest so that the
+# one real ECU sees a plausible world, and when they hand us the second binary
+# we flip `scripted` -> `real` and NO EXISTING SCENARIO CHANGES.
+#
+# -----------------------------------------------------------------------------
+# FIELD REFERENCE
+# -----------------------------------------------------------------------------
+#   id               node name; must match `sender:` in catalog.yml
+#   type             real | scripted
+#   board            key into harness/boards.yml (real nodes only)
+#   elf              path to the built binary, relative to the repo root
+#   boot_text        the banner the firmware prints on its console once it is
+#                    up; scenarios wait for this before doing anything else
+#   buses            list of bus ids this node is attached to
+#   emits            message ids the frame player transmits (scripted only)
+#   period_ms        transmit period for those messages (scripted only)
+#   default_signals  starting payload values; enum-valued signals use the NAME
+#                    from catalog.yml, never the number
+#   dut              exactly one node is the device under test
+#   position         canvas coordinates for the Design view only; no runtime
+#                    meaning whatsoever
+# =============================================================================
+
+buses:
+  - { id: powertrain, type: can, bitrate: 500000 }   # single classic-CAN bus, 500 kbit/s
+
+nodes:
+
+  # ---------------------------------------------------------------------------
+  # Real nodes — Phase 1 builds three firmwares.
+  # ---------------------------------------------------------------------------
+
+  # The device under test. Everything else on this bus exists to give the BMS
+  # a plausible world to react to.
+  - id: bms
+    type: real
+    board: bms_ecu
+    elf: firmware/bms/build/zephyr/zephyr.elf
+    boot_text: "BMS ready"
+    buses: [powertrain]
+    dut: true
+    position: { x: 100, y: 80 }
+
+  # Vehicle control unit. Real firmware: it is the BMS's main conversation
+  # partner, and its heartbeat is what the BMS times out on.
+  - id: vcu
+    type: real
+    board: vcu_ecu
+    elf: firmware/vcu/build/zephyr/zephyr.elf
+    boot_text: "VCU ready"
+    buses: [powertrain]
+    position: { x: 100, y: 240 }
+
+  # On-board charger. Real firmware: charge-session faults are the second
+  # safety story after over-temperature.
+  - id: charger
+    type: real
+    board: chg_ecu
+    elf: firmware/charger/build/zephyr/zephyr.elf
+    boot_text: "CHG ready"
+    buses: [powertrain]
+    position: { x: 100, y: 400 }
+
+  # ---------------------------------------------------------------------------
+  # Scripted nodes — bus-visible only. Each one is a candidate for promotion to
+  # `type: real` later without touching a single scenario.
+  # ---------------------------------------------------------------------------
+
+  # Motor / inverter. Fast node: 20 ms is the real rate on the vehicle.
+  - id: motor
+    type: scripted
+    buses: [powertrain]
+    emits: [0x400, 0x401, 0x402]
+    period_ms: 20
+    default_signals:
+      motor_rpm: 0
+      motor_temp_c: 25
+      inverter_state: STANDBY        # enum inverter_state
+      dc_bus_voltage_mv: 72000       # tracks a full 72 V pack
+      phase_current_ma: 0
+      wheel_speed_rpm: 0
+      regen_active: 0
+    position: { x: 420, y: 80 }
+
+  # Dash cluster. Slow display node; the telltales are what a rider would see.
+  - id: dash
+    type: scripted
+    buses: [powertrain]
+    emits: [0x500, 0x501]
+    period_ms: 200
+    default_signals:
+      telltale_mil: 0
+      telltale_battery: 0
+      telltale_overtemp: 0
+      telltale_service: 0
+      odometer_km: 1240
+      trip_dkm: 0
+      range_estimate_km: 62
+    position: { x: 420, y: 240 }
+
+  # Diagnostic tester on the BMS diagnostic channel. Separate node so that
+  # diagnostics can be silenced independently of pack telemetry.
+  - id: bms_diag
+    type: scripted
+    buses: [powertrain]
+    emits: [0x610]
+    period_ms: 1000
+    default_signals:
+      diag_response_code: NO_REQUEST # enum diag_response_code
+      dtc_id: 0
+    position: { x: 420, y: 400 }

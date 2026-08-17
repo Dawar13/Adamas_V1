@@ -1,0 +1,3 @@
+// Charger ECU — board layer, STM32H743 target.
+// See platforms/boards/bms_ecu.repl for why these files are near-empty.
+using "../nucleo_h743zi_can.repl"

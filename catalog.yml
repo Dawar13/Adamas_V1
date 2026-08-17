@@ -1,0 +1,316 @@
+# catalog.yml — the CAN contract for this project
+# =============================================================================
+# THIS FILE IS PROJECT DATA, NOT ENGINE CODE.
+#
+# It describes one saved example project: a 72 V EV two-wheeler powertrain
+# (BMS, VCU, on-board charger, motor/inverter, dash cluster, diagnostics).
+# Everything specific to this vehicle — message IDs, signal names, bit
+# positions, enum spellings — lives here. Nothing in harness/*.py may hard-code
+# any of it. Onboarding a different customer means replacing this file and
+# network.yml; it must never mean editing the engine.
+#
+# It is also a human-edited file. The comments are load-bearing: keep them
+# accurate when you change a row.
+#
+# -----------------------------------------------------------------------------
+# BIT LAYOUT CONVENTION
+# -----------------------------------------------------------------------------
+#   start_bit  LSB position of the signal inside a little-endian payload.
+#              Bit 0 is the least-significant bit of byte 0; bit 8 is the LSB
+#              of byte 1; and so on.
+#   length     width in bits.
+#
+#   Signals are byte-aligned wherever the physical quantity allows it
+#   (start_bit % 8 == 0). The only deliberate exception is the dash telltale
+#   block in 0x500, which is genuinely a bit field on the wire.
+#
+#   Within a message, signals must not overlap, and start_bit + length must
+#   fit inside dlc * 8 bits. Some messages leave trailing bytes spare on
+#   purpose: real ECUs reserve room for later revisions.
+#
+# -----------------------------------------------------------------------------
+# SIGNEDNESS AND SCALING
+# -----------------------------------------------------------------------------
+# The schema carries no per-signal SCALE field. Physical units are encoded in
+# the signal NAME suffix and stated in the comment on the row:
+#
+#   _mv    millivolts            _ma  milliamps (may be negative → two's compl.)
+#   _dC    deci-degrees Celsius  _c   whole degrees Celsius
+#   _dkph  deci-km/h             _dkm deci-kilometres      _km  kilometres
+#   _da    deci-amperes          _dnm deci-newton-metres
+#   _pct   percent 0..100        _rpm revolutions per minute
+#
+# SIGNEDNESS, HOWEVER, IS A DECLARED FIELD: `signed: true`.
+#
+# It has to be. The engine cannot read a `_ma` suffix or the word SIGNED in a
+# comment and conclude two's complement — that would be project knowledge
+# living in harness/, which is exactly what R1 forbids. Prose is for humans;
+# the flag is what the encoder reads. A row commented "SIGNED" that lacks the
+# flag is a silent bug: -5000 mA encodes correctly but decodes back as
+# 16772216, because the engine was never told the top bit means anything.
+#
+# So: every row marked "SIGNED" below carries `signed: true`, and two's
+# complement runs over the signal's full declared width. Rows without the flag
+# are plain unsigned.
+#
+# Rolling counters (bms_heartbeat, vcu_heartbeat, fault_counter) change on every
+# transmission — this is exactly why encode() must return a bit mask and why an
+# assertion may only compare the bits the caller actually specified.
+# =============================================================================
+
+messages:
+
+  # ---------------------------------------------------------------------------
+  # BMS — the device under test. Owns the high-voltage pack.
+  # ---------------------------------------------------------------------------
+
+  - id: 0x600                     # bms_status — 100 ms, the main pack telemetry
+    name: bms_status
+    dlc: 8
+    sender: bms
+    signals:
+      - { name: pack_voltage_mv, start_bit: 0,  length: 24 }   # 0..16.7 MV, 72 V pack ≈ 72000
+      - { name: pack_current_ma, start_bit: 24, length: 24, signed: true }   # SIGNED: + discharge, − charge
+      - { name: soc_pct,         start_bit: 48, length: 8  }   # state of charge, 0..100
+      - { name: bms_heartbeat,   start_bit: 56, length: 8  }   # rolling 0..255, wraps
+
+  - id: 0x601                     # bms_temps — 250 ms, cell thermal picture
+    name: bms_temps
+    dlc: 6
+    sender: bms
+    signals:
+      - { name: cell_temp_dC,     start_bit: 0,  length: 16, signed: true }  # SIGNED, hottest sensor read now
+      - { name: cell_temp_max_dC, start_bit: 16, length: 16, signed: true }  # SIGNED, session maximum
+      - { name: cell_temp_min_dC, start_bit: 32, length: 16, signed: true }  # SIGNED, session minimum
+
+  - id: 0x602                     # bms_limits — 100 ms, what the VCU is allowed to draw
+    name: bms_limits
+    dlc: 6
+    sender: bms
+    signals:
+      - { name: discharge_current_limit_da, start_bit: 0,  length: 16 }  # 0..6553.5 A
+      - { name: charge_current_limit_da,    start_bit: 16, length: 16 }
+      - { name: contactor_state,            start_bit: 32, length: 8  }  # enum contactor_state
+
+  - id: 0x603                     # bms_cells — 500 ms, cell-level health
+    name: bms_cells
+    dlc: 6
+    sender: bms
+    signals:
+      - { name: cell_volt_max_mv, start_bit: 0,  length: 16 }  # highest cell, mV
+      - { name: cell_volt_min_mv, start_bit: 16, length: 16 }  # lowest cell, mV
+      - { name: soh_pct,          start_bit: 32, length: 8  }  # state of health, 0..100
+
+  - id: 0x604                     # bms_fault — event driven, repeated while active
+    name: bms_fault
+    dlc: 8
+    sender: bms
+    signals:
+      - { name: fault_code,    start_bit: 0, length: 8 }       # enum fault_code
+      - { name: fault_counter, start_bit: 8, length: 8 }       # increments per transmission
+
+  # ---------------------------------------------------------------------------
+  # BMS diagnostic channel — a separate logical node so that diagnostics can be
+  # silenced or replayed without touching pack telemetry.
+  # ---------------------------------------------------------------------------
+
+  - id: 0x610                     # bms_diag_response — on request only
+    name: bms_diag_response
+    dlc: 8
+    sender: bms_diag
+    signals:
+      - { name: diag_response_code, start_bit: 0,  length: 8  }  # enum diag_response_code
+      - { name: dtc_id,             start_bit: 16, length: 16 }  # stored trouble code, 0 = none
+
+  # ---------------------------------------------------------------------------
+  # VCU — vehicle control unit. Arbitrates torque, ride mode and charging.
+  # ---------------------------------------------------------------------------
+
+  - id: 0x200                     # vcu_command — 10 ms, the torque path
+    name: vcu_command
+    dlc: 8
+    sender: vcu
+    signals:
+      - { name: drive_state,       start_bit: 0,  length: 8  }  # enum drive_state
+      - { name: torque_request_dnm, start_bit: 8, length: 16, signed: true }  # SIGNED, negative = regen
+      - { name: throttle_pct,      start_bit: 24, length: 8  }  # 0..100, raw rider demand
+      - { name: vcu_heartbeat,     start_bit: 32, length: 8  }  # rolling 0..255, wraps
+
+  - id: 0x201                     # vcu_status — 100 ms, vehicle-level state
+    name: vcu_status
+    dlc: 8
+    sender: vcu
+    signals:
+      - { name: vehicle_speed_dkph, start_bit: 0,  length: 16 }  # 0..6553.5 km/h
+      - { name: ride_mode,          start_bit: 16, length: 8  }  # enum ride_mode
+      - { name: brake_pct,          start_bit: 24, length: 8  }  # 0..100, brake lever
+
+  - id: 0x202                     # vcu_charge_control — 100 ms while plugged in
+    name: vcu_charge_control
+    dlc: 4
+    sender: vcu
+    signals:
+      - { name: charge_enable,             start_bit: 0, length: 8  }  # 0 = deny, 1 = permit
+      - { name: charge_current_request_da, start_bit: 8, length: 16 }  # negotiated with charger
+
+  # ---------------------------------------------------------------------------
+  # Charger — on-board AC charger.
+  # ---------------------------------------------------------------------------
+
+  - id: 0x300                     # charger_status — 200 ms
+    name: charger_status
+    dlc: 8
+    sender: charger
+    signals:
+      - { name: charge_state,      start_bit: 0,  length: 8  }  # enum charge_state
+      - { name: charge_voltage_mv, start_bit: 8,  length: 24 }  # output voltage at the port
+      - { name: charge_current_ma, start_bit: 32, length: 24 }  # output current, always positive
+
+  - id: 0x301                     # charger_limits — 500 ms
+    name: charger_limits
+    dlc: 4
+    sender: charger
+    signals:
+      - { name: charge_plug_state,      start_bit: 0, length: 8  }  # enum charge_plug_state
+      - { name: max_charge_current_da,  start_bit: 8, length: 16 }  # hardware ceiling
+
+  # ---------------------------------------------------------------------------
+  # Motor / inverter.
+  # ---------------------------------------------------------------------------
+
+  - id: 0x400                     # motor_status — 20 ms
+    name: motor_status
+    dlc: 8
+    sender: motor
+    signals:
+      - { name: motor_rpm,      start_bit: 0,  length: 16, signed: true }   # SIGNED, negative = reverse
+      - { name: motor_temp_c,   start_bit: 16, length: 8, signed: true }   # SIGNED, stator winding
+      - { name: inverter_state, start_bit: 24, length: 8  }   # enum inverter_state
+
+  - id: 0x401                     # motor_power — 20 ms, DC link
+    name: motor_power
+    dlc: 6
+    sender: motor
+    signals:
+      - { name: dc_bus_voltage_mv, start_bit: 0,  length: 24 }  # should track pack_voltage_mv
+      - { name: phase_current_ma,  start_bit: 24, length: 24, signed: true }  # SIGNED, RMS phase current
+
+  - id: 0x402                     # motor_wheel — 50 ms, road-speed source
+    name: motor_wheel
+    dlc: 4
+    sender: motor
+    signals:
+      - { name: wheel_speed_rpm, start_bit: 0,  length: 16 }
+      - { name: regen_active,    start_bit: 16, length: 8  }  # 0 = no, 1 = recuperating
+
+  # ---------------------------------------------------------------------------
+  # Dash cluster.
+  # ---------------------------------------------------------------------------
+
+  - id: 0x500                     # dash_telltales — 200 ms
+    name: dash_telltales           # NOTE: the only sub-byte block in this catalog.
+    dlc: 4                         # Telltales are lamps; one bit each is what the
+    sender: dash                   # real cluster puts on the wire.
+    signals:
+      - { name: telltale_mil,      start_bit: 0, length: 1 }   # amber malfunction lamp
+      - { name: telltale_battery,  start_bit: 1, length: 1 }   # pack warning lamp
+      - { name: telltale_overtemp, start_bit: 2, length: 1 }   # thermal lamp
+      - { name: telltale_service,  start_bit: 3, length: 1 }   # service-due lamp
+
+  - id: 0x501                     # dash_trip — 1 s, odometry and range
+    name: dash_trip
+    dlc: 6
+    sender: dash
+    signals:
+      - { name: odometer_km,        start_bit: 0,  length: 24 }  # lifetime, whole km
+      - { name: trip_dkm,           start_bit: 24, length: 16 }  # trip A, deci-km
+      - { name: range_estimate_km,  start_bit: 40, length: 8  }  # remaining range guess
+
+# =============================================================================
+# ENUMS
+# =============================================================================
+# ENUM TABLES RESOLVE BY SIGNAL NAME ONLY.
+#
+# There is no per-signal `enum:` field, and there is no way to point a signal at
+# a table with a different name. A signal named `fault_code` resolves against
+# the table keyed `fault_code`, and against nothing else. A table keyed
+# `bms_fault_codes`, `faultCode` or `fault_codes` WILL NOT RESOLVE — the signal
+# stays numeric and every scenario that writes `fault_code: OVERTEMP` fails to
+# compile. Rename the SIGNAL or rename the TABLE until they match exactly.
+#
+# Consequence: a table below whose key is not the name of some signal above is
+# dead data. The loader warns loudly on stderr for every such orphan table.
+# There are deliberately none here.
+# =============================================================================
+
+enums:
+
+  # bms_fault.fault_code — the safety verdict the firmware publishes.
+  fault_code:
+    0: NONE
+    1: OVERTEMP
+    2: OVERVOLT
+    3: UNDERVOLT
+    4: HEARTBEAT_LOST          # expected periodic message stopped arriving
+    5: CHARGE_LOST             # charger vanished mid-session
+    6: OVERCURRENT
+    7: ISOLATION_FAULT         # HV-to-chassis isolation below limit
+
+  # bms_limits.contactor_state — the main HV contactor.
+  contactor_state:
+    0: OPEN
+    1: PRECHARGE               # precharge resistor in circuit
+    2: CLOSED
+    3: WELDED                  # failed to open when commanded
+    4: FAULT
+
+  # vcu_command.drive_state — the vehicle-level mode the VCU commands.
+  drive_state:
+    0: PARKED
+    1: READY                   # HV up, torque inhibited
+    2: DRIVE
+    3: REVERSE                 # walk-assist reverse, speed limited
+    4: LIMP                    # derated after a recoverable fault
+    5: SHUTDOWN
+
+  # vcu_status.ride_mode — rider-selected map.
+  ride_mode:
+    0: ECO
+    1: CITY
+    2: SPORT
+    3: SERVICE                 # workshop mode, torque capped
+
+  # charger_status.charge_state — charging session state machine.
+  charge_state:
+    0: IDLE
+    1: CONNECTED               # plug seen, no current yet
+    2: HANDSHAKE               # negotiating limits with the VCU
+    3: CONSTANT_CURRENT
+    4: CONSTANT_VOLTAGE
+    5: COMPLETE
+    6: SUSPENDED               # paused by the VCU or by a thermal derate
+    7: FAULT
+
+  # charger_limits.charge_plug_state — physical connector.
+  charge_plug_state:
+    0: UNPLUGGED
+    1: PLUGGED_UNLOCKED
+    2: PLUGGED_LOCKED
+    3: PROXIMITY_FAULT         # proximity pilot implausible
+
+  # motor_status.inverter_state — power stage.
+  inverter_state:
+    0: OFF
+    1: STANDBY                 # gate drivers enabled, zero torque
+    2: RUN
+    3: REGEN
+    4: FAULT
+
+  # bms_diag_response.diag_response_code — result of the last diagnostic request.
+  diag_response_code:
+    0: NO_REQUEST
+    1: POSITIVE
+    2: PENDING
+    3: NEGATIVE_GENERAL
+    4: SESSION_REQUIRED        # needs an extended diagnostic session
+    5: SECURITY_LOCKED

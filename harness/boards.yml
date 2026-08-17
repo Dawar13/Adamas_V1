@@ -3,24 +3,85 @@
 # THIS FILE IS DATA, NOT ENGINE CODE. It lives under harness/ because the spec
 # places it here, but it is the same kind of thing as catalog.yml and
 # network.yml: a saved project's arrangement. The rule "the engine contains no
-# project data" (PROJECT.md §2.7) is a rule about *code*, and is verified by
-# grepping harness/**.py — not this file. The whole point of boards.yml is to
-# be the one place a peripheral name is allowed to appear, so that no peripheral
-# name ever has to appear in Python.
+# project data" (PROJECT.md §2.7) is a rule about *code*, verified by grepping
+# harness/**.py — not this file. The whole point of boards.yml is to be the one
+# place a peripheral name is allowed to appear, so that no peripheral name ever
+# has to appear in Python.
 #
-# PERIPHERAL NAMES ARE RENODE'S NAMES, NOT ZEPHYR'S. They differ, and the
-# emulator only answers to its own. Getting this wrong produces a name that
-# resolves to nothing, which is a run that cannot happen:
+# -----------------------------------------------------------------------------
+# BOARD KEYS ARE ECU ROLES, NOT SILICON
+# -----------------------------------------------------------------------------
+# network.yml says `board: bms_ecu`, never `board: nucleo_h743zi`. The silicon
+# is named only here. Retargeting the whole project onto different hardware is
+# therefore an edit to this file alone — no scenario changes, no topology
+# changes. That indirection already earned its keep once: Phase 1 started on
+# S32K388 and moved to STM32H743 without touching network.yml or any scenario.
+#
+# -----------------------------------------------------------------------------
+# PERIPHERAL NAMES ARE RENODE'S NAMES, NOT ZEPHYR'S
+# -----------------------------------------------------------------------------
+# They differ, and the emulator only answers to its own. A name that resolves to
+# nothing is a run that cannot happen:
 #
 #   chip        Zephyr devicetree      Renode peripheral
-#   S32K388     flexcan0               can0
-#   S32K388     lpuart2                lpuart2
 #   STM32H743   fdcan1                 fdcan1
+#   STM32H743   usart3                 usart3
+#   S32K3xx     flexcan0               can0
 #
+# -----------------------------------------------------------------------------
 # TIERS (PROJECT.md §2.1): verified | modelled | declared
 #   verified  real firmware ran on it in a full scenario run, with evidence
 #   modelled  the emulator supports it; we have not verified it end to end
 #   declared  definable, but no execution path exists — refuses to run
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# The working target. Two machines demonstrably exchange CAN frames on it.
+# -----------------------------------------------------------------------------
+
+bms_ecu:
+  repl: platforms/boards/bms_ecu.repl
+  zephyr_board: nucleo_h743zi
+  can_peripheral: sysbus.fdcan1
+  uart_peripheral: sysbus.usart3
+  # Ordinary Cortex-M boot: the vector table sits at the start of flash and the
+  # core finds it unaided. Only the S32K3 parts need an explicit offset.
+  vector_table_symbol: null
+  # network.yml's powertrain bus is 500 kbit/s, but Zephyr's nucleo_h743zi
+  # devicetree ships bus-speed = <125000>. Each firmware carries an overlay
+  # forcing 500000, and the build cross-checks it against network.yml. A silent
+  # mismatch produces a bus where nothing communicates and no error anywhere.
+  can_bitrate: 500000
+  tier: modelled
+  notes: |
+    ST Nucleo-H743ZI, single Cortex-M7. CAN is Renode's CAN.MCAN model.
+    Observed: two machines on one canHub exchanged 30 frames each, both
+    directions, with can init_res=0 and can_start rc=0.
+    Stays `modelled` until the full scenario suite passes on it.
+
+vcu_ecu:
+  repl: platforms/boards/vcu_ecu.repl
+  zephyr_board: nucleo_h743zi
+  can_peripheral: sysbus.fdcan1
+  uart_peripheral: sysbus.usart3
+  vector_table_symbol: null
+  can_bitrate: 500000
+  tier: modelled
+
+chg_ecu:
+  repl: platforms/boards/chg_ecu.repl
+  zephyr_board: nucleo_h743zi
+  can_peripheral: sysbus.fdcan1
+  uart_peripheral: sysbus.usart3
+  vector_table_symbol: null
+  can_bitrate: 500000
+  tier: modelled
+
+# -----------------------------------------------------------------------------
+# NXP S32K388 — DECLARED. Definable, not runnable. Kept, not deleted, because
+# the automotive part is the one an EV engineer recognises and because the
+# blocker is specific and may be fixable later.
+# -----------------------------------------------------------------------------
 
 bms_s32k:
   repl: platforms/boards/bms_s32k.repl
@@ -28,21 +89,33 @@ bms_s32k:
   can_peripheral: sysbus.can0
   uart_peripheral: sysbus.lpuart2
   # S32K3 has no boot ROM parsing the IVT under emulation, so the vector table
-  # offset must be set explicitly from the ELF or the core never starts
-  # correctly. Renode's own scripts/single-node/nxp-s32k388_zephyr.resc does
-  # exactly this. Without it the CPU runs from a garbage vector table.
+  # offset must be set from the ELF or the core runs from a garbage table.
+  # Renode's own scripts/single-node/nxp-s32k388_zephyr.resc does exactly this.
   vector_table_symbol: _vector_table
-  tier: modelled
+  can_bitrate: 500000
+  tier: declared
+  blocked_by: missing-peripheral-model
   notes: |
-    NXP S32K388, quad Cortex-M7 (cpu1..3 halted at reset; we run single-core).
-    Firmware is built for Zephyr's mr_canhubk3 board (S32K344) and executed on
-    Renode's S32K388 model. The two are the same S32K3xx family and the
-    peripheral addresses that matter are identical:
-      flexcan0 0x40304000 = can0 · lpuart2 0x40330000 = lpuart2
-    Renode's flash and SRAM regions are supersets of the S32K344's.
+    The CPU, memory, UART and timers all work. The core executes real firmware
+    and prints its banner, and after our SysTick correction firmware time
+    tracks virtual time 1:1. What does not work is CAN, which is the entire
+    subject of this product — so no verdict can be produced here, and the tier
+    says so rather than implying a partial pass.
 
-    Observed: boots and prints its banner on lpuart2.
-    Not yet verified: a full scenario run. Stays `modelled` until then.
+    Root cause, from the driver's own log:
+      <dbg> can_common: can_calc_timing_int: SP error: 65535 1/1000
+      <dbg> can_mcux_flexcan: Presc: 0, Seg1S1: 0, Seg2: 0
+      <err> can_mcux_flexcan: failed to set timing (err -134)
+      device init_res = 19 (ENODEV)
+
+    Prescaler and both bit-timing segments compute to zero: the driver cannot
+    derive a 500 kbit/s timing because there is no usable FlexCAN source clock
+    to divide. Renode 1.16.1 does not model S32K3 clock generation — MC_CGM is
+    Tagged, and the clock-mux status registers are `flipflop.py` stubs that
+    exist only to stop the boot polling loops hanging.
+
+    Classification (PROJECT.md §7): missing-peripheral-model, not
+    address-error. No configuration change fixes it; it needs a clock model.
 
 vcu_s32k:
   repl: platforms/boards/vcu_s32k.repl
@@ -50,7 +123,9 @@ vcu_s32k:
   can_peripheral: sysbus.can0
   uart_peripheral: sysbus.lpuart2
   vector_table_symbol: _vector_table
-  tier: modelled
+  can_bitrate: 500000
+  tier: declared
+  blocked_by: missing-peripheral-model
 
 chg_s32k:
   repl: platforms/boards/chg_s32k.repl
@@ -58,20 +133,23 @@ chg_s32k:
   can_peripheral: sysbus.can0
   uart_peripheral: sysbus.lpuart2
   vector_table_symbol: _vector_table
-  tier: modelled
+  can_bitrate: 500000
+  tier: declared
+  blocked_by: missing-peripheral-model
 
-# Phase 0's target, kept because it works. PROJECT.md §7: do not discard a
-# working target speculatively.
+# -----------------------------------------------------------------------------
+# The bare Phase 0 board, kept as the reference single-node target.
+# -----------------------------------------------------------------------------
+
 nucleo_h743zi:
   repl: platforms/nucleo_h743zi_can.repl
   zephyr_board: nucleo_h743zi
   can_peripheral: sysbus.fdcan1
   uart_peripheral: sysbus.usart3
-  # Cortex-M ordinary boot: the vector table sits at the start of flash and the
-  # core finds it without help. No explicit offset needed.
   vector_table_symbol: null
+  can_bitrate: 500000
   tier: modelled
   notes: |
-    Verified in Phase 0 to boot real firmware deterministically (two clean
-    clones, byte-identical UART output). That is a boot proof, not a scenario
+    Verified in Phase 0 to boot real firmware deterministically — two clean
+    clones, byte-identical UART output. That is a boot proof, not a scenario
     proof, so it is `modelled` rather than `verified`.

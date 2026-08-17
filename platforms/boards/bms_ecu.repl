@@ -1,0 +1,11 @@
+// BMS ECU — board layer, STM32H743 target.
+//
+// Near-empty by design: sensor values are injected at variable level
+// (PROJECT.md §6), so there is nothing board-specific left for the emulator to
+// model. The file exists so every node on the canvas maps to a board file of
+// its own, and so a real customer board has somewhere to put its additions.
+//
+// Peripherals, by their REAL Renode names (see harness/boards.yml):
+//   fdcan1   CAN.MCAN           @ 0x4000A000
+//   usart3   UART.STM32F7_USART @ 0x40004800   (Zephyr's console for this board)
+using "../nucleo_h743zi_can.repl"
