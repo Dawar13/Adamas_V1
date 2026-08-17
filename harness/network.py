@@ -21,6 +21,19 @@ Two node kinds, and only two:
 Scenarios must never be able to tell the two apart; that is what lets a
 scripted node be promoted to real without touching a single scenario.
 
+Two things this module refuses to be casual about, because both fail silently:
+
+*Symbolic values are text, not booleans.* A topology writes enum-valued signals
+using the NAME the contract defines, and YAML 1.1 flattens several perfectly
+ordinary symbolic spellings into booleans. This module parses under the engine's
+shared strict policy (see ``yaml_strict``) so a symbol stays the string that was
+written, and refuses a boolean where a signal value belongs.
+
+*Starting payloads are cross-checked, not trusted.* :meth:`Network.validate_against`
+checks every name and every value in ``default_signals`` against the contract. A
+name no message carries, or a symbol no table defines, is refused at load time
+rather than discovered when a scenario runs -- or, worse, never.
+
 Public API
 ----------
 ``load(path=...) -> Network``
@@ -36,6 +49,14 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import yaml
+
+# The topology file quotes symbol names defined by the contract file, so both
+# must be parsed under the same YAML policy. Stock YAML 1.1 turns several of
+# those spellings into booleans; the shared loader does not.
+try:  # imported as ``harness.network``
+    from .yaml_strict import StrictBoolLoader, yaml_11_bool_spellings
+except ImportError:  # imported as top-level ``network`` (path-shim callers)
+    from yaml_strict import StrictBoolLoader, yaml_11_bool_spellings
 
 __all__ = [
     "NetworkError",
@@ -601,7 +622,10 @@ def load(path=DEFAULT_NETWORK_PATH) -> Network:
         raise NetworkError("cannot read topology file %s: %s" % (path, exc)) from None
 
     try:
-        data = yaml.safe_load(text)
+        # Not yaml.safe_load(): under YAML 1.1 that turns symbolic values such
+        # as the affirmative and negative words into booleans, and a starting
+        # payload written with a legitimate symbol would silently become 0 or 1.
+        data = yaml.load(text, Loader=StrictBoolLoader)
     except yaml.YAMLError as exc:
         raise NetworkError("%s is not valid YAML: %s" % (path, exc)) from None
 

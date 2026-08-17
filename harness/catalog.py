@@ -57,16 +57,30 @@ A signal is two's complement over its full width if -- and only if -- it
 carries ``signed: true``. The engine cannot infer signedness from a name, a
 unit suffix or a comment; that would be project knowledge living in code.
 
-For a signal without the flag the engine has no type information, so encode
-accepts either representation of the same bit pattern (``-1`` and
-``2**length - 1`` produce identical bits) and decode returns the unsigned
-reading. For a signal WITH the flag the declared range is enforced in both
-directions and decode sign-extends.
+A signal WITH the flag has declared range ``-(2**(n-1)) .. 2**(n-1)-1``,
+enforced in both directions, and decode sign-extends.
+
+A signal WITHOUT the flag is unsigned: its range is ``0 .. 2**n - 1`` and a
+negative value is refused, exactly as an oversized one is. Encode used to
+accept negatives here and quietly store their two's-complement bits while
+still refusing positive overflow. That asymmetry meant a well-formed frame
+could decode back as a large positive the caller never wrote, so encode and
+decode did not round-trip and an assertion could pass against a value nobody
+asked for. If a field really is two's complement on the wire, the contract
+says so with ``signed: true``; the engine does not infer it.
+
+-----------------------------------------------------------------------------
+PAYLOAD LENGTH IS EXACT
+-----------------------------------------------------------------------------
+``decode`` refuses a payload that is not exactly ``dlc`` bytes, in both
+directions. A short frame would invent bits that were never on the wire; an
+over-long one is the shape of a mis-sized or mis-routed message, and silently
+truncating it decodes plausible values while the caller never learns the frame
+was wrong.
 """
 
 from __future__ import annotations
 
-import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -94,38 +108,18 @@ MAX_PAYLOAD_BYTES = 64
 Value = Union[int, str]
 
 
-class _ContractLoader(yaml.SafeLoader):
-    """SafeLoader with YAML 1.1's promiscuous booleans reined in.
-
-    Beyond ``true``/``false``, stock PyYAML also resolves the affirmative and
-    negative English words and their single-letter forms -- in any case -- to
-    booleans. Those spellings are ordinary symbolic names in a CAN contract,
-    and a human editing the file has no reason to suspect that one of their
-    symbols quietly became ``False`` while its neighbours stayed strings. That
-    corruption is silent and data-dependent, so it is removed here at the
-    syntax layer: only ``true``/``false`` resolve to booleans, and everything
-    else stays exactly the string that was written.
-
-    Schema fields that are genuinely boolean stay tolerant of those spellings
-    via :func:`_as_bool`, because there the type comes from the schema rather
-    than from a guess about the text.
-    """
-
-
-def _install_restricted_bool_resolver() -> None:
-    strict_bool = re.compile(r"^(?:true|True|TRUE|false|False|FALSE)$")
-    resolvers = {}
-    for first_char, entries in yaml.SafeLoader.yaml_implicit_resolvers.items():
-        kept = [(tag, rx) for tag, rx in entries if tag != "tag:yaml.org,2002:bool"]
-        if kept:
-            resolvers[first_char] = kept
-    _ContractLoader.yaml_implicit_resolvers = resolvers
-    _ContractLoader.add_implicit_resolver(
-        "tag:yaml.org,2002:bool", strict_bool, list("tTfF")
-    )
-
-
-_install_restricted_bool_resolver()
+# The YAML policy is shared with every other engine loader rather than
+# reimplemented here: a contract file and the topology file that quotes its
+# symbol names must be parsed under the SAME rules, or a symbol survives in one
+# file and is silently flattened to a boolean in the other. See yaml_strict.
+#
+# Schema fields that are genuinely boolean stay tolerant of the YAML 1.1
+# spellings via :func:`_as_bool`, because there the type comes from the schema
+# rather than from a guess about the text.
+try:  # imported as ``harness.catalog``
+    from .yaml_strict import StrictBoolLoader as _ContractLoader
+except ImportError:  # imported as top-level ``catalog`` (path-shim callers)
+    from yaml_strict import StrictBoolLoader as _ContractLoader
 
 
 _TRUTHY = {"true", "yes", "on", "1"}
