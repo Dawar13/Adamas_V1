@@ -17,7 +17,7 @@ A stored run lives at project/runs/<id>/ and holds:
     replay.txt        the exact command to reproduce it
 
 -----------------------------------------------------------------------------
-OPEN AND REPLAY ARE DIFFERENT OPERATIONS AND MUST NEVER BLUR
+OPENING AND REPLAYING ARE DIFFERENT OPERATIONS AND MUST NEVER BLUR
 -----------------------------------------------------------------------------
     open_run(id)          loads what was recorded. Instant. Executes nothing.
     replay_command(id)    returns the command that would re-execute it.

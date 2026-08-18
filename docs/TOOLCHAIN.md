@@ -40,3 +40,42 @@ substantially slower than on the WSL filesystem, because of the 9p filesystem br
 
 `dtc` (device-tree-compiler) is **not** required. Zephyr parses devicetree with its own Python
 `edtlib`; `dtc` is only used as an optional validator and the build skips it when absent.
+
+## Parallelism, measured on the target machine
+
+`scripts/bench-parallelism.sh` runs the same tests at several worker counts and
+reports wall clock and per-test time. Measured here, on 12 cores:
+
+| workers | wall clock | per test | gain vs previous |
+|---|---|---|---|
+| 1 | 327.8 s | 36.4 s | — |
+| 2 | 179.5 s | 19.9 s | +45% |
+| 4 | **145.6 s** | 16.2 s | +19% |
+| 8 | 148.7 s | 16.5 s | **−2%** |
+
+**Ceiling: 4 workers.** Past that the wall clock stops improving and slightly
+regresses — the tests are competing for the same cores rather than the suite
+getting slower. That matches the shape of the workload: a multi-node test keeps
+roughly three cores genuinely busy, because the emulated machines step through
+virtual time in lockstep and are not all active at once. Guessing from `nproc`
+would have suggested 12 and lost time.
+
+`export BENCH_WORKERS=4`, or let `harness/run_suite.py` derive it from the core
+count, which lands on the same number here.
+
+Re-measure on a different machine before trusting the default: this is the one
+number in the toolchain that is a property of the host rather than of the pinned
+versions.
+
+### A correction worth keeping
+
+The first version of `bench-parallelism.sh` recommended **8** from this same
+data. It compared each level's per-test time against the *single-worker* figure
+and stopped when it rose 15% above it — but the N=1 run also carries the one-off
+expansion cost, so its per-test time is inflated and every later level looks flat
+against it. A plausible answer from the wrong comparison.
+
+It now compares each level with the one below it, which removes the baseline
+entirely: while there is spare capacity, adding workers shortens the wall clock
+markedly; once the machine is saturated the curve flattens and reverses. The last
+level that still bought a real improvement is the ceiling.
