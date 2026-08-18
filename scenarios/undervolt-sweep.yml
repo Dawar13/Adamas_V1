@@ -1,0 +1,81 @@
+# undervolt-sweep — a rule that applies while driving, and must not otherwise.
+# =============================================================================
+# THIS FILE IS PROJECT DATA. The limit comes from the firmware
+# (firmware/bms/src/bms.h: BMS_UNDERVOLT_LIMIT_mV 60000), the identifiers and
+# enum spellings from catalog.yml, the node and symbol from network.yml.
+#
+# WHY THE STATE QUALIFIER IS THE INTERESTING PART
+# -----------------------------------------------------------------------------
+# The threshold is easy and the qualifier is where real firmware bugs live. A
+# flat pack sitting in standby is a discharged battery, not a safety event; the
+# same reading while driving is. A rule that lost its state qualifier would
+# fault a parked vehicle every time its pack ran down, and every scenario that
+# only ever tested it WHILE DRIVING would still pass.
+#
+# That is not hypothetical here: firmware/bms-broken-state is exactly that
+# defect, and this shape is what catches it.
+# =============================================================================
+
+id: undervolt-sweep
+title: Pack under-voltage applies while driving and not while parked
+description: >
+  Walk the under-voltage limit across its boundary in both states. Parked, no
+  value may raise a fault however low it goes. Driving, the limit itself is
+  legal and the first value below it must fault with UNDERVOLT and latch.
+
+pattern: state-dependent-rule
+
+params:
+  node: bms
+  symbol: g_pack_mv
+  limit: 60000
+  direction: below
+  unit: mV
+  healthy: 72000
+
+  # The node whose request selects the state, and the two requests that put the
+  # device either side of the qualifier.
+  commander: vcu
+  commander_message: 0x200
+  commander_signal: drive_state
+  excluded_request: PARKED
+  applying_request: DRIVE
+
+  # A third node held out of the way, so each state is unambiguous rather than
+  # an accident of what the charger happened to be doing.
+  quiet_node: charger
+  quiet_message: 0x300
+  quiet_signal: charge_state
+  quiet_value: IDLE
+
+  # The device names its own state on the console, so the scenario waits for
+  # the state rather than assuming a delay was long enough.
+  excluded_state_text: "STANDBY"
+  applying_state_text: "RUNNING"
+  state_timeout: 800
+  boot_timeout: 100
+
+  # What the fault would operate, so the legal half is not merely an absence.
+  untripped_message: 0x602
+  untripped_signal: contactor_state
+  untripped_value: CLOSED
+
+  bus_window: 200
+  observe_window: 300
+  rebroadcast: 500
+
+  message: 0x604
+  signal: fault_code
+  value: UNDERVOLT
+  deadline: 50
+
+  corroborating_message: 0x600
+  corroborating_signal: pack_voltage_mv
+
+  latching: true
+  return_window: 600
+
+sweep:
+  # 60000 is the limit and 59999 the first faulting value, because the fault
+  # lies BELOW: the mandatory pair for a downward rule.
+  values: [72000, 65000, 61000, 60001, 60000, 59999, 58000, 55000, 50000]

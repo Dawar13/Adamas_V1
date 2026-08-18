@@ -1281,5 +1281,74 @@ class TestSummary(ExpandTestCase):
         self.assertIn("no-such-scenario", str(caught.exception))
 
 
+class TestSweepSidesFollowTheRuleDirection(unittest.TestCase):
+    """A downward rule must put its fault side BELOW the limit.
+
+    Getting this backwards inverts every expectation in a sweep, so the
+    specification asks for it to be tested on its own rather than assumed.
+
+    It WAS backwards. A pattern declared a `direction` parameter, documented it
+    as "which side of the limit the fault lies on", let a scenario bind it --
+    and then never wired it to the sweep, so the generator used its default of
+    `above`. A flat pack was asserted legal and a healthy one asserted to fault.
+    A parameter that is accepted and then ignored is worse than one that is
+    missing: the scenario looks correct and the sweep it produces is exactly
+    backwards.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        if not (REPO_ROOT / "scenarios").is_dir():
+            raise unittest.SkipTest("no scenarios directory in this tree")
+        cls.plan = expand.build_plan(
+            repo_root=REPO_ROOT,
+            out_dir=REPO_ROOT / ".generated" / "tests",
+        )
+
+    def expansion(self, scenario_id):
+        for item in self.plan.expansions:
+            if item.scenario.id == scenario_id:
+                return item
+        self.skipTest("%s is not among the shipped scenarios" % scenario_id)
+
+    def split(self, item):
+        """Swept values, divided into the two sides the generator chose.
+
+        `far` is the side the fault lies on; `near` is the legal side. Asking
+        the sweep rather than re-deriving it means this checks the decision the
+        generator actually made, not a second implementation of the same rule
+        that could be wrong in the same way.
+        """
+        legal, fault = [], []
+        for value in item.sweep.values:
+            side = item.sweep.side_of(value)
+            (fault if side == "far" else legal).append(int(value))
+        return legal, fault
+
+    def test_a_downward_rule_faults_below_its_limit(self):
+        item = self.expansion("undervolt-sweep")
+        limit = int(item.scenario.raw_params["limit"])
+        legal, fault = self.split(item)
+        self.assertTrue(fault, "a sweep with no fault side proves nothing")
+        for value in fault:
+            with self.subTest(value=value):
+                self.assertLess(value, limit)
+        for value in legal:
+            with self.subTest(value=value):
+                self.assertGreaterEqual(value, limit)
+
+    def test_an_upward_rule_faults_above_its_limit(self):
+        item = self.expansion("overtemp-sweep")
+        limit = int(item.scenario.raw_params["limit"])
+        legal, fault = self.split(item)
+        self.assertTrue(fault, "a sweep with no fault side proves nothing")
+        for value in fault:
+            with self.subTest(value=value):
+                self.assertGreater(value, limit)
+        for value in legal:
+            with self.subTest(value=value):
+                self.assertLessEqual(value, limit)
+
+
 if __name__ == "__main__":
     unittest.main()

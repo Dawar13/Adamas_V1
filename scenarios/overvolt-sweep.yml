@@ -1,0 +1,43 @@
+# overvolt-sweep — the pack over-voltage limit, walked across its boundary.
+# =============================================================================
+# THIS FILE IS PROJECT DATA. The pattern supplies the shape; everything below
+# binds it to this vehicle. The limit comes from the firmware itself
+# (firmware/bms/src/bms.h: BMS_OVERVOLT_LIMIT_mV 84000), the identifiers and
+# signal names from catalog.yml, the node and symbol from network.yml.
+#
+# 84.000 V is a legal, fully charged pack. A firmware that wrote `>=` would
+# fault every vehicle that finished a charge -- a warranty return per car, and
+# invisible to any test that only ever injects a comfortably-over value.
+# =============================================================================
+
+id: overvolt-sweep
+title: Pack over-voltage across its boundary, at several points in the drive
+description: >
+  Walk the pack-voltage limit from a healthy pack to well over it, landing
+  exactly on the limit and one millivolt above. The limit itself must be legal;
+  the first value above it must fault with OVERVOLT and latch.
+
+pattern: threshold-exceeded
+
+params:
+  node: bms
+  symbol: g_pack_mv
+  limit: 84000
+  unit: mV
+  message: 0x604
+  signal: fault_code
+  value_name: OVERVOLT
+  deadline: 50
+  latching: true
+  healthy: 72000
+  observe_ms: 300
+  latch_ms: 600
+  boot_timeout: 100
+
+sweep:
+  # 84000 is the limit and 84001 the first faulting value: the mandatory pair.
+  # A millivolt apart, and that is the point -- it is the only place in the
+  # range where `>` and `>=` disagree.
+  values: [72000, 80000, 83000, 83999, 84000, 84001, 85000, 88000, 92000]
+  # Each moment meets the firmware in a different state.
+  at: [200, 800, 1500]

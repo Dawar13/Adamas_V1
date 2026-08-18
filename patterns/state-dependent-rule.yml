@@ -144,6 +144,17 @@ sweep:
   # Flips in the APPLYING half only. The excluded half is pinned legal for every
   # variant; that is the claim.
   expectation: flips
+  # WHICH SIDE OF THE LIMIT THE FAULT LIES ON, taken from the scenario.
+  #
+  # Without this line the generator used its default of `above`, and a rule
+  # whose fault lies BELOW the limit had every expectation in its sweep
+  # inverted: a flat pack was asserted legal and a healthy one asserted to
+  # fault. The `direction` parameter existed, was documented, was bound by the
+  # scenario -- and was read by nothing. A parameter that is accepted and then
+  # ignored is worse than one that is missing, because the scenario looks
+  # correct and the sweep it produces is exactly backwards.
+  far_side: "{{direction}}"
+
 
 # The shape, in the eleven verbs. {{param}} is substituted per test; {{value}} is
 # the swept value for this instance, {{value_name}} the fault code's name where an
