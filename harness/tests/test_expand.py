@@ -577,19 +577,42 @@ class TestShippedScenariosAreUnchanged(unittest.TestCase):
             out_dir=REPO_ROOT / ".generated" / "tests",
         )
 
-    def test_every_shipped_scenario_expands_to_exactly_one_test(self):
-        counts = {e.scenario.id: len(e.tests) for e in self.plan.expansions}
+    #: These three assertions describe scenarios that declare NO sweep: the
+    #: nine Phase 1 files, which must keep working untouched. A swept scenario
+    #: deliberately breaks all three -- that is the entire point of a sweep --
+    #: so they are scoped to the unswept ones rather than relaxed. Written
+    #: before sweeps existed, they encoded "one scenario, one test" as though it
+    #: were a law instead of the behaviour of a file with nothing to sweep.
+
+    def unswept(self):
+        return [e for e in self.plan.expansions if e.sweep is None]
+
+    def test_every_unswept_scenario_expands_to_exactly_one_test(self):
+        counts = {e.scenario.id: len(e.tests) for e in self.unswept()}
         self.assertEqual(sorted(set(counts.values())), [1], counts)
 
-    def test_the_test_count_equals_the_scenario_count(self):
-        self.assertEqual(len(self.plan.tests), len(self.plan.expansions))
+    def test_the_unswept_test_count_equals_the_unswept_scenario_count(self):
+        unswept = self.unswept()
+        self.assertEqual(sum(len(e.tests) for e in unswept), len(unswept))
 
-    def test_every_shipped_scenario_is_copied_verbatim(self):
-        for test in self.plan.tests:
-            with self.subTest(test=test.id):
-                source = (self.scenarios / ("%s.yml" % test.id)).read_text(
-                    encoding="utf-8")
-                self.assertTrue(test.text().endswith(source))
+    def test_every_unswept_scenario_is_copied_verbatim(self):
+        # A scenario with nothing to sweep must reach the emulator exactly as
+        # written: expansion is not licence to rewrite it.
+        for expansion in self.unswept():
+            for test in expansion.tests:
+                with self.subTest(test=test.id):
+                    source = (self.scenarios / ("%s.yml" % test.id)).read_text(
+                        encoding="utf-8")
+                    self.assertTrue(test.text().endswith(source))
+
+    def test_a_swept_scenario_produces_more_than_one_test(self):
+        # The complement, so "everything is unswept" cannot pass this class by
+        # accident if the sweep machinery silently stopped working.
+        swept = [e for e in self.plan.expansions if e.sweep is not None]
+        if swept:
+            for expansion in swept:
+                with self.subTest(scenario=expansion.scenario.id):
+                    self.assertGreater(len(expansion.tests), 1)
 
     def test_every_generated_test_is_accepted_by_the_compiler(self):
         # `build_plan` validates each emitted test through the compiler's own

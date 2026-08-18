@@ -18,7 +18,7 @@ could not be used, this module would say so and report nothing rather than
 estimate.
 
 -----------------------------------------------------------------------------
-COVERAGE NEVER RUNS DURING A MEASURED RUN
+COVERAGE IS NEVER COLLECTED DURING A MEASURED EXECUTION
 -----------------------------------------------------------------------------
 Profiling is collected in a SEPARATE pass, never during a run that produces a
 verdict. The compiler is reused unchanged -- each test is compiled with
@@ -159,12 +159,12 @@ def call_sites(elf: Path, objdump: Path) -> dict:
     Under -Os the compiler inlines small static functions into their caller. The
     symbol survives in the table, but no sample can ever be attributed to it,
     because its instructions now live inside somebody else's frame. Measured on
-    this project's own firmware:
+    the firmware this was developed against, a safety handler compiled to a
+    six-byte stub with ZERO call sites, and the check it belonged to had no
+    symbol at all -- both fully inlined into the routine that calls them.
 
-        bms_handle_overtemp        6 bytes, 0 call sites
-        bms_check_cell_overtemp    no symbol at all
-
-    Its logic certainly runs -- the fault frame reaches the bus -- so reporting
+    Their logic certainly runs -- the resulting frame reaches the bus -- so
+    reporting
     it as "no test has ever executed this" would be a plausible, confident and
     completely false finding, in the one metric whose whole job is to expose
     untested code.

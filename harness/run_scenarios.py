@@ -768,18 +768,34 @@ class Compiler:
             execution_trace = None
             if self.trace_execution:
                 # The emulator writes the program counter of every instruction
-                # it executes to this file, gzip-compressed as it goes. It is a
-                # passive observer: it cannot reach the emulated core, so it
-                # cannot move a verdict or a latency. Measured, not assumed --
-                # an event log from a traced run is byte-identical to one from
-                # the same run untraced.
+                # it executes to this file, in its own binary trace format,
+                # gzip-compressed as it goes. It is a passive observer outside
+                # the emulated core, so it cannot move a verdict or a latency.
+                # Measured, not assumed: scripts/check-coverage.sh runs the same
+                # test traced and untraced and requires the event logs to be
+                # byte-identical.
+                #
+                # The core is named by the board file, for the same reason every
+                # other peripheral is: this file must not know what a core is
+                # called on the customer's part.
+                core = board.get("cpu_peripheral")
+                if not core:
+                    raise CompileError(
+                        "%s: board %r does not name the core, so execution "
+                        "cannot be traced. Add it to the board file. Tracing "
+                        "is not skipped quietly: coverage that did not happen "
+                        "looks exactly like code no test executed, which is "
+                        "the one finding the measurement exists to produce."
+                        % (where, node.board)
+                    )
                 execution_trace = self.out_dir / ("execution_%s.pc.gz" % name)
                 self._emit(
-                    'sysbus.cpu CreateExecutionTracing "%s" @%s PC false true'
-                    % (_safe_name("trace_" + name, where),
+                    '%s CreateExecutionTracing "%s" @%s PC true true'
+                    % (_safe_name(core, where),
+                       _safe_name("trace_" + name, where),
                        self._path(execution_trace))
                 )
-                self._traced.append(name)
+                self._traced.append((name, core))
             vector = board.get("vector_table_symbol")
             if vector:
                 # Some parts have no boot ROM parsing the image header under
@@ -1321,12 +1337,12 @@ class Compiler:
         self._emit()
         self._emit("bench_status")
         self._emit("bench_log_close")
-        for name in self._traced:
+        for name, core in self._traced:
             # Close each tracer explicitly rather than trusting the shutdown to
             # flush it. A truncated trace would understate what executed, and
             # understated coverage reads as a finding.
             self._emit('mach set "%s"' % name)
-            self._emit("sysbus.cpu DisableExecutionTracing")
+            self._emit("%s DisableExecutionTracing" % core)
         self._emit("quit")
         return self.result
 
