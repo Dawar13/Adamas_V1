@@ -1,0 +1,33 @@
+# What this defective build is expected to change, and nothing else.
+# =============================================================================
+# Written from the divergence gate's own report. The list below is OBSERVED,
+# never predicted.
+#
+# The gate fails if the observed set differs from this list in EITHER direction.
+# A test that diverges and is not here means the binary differs in more ways
+# than it admits, or something non-deterministic is leaking into a run.
+# =============================================================================
+
+defect: over-temperature fault made non-latching, so it self-clears on cooling
+
+diverging_tests:
+  - overtemp-boundary
+  - overtemp-fault
+
+rationale: |
+  Latching is checked by asking for the fault to still be on the bus AFTER the
+  temperature has returned to normal. Two scenarios make that check, so both
+  see this defect, and both fail the same way: "nothing matched within the
+  window", because the fault cleared itself when the pack cooled.
+
+  This binary is the reason more than one defective build exists. The
+  over-temperature comparison is byte-for-byte correct here, so every boundary
+  value behaves exactly as it should and the boundary test alone would not
+  notice anything wrong. A suite can have complete coverage of a rule, and even
+  test its threshold precisely, while saying nothing about whether the fault it
+  raises is permitted to disappear.
+
+  IF THIS LIST GROWS OR SHRINKS, investigate before editing. Shrinking would be
+  the more alarming change: it would mean a latch assertion stopped being made
+  somewhere, and the suite would have quietly lost the only thing that detects
+  a self-clearing safety fault.

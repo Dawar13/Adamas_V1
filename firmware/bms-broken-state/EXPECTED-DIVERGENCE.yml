@@ -1,0 +1,35 @@
+# What this defective build is expected to change, and nothing else.
+# =============================================================================
+# Written from the divergence gate's own report. The list below is OBSERVED,
+# never predicted.
+#
+# The gate fails if the observed set differs from this list in EITHER direction.
+# =============================================================================
+
+defect: under-voltage rule lost its state qualifier and fires in every state
+
+diverging_tests:
+  - undervolt-running-only
+
+rationale: |
+  The rule is meant to apply only while the vehicle is driving: a flat pack
+  sitting in standby is a discharged battery, not a safety event. With the
+  qualifier removed it faults immediately in standby, and undervolt-running-only
+  catches it directly -- "a flat pack that is not driving is not a safety event"
+  fails with a matching fault frame at 250400 us.
+
+  That one test reports FOUR failing assertions, and they share a single root
+  cause rather than being four findings. Faulting in standby latches the pack
+  into FAULT, so it never reaches the running state the rest of the scenario was
+  written to exercise; those later assertions then fail because the state they
+  needed never arrived. One defect, one diverging test, a cascade of
+  consequences inside it.
+
+  IF THIS LIST GROWS, the extra entry is the thing to investigate, not to add.
+  A state qualifier that has been removed from one rule cannot change the
+  behaviour of a scenario that never drives the pack below the limit, so any
+  further divergence would be evidence of a different change altogether.
+
+  This binary rests on ONE test, which the gate reports as a warning rather than
+  a pass. Strengthening it means adding a scenario that probes the standby case
+  honestly, not widening this file.

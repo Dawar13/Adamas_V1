@@ -1,0 +1,38 @@
+# What this defective build is expected to change, and nothing else.
+# =============================================================================
+# Written from the divergence gate's own report. The list below is OBSERVED,
+# never predicted: the gate ran the whole suite against this binary and against
+# the good one and recorded which verdicts moved.
+#
+# The gate fails if the observed set differs from this list in EITHER direction.
+# A test that diverges and is not here means the binary differs in more ways
+# than it admits, or a verdict moved for a reason unrelated to the defect --
+# which would mean something non-deterministic is leaking into a run. Both are
+# worse than a red gate.
+# =============================================================================
+
+defect: over-temperature comparison inverted, so the limit itself faults
+
+diverging_tests:
+  - overtemp-boundary
+
+rationale: |
+  Only the exact boundary value separates `>` from `>=`. overtemp-boundary
+  injects the limit itself and requires it to be legal, so it is the single
+  test in the suite that can see this defect.
+
+  overtemp-fault does NOT diverge, and that is the confirmation rather than a
+  gap: it injects a value comfortably above the limit, where both
+  implementations fault identically. Every scenario in the original Phase 1
+  suite did exactly that, which is why all eight of them passed against this
+  binary before a boundary test existed.
+
+  IF THIS LIST GROWS, do not add the new entry. A change here means either the
+  binary acquired a second defect or a verdict moved for a reason that is not
+  about temperature at all. Find out which before touching this file: the value
+  of the gate is precisely that it refuses to absorb a surprise.
+
+  This binary rests on ONE test. That is reported as a warning by the gate, not
+  as a pass. Delete overtemp-boundary, or let its injected value drift one tenth
+  of a degree off the limit, and the suite stays green while the proof that the
+  engine reads the binary disappears silently.
