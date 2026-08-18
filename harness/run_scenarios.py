@@ -595,7 +595,7 @@ class Compiler:
         self.scenario = scenario
         self.out_dir = Path(out_dir)
         self.translate = translate
-        # Execution tracing is OFF unless a caller asks for it. It writes a
+        # Execution tracing stays disabled unless a caller asks for it. It writes a
         # file per machine and is measured, not assumed, to be free -- but a
         # default that writes files nobody asked for is still a cost.
         self.trace_execution = bool(trace_execution)
