@@ -31,3 +31,14 @@ renode-cache/
 # app/project/runs/.
 harness/out/
 *.robot.generated
+
+# Expanded tests. Derived from patterns/ plus scenarios/ by harness/expand.py and
+# regenerated on every run. Committing them would create a second source of truth
+# for what the suite asserts — and the moment a committed test could disagree with
+# the scenario it came from, the generator itself stops being verifiable.
+.generated/
+
+# Expanded tests are derived from patterns/ + scenarios/ and regenerated every
+# run. Committing them would create a second source of truth and make the sweep
+# generator unverifiable.
+.generated/

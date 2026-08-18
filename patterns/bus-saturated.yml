@@ -1,0 +1,173 @@
+# bus-saturated — the bus is flooded, and the traffic that matters survives.
+# =============================================================================
+# PATTERNS ARE UNIVERSAL AND SHIP WITH THE TOOL. There is no project data in
+# this file: no identifier, no payload, no queue depth, no node name, no signal
+# name, no enum spelling. Those arrive as parameters from a scenario, which is
+# where one project's judgement lives. A pattern describes a SHAPE; a scenario
+# binds it to a vehicle.
+#
+# DERIVED, NOT INVENTED. Read off the one Phase 1 scenario that uses the flood
+# verb — bus-flood — whose verb sequence is
+#
+#     wait_uart -> expect_can -> flood -> expect_can -> expect_no_can
+#               -> flood -> write_symbol -> expect_can -> expect_can
+#
+# THREE CLAIMS, AND ONLY THE THIRD IS LOAD-BEARING
+# -----------------------------------------------------------------------------
+#   the device's own periodic frame still reaches the bus after the burst
+#   the burst itself raises no fault — traffic is not a safety event
+#   a genuine fault, injected while the receive path is still stuffed, still gets
+#     its announcement out inside the same budget it gets on a quiet bus
+#
+# The first two would both pass against a firmware whose safety path had quietly
+# stopped running, which is why the third exists and why it is not optional. A
+# scenario that stopped after the first two would be measuring that the device is
+# alive, not that it is still safe.
+#
+# THE PAYLOAD IS DELIBERATELY INERT. It must command nothing, so that any change
+# in behaviour can only be the volume of frames and not their content. A burst
+# that also carried a request would be two stimuli wearing one name, and the
+# report could not say which of them the device reacted to.
+#
+# WHAT THIS PATTERN DOES NOT ASSERT — AND IT SHIPS WITH THE PATTERN ON PURPOSE
+# -----------------------------------------------------------------------------
+# The burst is delivered into every other controller's receive path at a single
+# virtual instant. That saturates the device's receive queue and its filter path,
+# which is what the three claims are about. It is NOT a model of bus arbitration,
+# error frames or bus-off recovery: no electrical layer is exercised and none is
+# claimed. Those stay on a bench rig. This paragraph belongs in the pattern rather
+# than in one project's scenario file because the pattern is what a picker offers
+# and what a report quotes, and the limit has to travel with it.
+#
+# THE ORDER OF THE TWO STIMULI IS LOAD-BEARING
+# -----------------------------------------------------------------------------
+# Both the burst and the injection are stimuli, and a latency is measured from the
+# LAST stimulus at or before the match. So the burst goes first and the injection
+# second, at the same virtual instant: the measured reaction is then the rule
+# reacting, not the burst clearing. Reverse them and the number still prints, is
+# still deterministic, and now measures the wrong thing.
+#
+# COMPARISON: STRICT, BUT THE EXPECTATION DOES NOT FLIP
+# -----------------------------------------------------------------------------
+# The boundary is a capacity: a burst of exactly `queue_depth` frames is the
+# largest that fits, and the first burst that overflows is one frame beyond it.
+# Strict, on the same reading of the word as a value threshold — the boundary
+# value belongs to the near side.
+#
+# What is different here, and is declared rather than left to a default, is that
+# THE REQUIRED BEHAVIOUR IS THE SAME ON BOTH SIDES. Traffic is not a safety event,
+# so every variant asserts survival: telemetry through, no fault, the announcement
+# inside its ordinary budget. A generator that assumed a flip at the boundary
+# would demand a fault from the overflow side — that is, it would assert as
+# correct the exact defect this pattern forbids, and it would look green doing it.
+# `expectation: invariant` says so out loud, and a generator that does not
+# recognise the key must refuse the pattern rather than fall back on a flip.
+#
+# What flips at the boundary is the FIRMWARE's internal condition, not the
+# verdict, and that is still where the discrimination lives: a receive path that
+# mishandles overflow first shows at (queue_depth, queue_depth + 1). Misplacing
+# that pair by one frame means the sweep never tests the overflow edge at all,
+# which is Finding 1.1 in a different subsystem — total coverage, no
+# discrimination.
+#
+# QUEUE DEPTH IS DERIVED, NOT GUESSED
+# -----------------------------------------------------------------------------
+# `queue_depth` is the depth the firmware itself declares, and a scenario must
+# pin it against that declaration with a test. A hand-written number that does not
+# match reality puts the boundary pair in the wrong place while every variant
+# still passes; this project has already lost time to exactly that, twice, from
+# tables that described something they had never been checked against.
+# =============================================================================
+
+id: bus-saturated
+name: Critical traffic survives a saturated bus
+description: |
+  A burst of frames arrives at one virtual instant, deep enough to overrun the
+  device's receive queue. Its own periodic traffic must still reach the bus, the
+  burst itself must raise no fault, and a genuine fault injected while the receive
+  path is still stuffed must still be announced inside the same budget it would
+  get on an idle bus.
+
+  The swept dimension is the depth of the burst, centred on the queue depth the
+  firmware declares. The expectation does not change across that boundary — what
+  changes is whether the firmware's receive path is in overflow while being asked
+  to stay safe.
+
+  This pattern says what it does not cover, and that text travels with it: the
+  burst is a receive-path stimulus, not a model of arbitration, error frames or
+  bus-off recovery.
+
+parameters:
+  - { name: node,          type: node,              doc: "the device under test" }
+  - { name: flood_id,      type: message_id,        doc: "the identifier flooded. The most dominant identifier the contract defines is the worst case for the device's own traffic, which is the pairing worth testing" }
+  - { name: payload,       type: string,            doc: "raw payload bytes for the burst. Raw on purpose — this step is about the volume of frames, not their meaning — and chosen so the burst commands nothing" }
+  - { name: queue_depth,   type: number,            doc: "the depth of the device's receive queue, as the firmware declares it. The centre of the sweep, and it must be pinned against that declaration by a test rather than written down by hand" }
+  - { name: telemetry,     type: message_id,        doc: "the device's own periodic frame, the one that must still get out" }
+  - { name: bus_window,    type: duration,          doc: "how long to allow for a periodic frame to come round. Must exceed the period of the frame being awaited, or an assertion fails for a reason that has nothing to do with the firmware" }
+  - { name: symbol,        type: injectable_symbol, doc: "the input the genuine fault is injected through" }
+  - { name: fault_value,   type: number,            doc: "a value comfortably past the rule's limit. Comfortably, on purpose — the boundary belongs to the threshold pattern, and a pattern testing two things at once can explain neither failure" }
+  - { name: message,       type: message_id,        doc: "the frame the fault is announced on, and the identifier watched for silence during the burst" }
+  - { name: signal,        type: signal,            doc: "the field carrying the fault code" }
+  - { name: value,         type: enum_value,        doc: "the fault code expected" }
+  - { name: deadline,      type: duration,          doc: "the budget for the announcement. It must be the SAME budget the rule gets on a quiet bus — a pattern that relaxed the deadline under load would be asserting nothing" }
+  - { name: quiet_window,  type: duration,          doc: "how long the announcement identifier is watched during saturation. Should exceed rebroadcast, so a device that HAD faulted cannot hide between two restatements" }
+  - { name: rebroadcast,   type: duration,          doc: "the device's restatement period for the announcement. Declared so the generator can refuse a quiet_window too short to catch a restatement, rather than trusting prose" }
+  - { name: boot_timeout,  type: duration,          doc: "how long the device may take to reach its application entry point" }
+
+sweep:
+  around: queue_depth
+  # STRICT: a burst of exactly queue_depth is the largest that fits, and the first
+  # overflowing burst is one frame beyond it.
+  comparison: strict
+  # One frame. A burst is a count of whole frames, so the smallest representable
+  # step is universal here rather than project data.
+  step: 1
+  # The required behaviour is identical on both sides of the boundary. See the
+  # header: a generator that assumed a flip would demand the defect.
+  expectation: invariant
+  # A scenario that wants exactly one burst depth pins it as a single-entry
+  # values list, and the run must RECORD that it characterised no boundary.
+  # Silently treating one pinned value as a swept boundary is how a report comes
+  # to claim discrimination it never had.
+
+# The shape, in the eleven verbs. {{param}} is substituted per test; {{value}} is
+# the swept value for this instance — here a COUNT OF FRAMES, not a sensor reading,
+# so a generator must take the swept dimension from the pattern rather than
+# assume it. {{value_name}} is the fault code's name where an enum is expected.
+# There are no legal|fault branches: the expectation is invariant. {{boot_text}}
+# is the entry point the topology already declares for that node.
+steps:
+  - wait_uart:     { node: "{{node}}", text: "{{boot_text}}", timeout_ms: "{{boot_timeout}}" }
+
+  # The baseline. The device is publishing BEFORE the burst, so "still publishing"
+  # afterwards is a comparison and not an assumption.
+  - expect_can:    { id: "{{telemetry}}", within_ms: "{{bus_window}}",
+                     label: "the device is publishing before the burst" }
+
+  - mark:          "{{value}} frames on one identifier, all at one instant"
+  - flood:         { id: "{{flood_id}}", count: "{{value}}", data_hex: "{{payload}}" }
+
+  # First claim: the device's own periodic frame still reaches the bus.
+  - expect_can:    { id: "{{telemetry}}", within_ms: "{{bus_window}}",
+                     label: "the device's own traffic survives a burst of {{value}}" }
+
+  # Second claim: traffic is not a safety event. Fed from the whole bus, so an
+  # announcement from any node would trip this.
+  - expect_no_can: { id: "{{message}}", for_ms: "{{quiet_window}}",
+                     label: "saturation raises no fault" }
+
+  - mark:          "a second burst, and a genuine fault injected into the middle of it"
+
+  # THE THIRD CLAIM, and the reason the pattern exists. Burst first, injection
+  # second, both at the same virtual instant — see the header on stimulus order.
+  - flood:         { id: "{{flood_id}}", count: "{{value}}", data_hex: "{{payload}}" }
+  - write_symbol:  { node: "{{node}}", symbol: "{{symbol}}", value: "{{fault_value}}" }
+
+  - expect_can:    { id: "{{message}}", signals: { "{{signal}}": "{{value_name}}" },
+                     within_ms: "{{deadline}}",
+                     label: "the announcement still gets out under saturation, inside its ordinary budget" }
+
+  # And the device is still talking afterwards. An announcement from a node that
+  # then fell off the bus would not be a working failsafe.
+  - expect_can:    { id: "{{telemetry}}", within_ms: "{{bus_window}}",
+                     label: "the device is still publishing after both bursts" }

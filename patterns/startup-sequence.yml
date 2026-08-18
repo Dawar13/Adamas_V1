@@ -1,0 +1,188 @@
+# startup-sequence — no stimulus at all: the ordering of events at boot.
+# =============================================================================
+# PATTERNS ARE UNIVERSAL AND SHIP WITH THE TOOL. There is no project data in
+# this file: no identifier, no console text, no window, no node name, no signal
+# name, no enum spelling. Those arrive as parameters from a scenario, which is
+# where one project's judgement lives. A pattern describes a SHAPE; a scenario
+# binds it to a vehicle.
+#
+# THIS IS THE SIXTH PATTERN, AND IT IS A FINDING RATHER THAN AN INVENTION
+# -----------------------------------------------------------------------------
+# Phase 2 §5 names five shapes and says the nine Phase 1 scenarios are instances
+# of about five. Eight of them are. The ninth — boot-sequence — has NO STIMULUS
+# VERB anywhere in it:
+#
+#     wait_uart -> expect_no_can -> wait_uart x3 -> expect_can x2
+#               -> wait_uart x2 -> expect_no_can
+#
+# Nothing is injected, nothing is silenced, nothing is flooded and nothing is sent.
+# No value crosses a limit, so it is not the threshold pattern; no peer stops
+# talking; no rule is state-qualified; no burst arrives; no unknown identifier
+# appears. It is an instance of none of the five, and the same section says that a
+# scenario which cannot be expressed is a MISSING PATTERN rather than a special
+# case. Hence this file.
+#
+# The distinguishing property is worth stating as an invariant rather than as a
+# list of what it is not: this is the only shape in the library whose origin is
+# power-on rather than a stimulus the harness applied. Everything it asserts is
+# measured against the device's own schedule.
+#
+# CONSEQUENCE: THERE IS NO LATENCY TO QUOTE, AND THE PATTERN SAYS SO
+# -----------------------------------------------------------------------------
+# A latency is measured from a stimulus; a deadline is measured from where an
+# assertion was armed; the engine quotes the pair only when the stimulus falls
+# inside the assertion's window. With no stimulus anywhere there is no such pair,
+# and the engine correctly reports none — the stored run for the instance has a
+# null headline and a null budget with the reason stated. That is the right answer,
+# not a gap: a boot test's product is an ORDER and a set of absences, and printing
+# a millisecond figure beside it would be inventing a measurement of nothing.
+#
+# HOW STRONG THE ORDERING CLAIM IS — SAID PLAINLY, AND IT SHIPS WITH THE PATTERN
+# -----------------------------------------------------------------------------
+# A console does not un-print, so a wait is satisfied by text already on the
+# console. These steps therefore prove each stage HAD been printed by the time it
+# was awaited, in this order, with the microsecond each was first seen recorded.
+# They are not proof that the firmware could not have printed them in some other
+# order inside its first tick.
+#
+# One ordering fact is asserted strictly, and it is the bus one: the device's entry
+# point is required BEFORE its own identifier is required ABSENT, and its first
+# scheduled frame is not due until later. Announce, then transmit.
+#
+# THE OTHER NODES ARE DERIVED FROM THE TOPOLOGY, NOT PARAMETERISED
+# -----------------------------------------------------------------------------
+# Every node for which the topology declares an entry-point text must reach it. No
+# parameter carries them, for two reasons: a test that asserted only the device
+# under test would report a healthy bus with dead nodes on it, and adding a node to
+# the canvas then strengthens this test with no scenario edit. Restating those
+# strings here would also be a second spelling of something the topology already
+# says, which is how two sources of truth start.
+#
+# COMPARISON: NON-STRICT, AND THIS IS THE ONE THAT WOULD BE MISSED
+# -----------------------------------------------------------------------------
+# The swept dimension is the length of the prohibition that says no fault is raised
+# anywhere in startup, centred on the LONGEST failsafe window the firmware
+# declares. A cold boot is where a failsafe timer is easiest to get wrong: an
+# implementation that armed its timer before the first frame from a peer had ever
+# arrived would fault on every cold boot where the device wins the race to the bus.
+# Such a timer fires exactly when its window has elapsed.
+#
+# So the window having elapsed IS the condition, and the boundary variant is the
+# first observation window that can see the defect. Non-strict.
+#
+# Strict would place the mandatory pair one step early, where every variant is
+# blind to an unguarded timer and all of them pass. That is Finding 1.1 exactly —
+# total coverage, zero discrimination — reproduced at the level of the pattern
+# library, where it would be inherited by every project that used the shape.
+#
+# THE EXPECTATION DOES NOT FLIP. Correct firmware raises no fault at any point in
+# startup, at any window length, so every variant asserts the same silence. What
+# changes across the boundary is whether the variant CAN SEE an unguarded timer.
+# A generator that assumed a flip would demand a fault during startup from the
+# far side, which is the defect this pattern exists to catch.
+# =============================================================================
+
+id: startup-sequence
+name: Startup reaches every stage in order
+description: |
+  With no stimulus of any kind, watch a device come up: its application entry
+  point, then each bring-up stage its firmware declares, in order. Require that it
+  puts nothing on its own identifier before it has announced itself, that whatever
+  it controls is untripped once its loop is running, that every node the topology
+  declares an entry point for reaches it, and that no fault is raised anywhere in
+  startup — across a window long enough to cover the longest failsafe timer the
+  firmware declares, which is where an unguarded timer would fire on every cold
+  boot.
+
+  The swept dimension is that final prohibition's length. The expectation does not
+  change across the boundary; what changes is whether the variant can see the
+  defect at all.
+
+  What this proves about ordering is stated in the file rather than implied: a
+  console does not un-print, so each stage is proven to have been printed by the
+  time it was awaited, in this order — not to have been impossible in another
+  order inside the first tick.
+
+parameters:
+  - { name: node,          type: node,       doc: "the device under test" }
+  - { name: stages,        type: string,     doc: "the bring-up stages, in order: one console line per stage the firmware must reach. A LIST, and the only repeated parameter in this library — the length of a boot sequence is a property of the firmware, not of the shape. The device's own entry-point text is NOT in this list; the topology already declares it" }
+  - { name: stage_timeout, type: duration,   doc: "how long each stage may take once the previous one has been seen" }
+  - { name: boot_timeout,  type: duration,   doc: "how long the device may take to reach its application entry point" }
+  - { name: telemetry,     type: message_id, doc: "the device's own periodic identifier — required absent before it announces itself, and present afterwards" }
+  - { name: pre_window,    type: duration,   doc: "how long that identifier must stay silent after the entry point. Must be shorter than first_frame_due, or the test forbids a frame the firmware is right to send" }
+  - { name: first_frame_due, type: duration, doc: "when that first scheduled frame is due, from the entry point. Declared so the generator can refuse a pre_window that would forbid it, rather than leaving the constraint to prose" }
+  - { name: consequence_message, type: message_id, doc: "the frame reporting the thing the device controls" }
+  - { name: consequence_signal,  type: signal,     doc: "the field reporting it" }
+  - { name: untripped_value,     type: enum_value, doc: "what that field must read once the loop is running. Nothing may engage on its own at power-up — the single worst startup defect a device can have" }
+  - { name: bus_window,    type: duration,   doc: "how long to allow for a periodic frame to come round. Must exceed the period of the frame being awaited, or an assertion fails for a reason that has nothing to do with the firmware" }
+  - { name: message,       type: message_id, doc: "the frame a fault would be announced on. Watched for silence across startup" }
+  - { name: longest_window, type: duration,  doc: "the longest failsafe window the firmware declares. The centre of the sweep, and it must be pinned against the firmware's own constants by a test — understate it and the boundary lands before the instant an unguarded timer would fire, which is the entire discrimination of this pattern" }
+  - { name: tick,          type: duration,   doc: "the device's evaluation period — the smallest step at which a duration boundary is representable here" }
+
+sweep:
+  around: longest_window
+  # NON-STRICT: the window having elapsed IS the condition an unguarded timer
+  # keys on, so the boundary variant is the first one that can observe the defect.
+  # See the header for what strict would cost.
+  comparison: non-strict
+  # The smallest representable step of a duration is the device's own evaluation
+  # tick, which is project data and so cannot be a literal in a universal file.
+  step: "{{tick}}"
+  # Correct firmware raises no fault at any window length. Nothing flips, so there
+  # are no branches below, and a generator that assumed a flip would demand a
+  # startup fault from the far side.
+  expectation: invariant
+  # `sweep.at` is meaningless here and must be refused rather than accepted: this
+  # pattern's origin is power-on, so shifting the injection instant shifts nothing.
+  # Variants that differ in no observable way would otherwise be counted as though
+  # they were coverage, and every number this tool reports has to be a real verdict
+  # of something distinct.
+
+# The shape, in the eleven verbs. {{param}} is substituted per test; {{value}} is
+# the swept value for this instance — here the LENGTH OF THE FINAL PROHIBITION.
+# {{boot_text}} is the entry point the topology declares for the device under
+# test. Inside for_each_stage, {{stage}} is one entry of `stages`; inside
+# for_each_declared_entry_point, {{peer}} and {{peer_boot_text}} are a node the
+# topology declares an entry point for, and that text. A generator that does not
+# recognise either construct must refuse the pattern: silently dropping a repeated
+# block would leave a test that looks like this one and asserts less.
+steps:
+  # 1. The device reaches its application entry point.
+  - wait_uart:     { node: "{{node}}", text: "{{boot_text}}", timeout_ms: "{{boot_timeout}}",
+                     label: "the device reaches its application entry point" }
+
+  # 2. Announce, then transmit. Its first scheduled frame is not due yet, so
+  #    nothing may be on that identifier. This is the one strictly ordered claim.
+  - expect_no_can: { id: "{{telemetry}}", for_ms: "{{pre_window}}",
+                     label: "it has not started transmitting before it is up" }
+
+  # 3. Each declared bring-up stage, in the order `stages` lists them. A stage
+  #    that a firmware never reaches fails here rather than making some later
+  #    assertion fail for the wrong reason.
+  - for_each_stage:
+      - wait_uart: { node: "{{node}}", text: "{{stage}}", timeout_ms: "{{stage_timeout}}",
+                     label: "bring-up stage reached: {{stage}}" }
+
+  # 4. The safety claim about startup. Nothing has been requested, so nothing the
+  #    device controls may be engaged.
+  - expect_can:    { id: "{{consequence_message}}",
+                     signals: { "{{consequence_signal}}": "{{untripped_value}}" },
+                     within_ms: "{{bus_window}}",
+                     label: "nothing it controls is engaged at startup" }
+
+  # 5. And now it is publishing, which is what step 2 said it had not been doing.
+  - expect_can:    { id: "{{telemetry}}", within_ms: "{{bus_window}}",
+                     label: "it publishes its own traffic once it is up" }
+
+  # 6. The rest of the world reaches its entry points too — every node the
+  #    topology declares one for, named by the topology and not by this file.
+  - for_each_declared_entry_point:
+      - wait_uart: { node: "{{peer}}", text: "{{peer_boot_text}}", timeout_ms: "{{boot_timeout}}",
+                     label: "{{peer}} reaches its entry point" }
+
+  # 7. The swept claim. Nothing about a normal startup is a fault, and at and past
+  #    the boundary this window is long enough to cover the longest failsafe timer
+  #    the firmware declares — so an implementation that armed one before hearing
+  #    from anybody is caught here rather than in the field.
+  - expect_no_can: { id: "{{message}}", for_ms: "{{value}}",
+                     label: "no fault is raised anywhere in startup, across {{value}} of it" }

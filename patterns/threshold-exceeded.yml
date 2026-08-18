@@ -38,16 +38,19 @@ description: |
   rule's own input rather than on the absence of evidence.
 
 parameters:
-  - { name: node,     type: node,              doc: the device under test }
-  - { name: symbol,   type: injectable_symbol, doc: the sensor input the rule reads }
-  - { name: limit,    type: number,            doc: the threshold, in the symbol's own units }
-  - { name: unit,      type: string,           doc: for the human-readable label only }
-  - { name: message,  type: message_id,        doc: the frame the fault is announced on }
-  - { name: signal,   type: signal,            doc: the field carrying the fault code }
-  - { name: value,    type: enum_value,        doc: the fault code expected }
-  - { name: deadline, type: duration,          doc: how long the firmware may take }
-  - { name: latching, type: boolean,           doc: whether cooling back down clears it }
-  - { name: healthy,  type: number,            doc: a value comfortably inside the limit }
+  - { name: node,     type: node,              doc: "the device under test" }
+  - { name: symbol,   type: injectable_symbol, doc: "the sensor input the rule reads" }
+  - { name: limit,    type: number,            doc: "the threshold, in the symbol's own units" }
+  - { name: unit,      type: string,           doc: "for the human-readable label only" }
+  - { name: message,  type: message_id,        doc: "the frame the fault is announced on" }
+  - { name: signal,   type: signal,            doc: "the field carrying the fault code" }
+  - { name: value,    type: enum_value,        doc: "the fault code expected" }
+  - { name: deadline, type: duration,          doc: "how long the firmware may take" }
+  - { name: latching, type: boolean,           doc: "whether cooling back down clears it" }
+  - { name: healthy,  type: number,            doc: "a value comfortably inside the limit" }
+  - { name: observe_ms, type: duration,        doc: "how long the legal side watches the announcement identifier for silence. Should exceed rebroadcast, so a device that HAD faulted cannot hide between two restatements" }
+  - { name: latch_ms,   type: duration,        doc: "how long the announcement is watched after the value returns to healthy. Latching only" }
+  - { name: boot_timeout, type: duration,      doc: "how long the device may take to reach its application entry point" }
 
 sweep:
   around: limit
@@ -62,7 +65,7 @@ sweep:
 # is the swept value for this instance and {{expected}} is legal|fault, decided
 # by the generator from `comparison` and never by this file.
 steps:
-  - wait_uart:     { node: "{{node}}", text: "{{boot_text}}", timeout_ms: 100 }
+  - wait_uart:     { node: "{{node}}", text: "{{boot_text}}", timeout_ms: "{{boot_timeout}}" }
   - mark:          "{{symbol}} driven to {{value}} {{unit}} — expected {{expected}}"
   - write_symbol:  { node: "{{node}}", symbol: "{{symbol}}", value: "{{value}}" }
 

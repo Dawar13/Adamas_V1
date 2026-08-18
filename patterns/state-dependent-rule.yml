@@ -1,0 +1,222 @@
+# state-dependent-rule — the same reading, two verdicts, decided by the state.
+# =============================================================================
+# PATTERNS ARE UNIVERSAL AND SHIP WITH THE TOOL. There is no project data in
+# this file: no identifier, no signal name, no limit, no node name, no enum
+# spelling. Those arrive as parameters from a scenario, which is where one
+# project's judgement lives. A pattern describes a SHAPE; a scenario binds it to
+# a vehicle.
+#
+# DERIVED, NOT INVENTED. Read off the one Phase 1 scenario that injects a single
+# value twice and requires two different verdicts — undervolt-running-only —
+# whose verb sequence is
+#
+#     wait_uart -> expect_can -> node_signal x2
+#               -> write_symbol -> expect_no_can -> expect_symbol -> wait_uart
+#               -> write_symbol(healthy) -> node_signal -> wait_uart
+#               -> write_symbol(the same value) -> expect_can -> expect_can
+#               -> write_symbol(healthy) -> expect_can
+#
+# THE QUALIFIER IS THE RULE, NOT A DETAIL OF IT
+# -----------------------------------------------------------------------------
+# A rule with a state qualifier is two claims, and a scenario that only ever
+# injects in the state where the rule applies makes one of them. It would pass
+# just as happily against a firmware that had dropped the qualifier entirely and
+# faulted everywhere — which is a real defective binary this project ships, and
+# this is the pattern that has to catch it. So one value goes in TWICE, in two
+# established states, and the two verdicts must disagree.
+#
+# HOW THIS DIFFERS FROM THE REFERENCE PATTERN, AND WHY IT IS NOT IT
+# -----------------------------------------------------------------------------
+# Structurally this is the reference pattern run twice, with the second copy's
+# expectation pinned legal however far past the limit the value goes. The
+# discriminator for the library is plain enough to assign a scenario without
+# judgement: if the SAME stimulus is required to produce two different verdicts,
+# it is this pattern; if one stimulus produces one verdict, it is the reference
+# pattern. Nothing about a scenario's identifiers or wording enters that
+# decision.
+#
+# ONE FLIP, NOT TWO. The sweep flips the expectation in the applying half only.
+# The excluded half asserts silence for every variant, at every distance past the
+# limit. A generator that applied the flip to both halves would demand a fault in
+# the state where the rule must not apply — that is, it would assert the exact
+# defect the pattern exists to catch, and it would do it while looking green. The
+# step list below encodes this: the legal|fault branch appears once, inside the
+# applying half.
+#
+# WHY DIRECTION IS A PARAMETER
+# -----------------------------------------------------------------------------
+# A floor and a ceiling are the same shape mirrored, and the firmware writes them
+# with opposite comparisons. Both leave the boundary reading LEGAL. A generator
+# that only ever added its step would place a floor's fault-side variants on the
+# legal side and demand faults that must never come, so which side the fault lies
+# on is declared rather than assumed.
+#
+# COMPARISON: STRICT, AND FOR THE SAME REASON AS THE REFERENCE PATTERN
+# -----------------------------------------------------------------------------
+# The subject is a value crossing a limit, so the boundary reading is legal and
+# belongs to the legal side; the first faulting value is one step beyond it, in
+# whichever direction `direction` names. Strict.
+#
+# Note the trap in the word: the firmware's own comparison at a floor is a strict
+# inequality, and it still leaves the boundary legal. `comparison` describes which
+# side of the boundary the boundary itself belongs to, not the spelling of an
+# operator in C. A timeout is the non-strict case, because there the window having
+# elapsed IS the condition.
+#
+# Backwards, every expectation in the sweep inverts: the boundary variant would
+# demand a fault from a device sitting exactly on its rated limit, and the first
+# genuinely faulting variant would be required to stay quiet. A firmware with the
+# comparison inverted — one character, and a defective binary this project ships —
+# would pass the whole sweep.
+#
+# WHY THE STATE IS NOT THE SWEPT DIMENSION
+# -----------------------------------------------------------------------------
+# The obvious second dimension is "every other state", and it is deliberately not
+# a sweep. A set of states has no boundary pair, so the generator's mandatory
+# boundary check would be vacuous over it and a state enumeration would be
+# counted as though it had the discrimination power of a boundary walk. Covering
+# N excluded states is N scenarios, each naming the state it excluded, so a
+# failure says which one. `sweep.at` is likewise not offered here: what the second
+# half changes is the state, not the instant.
+# =============================================================================
+
+id: state-dependent-rule
+name: A rule that applies in one state only
+description: |
+  A monitored value crosses a limit twice, at the same reading, in two states the
+  device demonstrably reaches. In the state the rule applies to, the fault must be
+  raised within a deadline. In the state it does not apply to, nothing may happen
+  at all — not at the boundary, and not at any distance past it.
+
+  The excluded half is guarded twice over, because "no fault frame appeared" is
+  also what an injection that never landed looks like: the value is read back out
+  of the running machine, and the device's own console has to name the state it is
+  sitting in. The field the fault would operate is also observed untripped before
+  anything is injected, so the silence is a starting picture rather than a
+  condition that was already true.
+
+  A scenario binds one excluded state. Covering more is more scenarios, not a
+  wider sweep — see the header.
+
+parameters:
+  - { name: node,      type: node,              doc: "the device under test" }
+  - { name: symbol,    type: injectable_symbol, doc: "the input the rule reads" }
+  - { name: limit,     type: number,            doc: "the limit, in the symbol's own units. The centre of the sweep" }
+  - { name: direction, type: string,            doc: "which side of the limit the fault lies on — above|below. A floor and a ceiling are the same shape mirrored" }
+  - { name: unit,      type: string,            doc: "for the human-readable label only" }
+  - { name: healthy,   type: number,            doc: "a value comfortably on the legal side, used between the halves and for the latch check" }
+  - { name: commander,          type: node,       doc: "the node whose request selects the device's state" }
+  - { name: commander_message,  type: message_id, doc: "the frame carrying that request" }
+  - { name: commander_signal,   type: signal,     doc: "the field carrying it" }
+  - { name: excluded_request,   type: enum_value, doc: "what it asks for while the rule must not apply" }
+  - { name: applying_request,   type: enum_value, doc: "what it asks for while the rule must apply" }
+  - { name: quiet_node,     type: node,       doc: "a third node held out of the way, so each state is unambiguous" }
+  - { name: quiet_message,  type: message_id, doc: "the frame it is held on" }
+  - { name: quiet_signal,   type: signal,     doc: "the field held" }
+  - { name: quiet_value,    type: enum_value, doc: "what it is held at" }
+  - { name: excluded_state_text, type: string,   doc: "a console line in which the device names the state the rule does NOT apply in. Read, not inferred — the field the fault operates usually reads the same in more than one state" }
+  - { name: applying_state_text, type: string,   doc: "a console line in which it names the state the rule DOES apply in" }
+  - { name: state_timeout,       type: duration, doc: "how long either state may take to be reached" }
+  - { name: boot_timeout,        type: duration, doc: "how long the device may take to reach its application entry point" }
+  - { name: untripped_message, type: message_id, doc: "the frame reporting the thing the fault would operate" }
+  - { name: untripped_signal,  type: signal,     doc: "the field reporting it" }
+  - { name: untripped_value,   type: enum_value, doc: "what that field reads while nothing is wrong" }
+  - { name: bus_window,        type: duration,   doc: "how long to allow for a periodic frame to come round. Must exceed the period of the frame being awaited, or an assertion fails for a reason that has nothing to do with the firmware" }
+  - { name: observe_window,    type: duration,   doc: "how long a prohibition watches the announcement. Should exceed rebroadcast, so a device that HAD faulted cannot hide between two restatements" }
+  - { name: rebroadcast,       type: duration,   doc: "the device's restatement period for the announcement. Declared so the generator can refuse an observe_window too short to catch a restatement, rather than trusting prose" }
+  - { name: message,   type: message_id, doc: "the frame the fault is announced on" }
+  - { name: signal,    type: signal,     doc: "the field carrying the fault code" }
+  - { name: value,     type: enum_value, doc: "the fault code expected" }
+  - { name: deadline,  type: duration,   doc: "how long the firmware may take to announce it" }
+  - { name: corroborating_message, type: message_id, doc: "the device's own telemetry carrying the reading it faulted on" }
+  - { name: corroborating_signal,  type: signal,     doc: "the field carrying it. Only this field is compared, so other fields on the same frame cannot make a correct frame miss" }
+  - { name: latching,      type: boolean,  doc: "whether returning to a healthy value clears the fault" }
+  - { name: return_window, type: duration, doc: "how long the announcement is watched after the value returns. Latching only, and must exceed rebroadcast" }
+
+sweep:
+  around: limit
+  # STRICT: the limit itself is legal, and the first faulting value is one step
+  # beyond it in the direction `direction` names. See the header for why the
+  # firmware's own operator is not what this word describes.
+  comparison: strict
+  # The smallest representable step in the symbol's own units.
+  step: 1
+  # Flips in the APPLYING half only. The excluded half is pinned legal for every
+  # variant; that is the claim.
+  expectation: flips
+
+# The shape, in the eleven verbs. {{param}} is substituted per test; {{value}} is
+# the swept value for this instance, {{value_name}} the fault code's name where an
+# enum is expected, and {{expected}} is legal|fault, decided by the generator from
+# `comparison` and `direction` and never by this file. {{boot_text}} is the entry
+# point the topology already declares for that node, so it is not restated here.
+steps:
+  - wait_uart:     { node: "{{node}}", text: "{{boot_text}}", timeout_ms: "{{boot_timeout}}" }
+
+  # Taken before anything is injected, so it is a starting picture and not a
+  # reaction to something this test did.
+  - expect_can:    { id: "{{untripped_message}}",
+                     signals: { "{{untripped_signal}}": "{{untripped_value}}" },
+                     within_ms: "{{bus_window}}",
+                     label: "nothing is tripped before this test does anything" }
+
+  - mark:          "held in the state this rule does not apply in"
+  - node_signal:   { node: "{{quiet_node}}", id: "{{quiet_message}}",
+                     signals: { "{{quiet_signal}}": "{{quiet_value}}" } }
+  - node_signal:   { node: "{{commander}}", id: "{{commander_message}}",
+                     signals: { "{{commander_signal}}": "{{excluded_request}}" } }
+
+  # THE EXCLUDED HALF. Whatever the swept value is, nothing may happen.
+  - mark:          "{{value}} {{unit}} injected where the rule does not apply"
+  - write_symbol:  { node: "{{node}}", symbol: "{{symbol}}", value: "{{value}}" }
+  - expect_no_can: { id: "{{message}}", for_ms: "{{observe_window}}",
+                     label: "{{value}} {{unit}} is not a safety event in this state" }
+
+  # The rule's own input, read back out of the running machine, so the silence
+  # above cannot be an injection that went missing. Placed after the window
+  # rather than beside its own write: armed in the same microsecond as its
+  # stimulus it would record a zero-millisecond reaction, and a zero in the
+  # reaction figures makes the instrument lie about how fast the firmware is.
+  - expect_symbol: { node: "{{node}}", symbol: "{{symbol}}", equals: "{{value}}",
+                     label: "the value the rule compares really is {{value}} {{unit}}" }
+
+  # And the qualifier itself, from the device's own mouth.
+  - wait_uart:     { node: "{{node}}", text: "{{excluded_state_text}}",
+                     timeout_ms: "{{state_timeout}}",
+                     label: "the device reports the state this rule does not apply in" }
+
+  - mark:          "healthy again, then the state the rule does apply in"
+  # Healthy FIRST. A value still past the limit while the state changes would
+  # fault during the transition, and the reaction measured below would be the
+  # length of that transition rather than the reaction time of the rule.
+  - write_symbol:  { node: "{{node}}", symbol: "{{symbol}}", value: "{{healthy}}" }
+  - node_signal:   { node: "{{commander}}", id: "{{commander_message}}",
+                     signals: { "{{commander_signal}}": "{{applying_request}}" } }
+  - wait_uart:     { node: "{{node}}", text: "{{applying_state_text}}",
+                     timeout_ms: "{{state_timeout}}",
+                     label: "the device reports the state this rule applies in" }
+
+  # THE APPLYING HALF: the same reading, the other verdict. The expectation is
+  # armed at its own stimulus with nothing in between, so the latency and the
+  # deadline share an origin and the ratio can be quoted.
+  - mark:          "the same {{value}} {{unit}}, now where the rule applies — expected {{expected}}"
+  - write_symbol:  { node: "{{node}}", symbol: "{{symbol}}", value: "{{value}}" }
+
+  # Exactly one of the following two is emitted, chosen by {{expected}}.
+  - when_legal:
+      - expect_no_can: { id: "{{message}}", for_ms: "{{observe_window}}",
+                         label: "{{value}} {{unit}} is legal even where the rule applies" }
+  - when_fault:
+      - expect_can:  { id: "{{message}}", signals: { "{{signal}}": "{{value_name}}" },
+                       within_ms: "{{deadline}}",
+                       label: "{{value}} {{unit}} faults with {{value_name}} where the rule applies" }
+      - expect_can:  { id: "{{corroborating_message}}",
+                       signals: { "{{corroborating_signal}}": "{{value}}" },
+                       within_ms: "{{bus_window}}",
+                       label: "the device publishes the reading it faulted on" }
+      # Latching is a property of the rule, so the check belongs to the pattern.
+      - when_latching:
+          - write_symbol: { node: "{{node}}", symbol: "{{symbol}}", value: "{{healthy}}" }
+          - expect_can:   { id: "{{message}}", signals: { "{{signal}}": "{{value_name}}" },
+                            within_ms: "{{return_window}}",
+                            label: "the fault stays latched after the value returns" }

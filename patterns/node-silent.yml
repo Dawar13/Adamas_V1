@@ -1,0 +1,261 @@
+# node-silent — a peer stops transmitting, and the failsafe fires on time.
+# =============================================================================
+# PATTERNS ARE UNIVERSAL AND SHIP WITH THE TOOL. There is no project data in
+# this file: no identifier, no signal name, no window, no node name, no enum
+# spelling. Those arrive as parameters from a scenario, which is where one
+# project's judgement lives. A pattern describes a SHAPE; a scenario binds it to
+# a vehicle.
+#
+# DERIVED, NOT INVENTED. This shape was read off two Phase 1 scenarios rather
+# than imagined — heartbeat-loss and charge-loss-recovery — whose common verb
+# sequence is
+#
+#     wait_uart -> node_signal x2 -> wait_uart -> expect_no_can
+#               -> node_silence(on)  -> expect_no_can -> expect_can -> expect_can
+#               -> node_silence(off) -> expect_can                       (latching)
+#                                    | wait_uart -> expect_can -> expect_no_can
+#                                                             (non-latching)
+#
+# They differ in exactly one thing: whether the failsafe latches once the peer
+# comes back. That is a parameter, not a second pattern.
+#
+# THE FRAME IS NOT THE FAILSAFE. The announcement on the bus is how the decision
+# is observed; the failsafe is the thing the device actually operates, and both
+# instances assert it separately. So this pattern does too.
+#
+# THE ARMING DEFECT THIS PATTERN EXISTS TO FIX
+# -----------------------------------------------------------------------------
+# A measured latency and a declared deadline can only be quoted as a ratio when
+# they share an origin. The engine measures a latency from the last stimulus at
+# or before the match, and a window from the instant its own assertion was
+# armed, so it quotes the pair only when the causing stimulus falls INSIDE the
+# assertion's window — and withholds the ratio otherwise rather than printing
+# two numbers taken from different instants.
+#
+# Both instances of this shape assert the near edge first: they forbid the
+# announcement for part of the window, and only then arm the expectation that
+# requires it. By that point the silencing step lies BEFORE the arming instant,
+# so the engine correctly declines. Their stored runs say so outright — in both,
+# the headline latency and its budget are null, with the note that no assertion
+# had its causing stimulus inside its own deadline window, and only a fastest
+# measured reaction is reported. The number this shape exists to produce — how
+# long the failsafe took after the peer went quiet, against the window the
+# firmware declares — is missing from both, and no amount of reading the trace
+# by hand puts it back honestly.
+#
+# The stored record shows how far apart the two clocks had drifted: the failsafe
+# assertion's own measured latency is LARGER than its own window, and it passed —
+# correctly, because it answered a small fraction of the way into a window that
+# had been armed most of the way into the silence. Two numbers in one record that
+# cannot be divided by each other. That is the defect, and it is invisible unless
+# something refuses to print the ratio.
+#
+# So this pattern ARMS THE SWEPT EXPECTATION AT THE SILENCING STEP, with nothing
+# asserted in between. Both edges of the window are still tested, but as two
+# variants of the sweep rather than as two windows inside one test: the near edge
+# is a variant that FORBIDS the announcement, the far edge is a variant that
+# REQUIRES it, and each measures from the instant its own stimulus was applied.
+# One test, one edge, one origin. A node-silent test therefore yields a latency
+# that can honestly be quoted against the firmware's own timeout.
+#
+# This needs no engine change. Taking a node off the bus records a stimulus at
+# that instant for either kind of node, so arming there is enough. Two
+# consequences the steps below depend on:
+#
+#   the silencing step must be the LAST stimulus before the window. A latency is
+#     measured from the last one, so any step that says anything to any node
+#     after it silently moves the origin and the ratio stops meaning what it
+#     says;
+#   the announcement must be observably ABSENT before the silence, or a match
+#     afterwards is not attributable to it. The engine checks that from the log
+#     rather than trusting the scenario, which is what the control window below
+#     earns.
+#
+# WHY THE BOUNDARY PAIR IS NOT ADJACENT — AND WHY THAT IS DECLARED, NOT HIDDEN
+# -----------------------------------------------------------------------------
+# The firmware's clock starts at the last frame it received, not at the moment
+# the harness silenced the peer, and that frame can already be up to one peer
+# period old. Measured from the silencing step, a correct failsafe therefore
+# fires somewhere in [timeout - period, timeout]. Exactly two claims are honest:
+#
+#   nothing may be announced within  timeout - period  of the silence
+#   the announcement must have arrived by  timeout  after it
+#
+# What lies between them is not a firmware property. It is the phase of the
+# peer's last frame, which the harness does not know and cannot set: the verb
+# that changes what a node says repaints the payload the player is already
+# sending, precisely so that the schedule does not shift. A variant placed inside
+# that band would still return a firm verdict, because the emulator is
+# deterministic — and that verdict would encode the phase rather than the rule.
+# It is the silent-success class wearing a green tick, so the generator must
+# REFUSE to place a variant there rather than let one be read as discrimination.
+#
+# COMPARISON: NON-STRICT, AND IT IS THE OPPOSITE OF A VALUE THRESHOLD
+# -----------------------------------------------------------------------------
+# The condition here is a window having elapsed. A firmware implementing it
+# compares an age against a window inclusively: the window having passed IS the
+# condition, so the boundary value belongs to the faulting side. In the reference
+# pattern, whose subject is a value crossing a limit, the boundary reading is
+# legal and belongs to the legal side. Same word, opposite side, and the
+# difference is the whole of the semantics.
+#
+# Non-strict, therefore: the variant AT the boundary requires the announcement,
+# and the last legal variant is one step short of the band below it.
+#
+# Backwards — treating the boundary as legal — the boundary variant would forbid
+# the announcement across the very window at whose end a correct firmware must
+# raise it. The one variant carrying the discrimination would report a false
+# escape, so the most interesting line in the report becomes the least
+# trustworthy one. Worse in the other direction: a firmware that raised the
+# failsafe one step LATE would pass that mislabelled variant, which is the defect
+# a timeout test exists to catch.
+# =============================================================================
+
+id: node-silent
+name: A peer stops transmitting
+description: |
+  A node the device under test depends on stops saying what it was saying. After
+  a window the firmware declares, the device must raise its failsafe: announce it
+  on the bus and operate the thing the failsafe controls. Before that window has
+  elapsed it must do neither — a device that trips on one missed frame is
+  unusable on a real bus, and it is one character away from correct.
+
+  Whether the failsafe clears itself when the peer returns is a parameter. A
+  latching failsafe must still be announced afterwards; a non-latching one must
+  stop being announced, reverse what it operated, and say so on its own console.
+  Recovery observed only as an absence is indistinguishable from a dead node,
+  which is why a non-latching scenario must supply the console line and is
+  refused without it.
+
+  The swept dimension is the elapsed silence at which the verdict is taken, and
+  every variant arms its expectation at the silencing step, so its latency and
+  its deadline share an origin and the ratio is quotable.
+
+parameters:
+  - { name: node,            type: node,       doc: "the device under test" }
+  - { name: peer,            type: node,       doc: "the node that goes quiet — nothing here says whether it has firmware behind it" }
+  - { name: peer_message,    type: message_id, doc: "the frame that stops arriving" }
+  - { name: peer_signal,     type: signal,     doc: "the field on it the rule watches" }
+  - { name: peer_active,     type: enum_value, doc: "the value that counts as present — a rule may key on the loss of a condition rather than the loss of frames" }
+  - { name: peer_period,     type: duration,   doc: "the cadence of that frame. Declared so the generator can refuse a variant inside the phase band, not so a comment can advise about it. Not derivable — the topology states a period only for a node it plays, and a node with firmware behind it carries its cadence in its own code" }
+  - { name: timeout,         type: duration,   doc: "the window the firmware declares. The centre of the sweep" }
+  - { name: tick,            type: duration,   doc: "the device's evaluation period — the smallest step at which a duration boundary is representable here" }
+  - { name: context_node,    type: node,       doc: "a third node held out of the way, so the state below is unambiguous" }
+  - { name: context_message, type: message_id, doc: "the frame it is held on" }
+  - { name: context_signal,  type: signal,     doc: "the field held" }
+  - { name: context_value,   type: enum_value, doc: "what it is held at" }
+  - { name: state_text,      type: string,     doc: "a console line in which the device names the state this rule applies in. Read, not inferred — the field the failsafe operates is usually in the same position in more than one state" }
+  - { name: state_timeout,   type: duration,   doc: "how long that state may take to be reached" }
+  - { name: boot_timeout,    type: duration,   doc: "how long the device may take to reach its application entry point" }
+  - { name: control_window,  type: duration,   doc: "how long the announcement is observed absent while the peer is still talking. This is what earns the attribution of any later announcement to the silence" }
+  - { name: message,         type: message_id, doc: "the frame the failsafe is announced on" }
+  - { name: signal,          type: signal,     doc: "the field carrying the failsafe code" }
+  - { name: value,           type: enum_value, doc: "the failsafe code expected" }
+  - { name: consequence_message, type: message_id, doc: "the frame reporting the thing the failsafe operates" }
+  - { name: consequence_signal,  type: signal,     doc: "the field reporting it" }
+  - { name: tripped_value,   type: enum_value, doc: "what that field reads while the failsafe is active" }
+  - { name: restored_value,  type: enum_value, doc: "what it reads once the failsafe has cleared. Non-latching only" }
+  - { name: consequence_deadline, type: duration, doc: "how long the device may take to operate it" }
+  - { name: latching,        type: boolean,    doc: "whether the peer returning clears the failsafe" }
+  - { name: rebroadcast,     type: duration,   doc: "the device's restatement period for the announcement. Declared so the generator can refuse a return_window too short to catch a restatement, rather than trusting prose" }
+  - { name: return_window,   type: duration,   doc: "how long the announcement is watched after the peer comes back. Must exceed rebroadcast, whichever branch is taken, or a firmware that had latched could hide between two restatements" }
+  - { name: recovery_text,   type: string,     doc: "a console line printed only by this rule's own recovery branch, so recovery is evidence rather than an absence. Non-latching only" }
+  - { name: recovery_timeout, type: duration,  doc: "how long recovery may take to be reported. Non-latching only" }
+
+sweep:
+  around: timeout
+  # NON-STRICT: the window having elapsed IS the condition, so the boundary
+  # variant is the one that must see the failsafe. See the header — the reference
+  # pattern is strict, and this is where the two shapes genuinely differ.
+  comparison: non-strict
+  # The smallest representable step of a duration is the device's own evaluation
+  # tick, which is project data and so cannot be a literal in a universal file.
+  # A finer step emits variants the firmware cannot distinguish, and a boundary
+  # pair the firmware cannot distinguish is not a boundary pair.
+  step: "{{tick}}"
+  # The required behaviour flips at the boundary: below it silence, at and past
+  # it the announcement.
+  expectation: flips
+  # Mandatory positions for this pattern: `timeout` on the fault side, and
+  # `timeout - peer_period` on the legal side. They are NOT one step apart, and
+  # the generator must emit no variant strictly between them — the band is the
+  # phase of the peer's last frame, not a firmware property. A sweep omitting
+  # either position is refused, exactly as in the reference pattern.
+  indeterminate_below: "{{peer_period}}"
+
+# The shape, in the eleven verbs. {{param}} is substituted per test. {{value}} is
+# the swept value for this instance — here a DURATION of silence, not a sensor
+# reading — {{value_name}} its name where an enum is expected, and {{expected}}
+# is legal|fault, decided by the generator from `comparison` and never by this
+# file. {{boot_text}} is the entry point the topology already declares for that
+# node, so it is not restated as a parameter: two spellings of one string is how
+# two sources of truth start.
+steps:
+  - wait_uart:     { node: "{{node}}", text: "{{boot_text}}", timeout_ms: "{{boot_timeout}}" }
+
+  - mark:          "the world held in the state this rule applies in"
+
+  # The state is established, not assumed: the third node is held out of the way
+  # and the peer says what makes the rule applicable. Neither step says anything
+  # about how either node comes to be on the bus.
+  - node_signal:   { node: "{{context_node}}", id: "{{context_message}}",
+                     signals: { "{{context_signal}}": "{{context_value}}" } }
+  - node_signal:   { node: "{{peer}}", id: "{{peer_message}}",
+                     signals: { "{{peer_signal}}": "{{peer_active}}" } }
+  - wait_uart:     { node: "{{node}}", text: "{{state_text}}",
+                     timeout_ms: "{{state_timeout}}",
+                     label: "the device reports the state this rule applies in" }
+
+  # The control. While the peer keeps talking there is nothing to see, so an
+  # announcement after the silence can only be the one the silence caused — and
+  # the engine verifies that from the log rather than taking this on trust.
+  - expect_no_can: { id: "{{message}}", for_ms: "{{control_window}}",
+                     label: "nothing announced while the peer is still talking" }
+
+  - mark:          "the peer goes off the bus — {{value}} of silence, expected {{expected}}"
+
+  # THE STIMULUS, and the last one before the window. Nothing may be said to any
+  # node between here and the expectation below, or the latency is measured from
+  # something else.
+  - node_silence:  { node: "{{peer}}", silence: true }
+
+  # Exactly one of the following two is emitted, chosen by {{expected}}. Either
+  # way it is armed here, at the stimulus, which is the whole point of the shape.
+  - when_legal:
+      - expect_no_can: { id: "{{message}}", for_ms: "{{value}}",
+                         label: "{{value}} of silence is not yet a failsafe" }
+  - when_fault:
+      - expect_can:  { id: "{{message}}", signals: { "{{signal}}": "{{value_name}}" },
+                       within_ms: "{{value}}",
+                       label: "the failsafe is announced within {{value}} of the peer falling silent" }
+      # The failsafe itself. The announcement is how it is observed; this is it.
+      - expect_can:  { id: "{{consequence_message}}",
+                       signals: { "{{consequence_signal}}": "{{tripped_value}}" },
+                       within_ms: "{{consequence_deadline}}",
+                       label: "and the device operates what the failsafe controls" }
+
+      - mark:        "the peer comes back"
+      - node_silence: { node: "{{peer}}", silence: false }
+
+      # Whether this clears is the rule, not a detail of it, so the check belongs
+      # to the pattern. The peer returning is exactly the condition that would
+      # clear a non-latching failsafe.
+      - when_latching:
+          - expect_can:    { id: "{{message}}", signals: { "{{signal}}": "{{value_name}}" },
+                             within_ms: "{{return_window}}",
+                             label: "the failsafe is still announced once the peer returns" }
+      - when_not_latching:
+          # From the device's own mouth. There is no frame that says "cleared":
+          # a cleared failsafe shows up as an ABSENCE, and an absence is also
+          # what a dead node looks like, so recovery is asserted three ways and
+          # all three must hold.
+          - wait_uart:     { node: "{{node}}", text: "{{recovery_text}}",
+                             timeout_ms: "{{recovery_timeout}}",
+                             label: "the device reports its own recovery, with no reset" }
+          - expect_can:    { id: "{{consequence_message}}",
+                             signals: { "{{consequence_signal}}": "{{restored_value}}" },
+                             within_ms: "{{consequence_deadline}}",
+                             label: "what the failsafe operated reverses on its own" }
+          - expect_no_can: { id: "{{message}}", signals: { "{{signal}}": "{{value_name}}" },
+                             for_ms: "{{return_window}}",
+                             label: "and the failsafe is not restated once the peer is back" }

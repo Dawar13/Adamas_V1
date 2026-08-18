@@ -1,0 +1,203 @@
+# unexpected-traffic — an identifier the contract does not define changes nothing.
+# =============================================================================
+# PATTERNS ARE UNIVERSAL AND SHIP WITH THE TOOL. There is no project data in
+# this file: no identifier, no payload, no node name, no signal name, no enum
+# spelling. Those arrive as parameters from a scenario, which is where one
+# project's judgement lives. A pattern describes a SHAPE; a scenario binds it to
+# a vehicle.
+#
+# DERIVED, NOT INVENTED. Read off the one Phase 1 scenario that puts a single
+# frame on the bus by hand — unexpected-frame — whose verb sequence is
+#
+#     wait_uart -> expect_can -> node_signal x2 -> can_send
+#               -> expect_no_can -> expect_can -> expect_can
+#               -> node_signal -> expect_can
+#
+# THE CONTROL AT THE END IS THE WHOLE PATTERN
+# -----------------------------------------------------------------------------
+# "No fault after an unknown frame" is exactly what a firmware with a completely
+# dead receive path also looks like — a far worse defect than the one being
+# tested, hiding behind a green result. So every variant ends by putting an
+# identifier the contract DOES define on the bus and requiring the device to act
+# on it. Ignoring the unknown is only meaningful if acting on the known still
+# works.
+#
+# THE SWEEP IS WHAT TURNS THAT CONTROL INTO A BOUNDARY
+# -----------------------------------------------------------------------------
+# A single arbitrary foreign identifier tests one point in an eleven-bit space and
+# says nothing about where the device's filters actually stop. The identifiers
+# worth trying are the ones ADJACENT to an identifier the contract defines,
+# because that is where an off-by-one in a filter identifier, or a mask that is
+# not the exact match it was meant to be, shows up. So the sweep walks the
+# identifier around a defined one, and the defined identifier itself is the
+# boundary — which means the scenario's own control becomes a variant of the sweep
+# rather than a step nobody varies.
+#
+# COMPARISON: STRICT, ON THE SAME READING OF THE WORD
+# -----------------------------------------------------------------------------
+# The boundary value belongs to the near side: AT the boundary the identifier is
+# the contract's own and the device must ACT on it; one step away it is foreign and
+# must be IGNORED. Strict.
+#
+# Non-strict would put the boundary on the far side — it would require the device
+# to ignore a frame it is contractually obliged to act on. That is not a
+# mislabelled test, it is an assertion that the receive path should be dead: the
+# sweep would certify the worst defect in this pattern's own honest-limits
+# paragraph as correct behaviour.
+#
+# NEITHER SIDE OF THIS BOUNDARY IS A DEFECT, so this pattern names its two sides
+# `defined` and `foreign` rather than borrowing the reference pattern's
+# legal|fault. Same mechanism, and the words have to match what the boundary means
+# or every label in the report carries a small lie.
+#
+# WHAT THE GENERATOR MUST REFUSE HERE, AND WHY IT IS THE ORDINARY CASE
+# -----------------------------------------------------------------------------
+#   an identifier one step from the boundary that is ITSELF in the contract. It is
+#     not foreign, so the far-side claim does not hold for it, and relabelling it
+#     would be a plausible output instead of a refusal. Contracts pack their
+#     identifiers densely, so this is the common case rather than an edge case.
+#   an identifier past the standard eleven-bit bound. That is a protocol error, not
+#     foreign traffic, and the sweep must stop at the bound. The bound is protocol,
+#     so it is not project data.
+#
+# THE VALIDATION OF THE SWEPT PARAMETER IS INVERTED, PER SIDE
+# -----------------------------------------------------------------------------
+# On the near side the identifier MUST resolve in the contract; on the far side it
+# MUST NOT. No other pattern in this library validates one parameter both ways, and
+# a validator that only knows "it must resolve" would refuse every foreign variant
+# while one that only knows "it must not" would refuse the control. The check has to
+# follow the side. The same applies to a picker built out of the contract: a field
+# that only offers defined identifiers cannot express this pattern at all.
+# =============================================================================
+
+id: unexpected-traffic
+name: An undefined identifier is ignored
+description: |
+  An identifier the contract does not define arrives while the device is idle. No
+  fault may be raised, the device's own traffic must continue, and nothing it
+  controls may move. Then an identifier the contract does define arrives on the
+  same receive path, and the device must act on it — which is what proves the
+  silence was a decision rather than a dead receive path.
+
+  The swept dimension is the identifier itself, centred on one the contract
+  defines. The variant at that centre is the control raised to a test of its own:
+  there the device must act. Every other variant is foreign and must be ignored.
+
+  Two claims hold on both sides and one flips. No fault, and still publishing, are
+  invariant. Whether the device acts is what the boundary decides.
+
+parameters:
+  - { name: node,             type: node,       doc: "the device under test" }
+  - { name: sender,           type: node,       doc: "which node the foreign frame comes from. A frame has to come from somewhere on the bus, and the contract names no sender for an identifier it does not define, so the scenario must say" }
+  - { name: reference_id,     type: message_id, doc: "an identifier the contract DOES define, and one the device is required to act on. The centre of the sweep and the control" }
+  - { name: reference_signal, type: signal,     doc: "the field on it that the device acts on" }
+  - { name: idle_request,     type: enum_value, doc: "what that field says while only the foreign frame is on the bus. With nothing requested, a change at the end can only be the control" }
+  - { name: acted_request,    type: enum_value, doc: "what that field says to make the device visibly act" }
+  - { name: commander,        type: node,       doc: "the node that carries the reference identifier on the bus" }
+  - { name: payload,          type: string,     doc: "raw payload bytes for the foreign identifier. Raw because a message the contract does not define has no signals to name, and inventing names for it would be fabricating a contract" }
+  - { name: quiet_node,       type: node,       doc: "a third node held out of the way, so the device's state is unambiguous" }
+  - { name: quiet_message,    type: message_id, doc: "the frame it is held on" }
+  - { name: quiet_signal,     type: signal,     doc: "the field held" }
+  - { name: quiet_value,      type: enum_value, doc: "what it is held at" }
+  - { name: message,          type: message_id, doc: "the frame a fault would be announced on. Watched for silence" }
+  - { name: quiet_window,     type: duration,   doc: "how long it is watched. Should exceed rebroadcast, so a device that HAD faulted cannot hide between two restatements" }
+  - { name: rebroadcast,      type: duration,   doc: "the device's restatement period for that announcement. Declared so the generator can refuse a quiet_window too short to catch a restatement, rather than trusting prose" }
+  - { name: telemetry,        type: message_id, doc: "the device's own periodic frame — alive, not merely quiet" }
+  - { name: bus_window,       type: duration,   doc: "how long to allow for a periodic frame to come round. Must exceed the period of the frame being awaited, or an assertion fails for a reason that has nothing to do with the firmware" }
+  - { name: consequence_message, type: message_id, doc: "the frame reporting the thing the device controls" }
+  - { name: consequence_signal,  type: signal,     doc: "the field reporting it" }
+  - { name: untripped_value,     type: enum_value, doc: "what that field reads while nothing has been requested" }
+  - { name: acted_value,         type: enum_value, doc: "what it reads once the device has acted on a defined identifier" }
+  - { name: consequence_deadline, type: duration,  doc: "how long the device may take to act" }
+  - { name: boot_timeout,        type: duration,   doc: "how long the device may take to reach its application entry point" }
+
+sweep:
+  around: reference_id
+  # STRICT: the boundary identifier belongs to the near side — it is the
+  # contract's own, and the device must act on it. See the header for what
+  # non-strict would assert instead.
+  comparison: strict
+  # One identifier. The space is integral and its bound is protocol, so this step
+  # is universal rather than project data.
+  step: 1
+  # The device acts at the boundary and ignores everywhere else.
+  expectation: flips
+  # Neither side is a fault, so the sides are named here. The generator must take
+  # these names from the pattern and REFUSE a branch name it does not recognise,
+  # rather than emitting a variant with no branch at all: a test that asserts
+  # nothing is the silent-success class this project keeps finding.
+  sides: { near: defined, far: foreign }
+  # A scenario that wants one arbitrary foreign identifier pins it as a
+  # single-entry values list, and the run must RECORD that it characterised no
+  # boundary. One pinned value silently reported as a swept boundary is a claim
+  # of discrimination nothing earned.
+
+# The shape, in the eleven verbs. {{param}} is substituted per test; {{value}} is
+# the swept value for this instance — here an IDENTIFIER — and {{expected}} is
+# defined|foreign, decided by the generator from `comparison` and never by this
+# file. {{boot_text}} is the entry point the topology already declares for that
+# node.
+steps:
+  - wait_uart:     { node: "{{node}}", text: "{{boot_text}}", timeout_ms: "{{boot_timeout}}" }
+
+  # The starting picture, on the wire rather than assumed, and taken before this
+  # test has done anything at all.
+  - expect_can:    { id: "{{consequence_message}}",
+                     signals: { "{{consequence_signal}}": "{{untripped_value}}" },
+                     within_ms: "{{bus_window}}",
+                     label: "the device starts with nothing requested and nothing moved" }
+
+  - mark:          "the device held idle: nothing requested anywhere"
+  - node_signal:   { node: "{{quiet_node}}", id: "{{quiet_message}}",
+                     signals: { "{{quiet_signal}}": "{{quiet_value}}" } }
+  - node_signal:   { node: "{{commander}}", id: "{{reference_id}}",
+                     signals: { "{{reference_signal}}": "{{idle_request}}" } }
+
+  - mark:          "{{value}} appears on the bus — expected {{expected}}"
+
+  # Exactly one of the following two is emitted, chosen by {{expected}}.
+  - when_foreign:
+      # The stimulus. Delivered into every other controller's receive path, so
+      # the device's controller genuinely sees it arrive and genuinely filters it
+      # out. Raw bytes, because there is no contract to name signals with.
+      - can_send:      { node: "{{sender}}", id: "{{value}}", data_hex: "{{payload}}" }
+
+      - expect_no_can: { id: "{{message}}", for_ms: "{{quiet_window}}",
+                         label: "an identifier the contract does not define raises no fault" }
+      - expect_can:    { id: "{{telemetry}}", within_ms: "{{bus_window}}",
+                         label: "the device is alive, not merely quiet" }
+      - expect_can:    { id: "{{consequence_message}}",
+                         signals: { "{{consequence_signal}}": "{{untripped_value}}" },
+                         within_ms: "{{bus_window}}",
+                         label: "and nothing it controls moved" }
+
+      # THE CONTROL. Without it the three assertions above are satisfied just as
+      # well by a device that had stopped listening to the bus entirely. Asserted
+      # last, so that the immobility above is asserted while only the foreign
+      # frame has been on the bus.
+      - mark:          "an identifier that IS defined, on the same receive path"
+      - node_signal:   { node: "{{commander}}", id: "{{reference_id}}",
+                         signals: { "{{reference_signal}}": "{{acted_request}}" } }
+      - expect_can:    { id: "{{consequence_message}}",
+                         signals: { "{{consequence_signal}}": "{{acted_value}}" },
+                         within_ms: "{{consequence_deadline}}",
+                         label: "a defined identifier still moves the device: the receive path is alive" }
+
+  - when_defined:
+      # {{value}} IS the contract's own identifier here, so the control becomes
+      # the whole variant. The request is put on the identifier's own carrier
+      # rather than sent once by hand: a single frame would be testing whether the
+      # request persists, which is a different claim and belongs to a different
+      # pattern.
+      - node_signal:   { node: "{{commander}}", id: "{{value}}",
+                         signals: { "{{reference_signal}}": "{{acted_request}}" } }
+      - expect_can:    { id: "{{consequence_message}}",
+                         signals: { "{{consequence_signal}}": "{{acted_value}}" },
+                         within_ms: "{{consequence_deadline}}",
+                         label: "the device acts on the identifier its own contract defines" }
+      # Invariant across the boundary: acting on a defined identifier is not a
+      # fault either, and the device keeps publishing while it does so.
+      - expect_no_can: { id: "{{message}}", for_ms: "{{quiet_window}}",
+                         label: "acting on a defined identifier raises no fault" }
+      - expect_can:    { id: "{{telemetry}}", within_ms: "{{bus_window}}",
+                         label: "the device keeps publishing its own traffic" }
