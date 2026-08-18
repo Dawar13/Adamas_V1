@@ -587,15 +587,23 @@ class Compilation:
 class Compiler:
     """Turns the four input files into one emulator command script."""
 
-    def __init__(self, net, cat, boards, scenario, out_dir, translate):
+    def __init__(self, net, cat, boards, scenario, out_dir, translate,
+                 trace_execution=False):
         self.net = net
         self.cat = cat
         self.boards = boards
         self.scenario = scenario
         self.out_dir = Path(out_dir)
         self.translate = translate
+        # Execution tracing is OFF unless a caller asks for it. It writes a
+        # file per machine and is measured, not assumed, to be free -- but a
+        # default that writes files nobody asked for is still a cost.
+        self.trace_execution = bool(trace_execution)
         self.result = Compilation()
         self._token_seq = 0
+        # Machines whose execution is being traced, in the order they were
+        # created, so the tracers can be closed again at the end of the script.
+        self._traced = []
         # (node, message id) -> the payload a frame player is currently sending.
         self._painted = {}
 
@@ -757,6 +765,21 @@ class Compiler:
             self._emit('mach create "%s"' % name)
             self._emit("machine LoadPlatformDescription @%s" % self._path(repl))
             self._emit("sysbus LoadELF @%s" % self._path(elf))
+            execution_trace = None
+            if self.trace_execution:
+                # The emulator writes the program counter of every instruction
+                # it executes to this file, gzip-compressed as it goes. It is a
+                # passive observer: it cannot reach the emulated core, so it
+                # cannot move a verdict or a latency. Measured, not assumed --
+                # an event log from a traced run is byte-identical to one from
+                # the same run untraced.
+                execution_trace = self.out_dir / ("execution_%s.pc.gz" % name)
+                self._emit(
+                    'sysbus.cpu CreateExecutionTracing "%s" @%s PC false true'
+                    % (_safe_name("trace_" + name, where),
+                       self._path(execution_trace))
+                )
+                self._traced.append(name)
             vector = board.get("vector_table_symbol")
             if vector:
                 # Some parts have no boot ROM parsing the image header under
@@ -789,6 +812,12 @@ class Compiler:
                     "hub": hub,
                     "boot_text": node.boot_text,
                     "console": console.name,
+                    # Absent unless tracing was asked for. A reader must be able
+                    # to tell "this run was not traced" from "this run executed
+                    # nothing", because the second would be a finding and the
+                    # first is not.
+                    "execution_trace":
+                        execution_trace.name if execution_trace else None,
                 }
             )
 
@@ -1292,6 +1321,12 @@ class Compiler:
         self._emit()
         self._emit("bench_status")
         self._emit("bench_log_close")
+        for name in self._traced:
+            # Close each tracer explicitly rather than trusting the shutdown to
+            # flush it. A truncated trace would understate what executed, and
+            # understated coverage reads as a finding.
+            self._emit('mach set "%s"' % name)
+            self._emit("sysbus.cpu DisableExecutionTracing")
         self._emit("quit")
         return self.result
 
@@ -1932,8 +1967,44 @@ def parse_args(argv):
                         help="host-side seconds before the run is abandoned")
     parser.add_argument("--dry-run", action="store_true",
                         help="compile and write the script, run nothing, judge nothing")
+    parser.add_argument("--coverage", action="store_true",
+                        help="also record which instructions each machine "
+                             "executed, for harness/coverage.py to attribute")
     parser.add_argument("--quiet", action="store_true", help="no human report")
     return parser.parse_args(argv)
+
+
+#: How the environment spells the coverage switch. Anything a runner spawns
+#: inherits it, so a whole suite can be traced without every caller in front of
+#: this one growing a flag of its own.
+COVERAGE_ENV = "BENCH_COVERAGE"
+_COVERAGE_ON = ("1", "true", "yes", "on")
+_COVERAGE_OFF = ("", "0", "false", "no", "off")
+
+
+def coverage_requested(args, environ=None) -> bool:
+    """Is execution tracing on? Off by default, and never ambiguous.
+
+    A misspelt switch must not read as "off". Coverage that quietly did not
+    happen looks exactly like code no test executed, which is the one finding
+    this measurement exists to produce -- so an unrecognised value is refused
+    rather than interpreted.
+    """
+    if getattr(args, "coverage", False):
+        return True
+    raw = (environ if environ is not None else os.environ).get(COVERAGE_ENV, "")
+    value = str(raw).strip().lower()
+    if value in _COVERAGE_ON:
+        return True
+    if value in _COVERAGE_OFF:
+        return False
+    raise CompileError(
+        "%s=%r is neither on nor off. Use one of %s to enable it, or one of %s "
+        "to disable it. It is not read as \"off\", because coverage that "
+        "silently did not happen is indistinguishable from code that no test "
+        "executed." % (COVERAGE_ENV, raw, ", ".join(_COVERAGE_ON),
+                       ", ".join(v for v in _COVERAGE_OFF if v))
+    )
 
 
 def main(argv=None):
@@ -1989,7 +2060,7 @@ def main(argv=None):
     try:
         emulator = Emulator(out_dir, args.wsl_distro)
         compiler = Compiler(net, cat, boards, scenario, out_dir,
-                            emulator.behind_layer)
+                            emulator.behind_layer, coverage_requested(args))
         compiled = compiler.compile(event_log)
     except Refusal as exc:
         print("\n%s\n" % exc, file=sys.stderr)
@@ -2158,6 +2229,14 @@ def main(argv=None):
             "event_log": event_log.name,
             "emulator_log": console_log.name,
             "script": resc.name,
+            # One entry per traced machine, empty when tracing was not asked
+            # for. The absence of a name here is the record that no execution
+            # trace exists, rather than something a reader has to infer.
+            "execution_traces": {
+                machine["node"]: machine["execution_trace"]
+                for machine in compiled.machines
+                if machine.get("execution_trace")
+            },
         },
     }
     results_file.write_text(

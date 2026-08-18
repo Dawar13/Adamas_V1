@@ -44,6 +44,9 @@ bms_ecu:
   zephyr_board: nucleo_h743zi
   can_peripheral: sysbus.fdcan1
   uart_peripheral: sysbus.usart3
+  # The core, for execution tracing. Named here for the same reason every
+  # other peripheral is: the engine must not know what a CPU is called.
+  cpu_peripheral: sysbus.cpu
   # Ordinary Cortex-M boot: the vector table sits at the start of flash and the
   # core finds it unaided. Only the S32K3 parts need an explicit offset.
   vector_table_symbol: null
@@ -64,6 +67,9 @@ vcu_ecu:
   zephyr_board: nucleo_h743zi
   can_peripheral: sysbus.fdcan1
   uart_peripheral: sysbus.usart3
+  # The core, for execution tracing. Named here for the same reason every
+  # other peripheral is: the engine must not know what a CPU is called.
+  cpu_peripheral: sysbus.cpu
   vector_table_symbol: null
   can_bitrate: 500000
   tier: modelled
@@ -73,6 +79,9 @@ chg_ecu:
   zephyr_board: nucleo_h743zi
   can_peripheral: sysbus.fdcan1
   uart_peripheral: sysbus.usart3
+  # The core, for execution tracing. Named here for the same reason every
+  # other peripheral is: the engine must not know what a CPU is called.
+  cpu_peripheral: sysbus.cpu
   vector_table_symbol: null
   can_bitrate: 500000
   tier: modelled
@@ -88,6 +97,9 @@ bms_s32k:
   zephyr_board: mr_canhubk3
   can_peripheral: sysbus.can0
   uart_peripheral: sysbus.lpuart2
+  # The core, for execution tracing. Named here for the same reason every
+  # other peripheral is: the engine must not know what a CPU is called.
+  cpu_peripheral: sysbus.cpu
   # S32K3 has no boot ROM parsing the IVT under emulation, so the vector table
   # offset must be set from the ELF or the core runs from a garbage table.
   # Renode's own scripts/single-node/nxp-s32k388_zephyr.resc does exactly this.
@@ -122,6 +134,9 @@ vcu_s32k:
   zephyr_board: mr_canhubk3
   can_peripheral: sysbus.can0
   uart_peripheral: sysbus.lpuart2
+  # The core, for execution tracing. Named here for the same reason every
+  # other peripheral is: the engine must not know what a CPU is called.
+  cpu_peripheral: sysbus.cpu
   vector_table_symbol: _vector_table
   can_bitrate: 500000
   tier: declared
@@ -132,6 +147,9 @@ chg_s32k:
   zephyr_board: mr_canhubk3
   can_peripheral: sysbus.can0
   uart_peripheral: sysbus.lpuart2
+  # The core, for execution tracing. Named here for the same reason every
+  # other peripheral is: the engine must not know what a CPU is called.
+  cpu_peripheral: sysbus.cpu
   vector_table_symbol: _vector_table
   can_bitrate: 500000
   tier: declared
@@ -146,6 +164,9 @@ nucleo_h743zi:
   zephyr_board: nucleo_h743zi
   can_peripheral: sysbus.fdcan1
   uart_peripheral: sysbus.usart3
+  # The core, for execution tracing. Named here for the same reason every
+  # other peripheral is: the engine must not know what a CPU is called.
+  cpu_peripheral: sysbus.cpu
   vector_table_symbol: null
   can_bitrate: 500000
   tier: modelled

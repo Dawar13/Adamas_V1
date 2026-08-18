@@ -1,0 +1,55 @@
+# overtemp-sweep — the over-temperature limit, walked across its boundary.
+# =============================================================================
+# THIS FILE IS PROJECT DATA. The pattern supplies the SHAPE; everything below
+# binds it to this vehicle. Ids and signal names come from catalog.yml, node
+# and symbol names from network.yml, and the limit from the firmware itself
+# (firmware/bms/src/bms.h: BMS_OVERTEMP_LIMIT_dC 550).
+#
+# WHY A SWEEP AND NOT A SINGLE VALUE
+# -----------------------------------------------------------------------------
+# All eight original Phase 1 scenarios passed against a firmware whose
+# comparison had been inverted from `>` to `>=`, because every one injected a
+# value comfortably past the limit where both implementations behave
+# identically. The two adjacent values at the boundary carry the entire
+# discrimination power; everything further out confirms the obvious.
+#
+# The generator REFUSES to expand this without the boundary pair, so the
+# property cannot be lost by editing the list carelessly.
+# =============================================================================
+
+id: overtemp-sweep
+title: Over-temperature across its boundary, at several points in the drive
+description: >
+  Walk the cell-temperature limit from comfortably legal to comfortably over,
+  landing exactly on the limit and one tenth of a degree above it. The limit
+  itself must be legal; the first value above it must fault and latch.
+
+pattern: threshold-exceeded
+
+params:
+  node: bms
+  symbol: g_cell_temp_dC
+  limit: 550
+  unit: dC
+  message: 0x604
+  signal: fault_code
+  value_name: OVERTEMP
+  deadline: 50
+  latching: true
+  healthy: 250
+  observe_ms: 300
+  latch_ms: 600
+  boot_timeout: 100
+
+sweep:
+  # 550 is the limit and 551 the first faulting value: the mandatory pair.
+  # The rest confirm the behaviour is monotonic rather than a coincidence at
+  # one point.
+  values: [500, 530, 545, 549, 550, 551, 555, 570, 600, 650]
+
+  # WHEN the reading arrives, in milliseconds after boot. Each moment meets the
+  # firmware in a different state, so these are not repeats of one another:
+  #   200   standby, before any drive request
+  #   800   running, contactor closed and under load
+  #   1500  well into the drive, after the periodic reports have settled
+  at: [200, 800, 1500]
