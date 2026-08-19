@@ -96,8 +96,18 @@ try {
           </div>
 
           <div class="bus-line" role="img" aria-label={`${bus.id} bus`}>
+            {/*
+              The engine reads type and bitrate with a bare get, so both can be
+              absent. Dividing an absent bitrate produced "NaN kbit/s", and a
+              zero produced a measured-looking "0 kbit/s" -- a bus speed nobody
+              declared, drawn as though someone had.
+            */}
             <span class="bus-label mono">
-              {bus.id} · {bus.type.toUpperCase()} · {(bus.bitrate / 1000).toFixed(0)} kbit/s
+              {bus.id}
+              {bus.type ? ` · ${String(bus.type).toUpperCase()}` : ""}
+              {typeof bus.bitrate === "number" && bus.bitrate > 0
+                ? ` · ${(bus.bitrate / 1000).toFixed(0)} kbit/s`
+                : " · bit rate not declared"}
             </span>
           </div>
         </section>

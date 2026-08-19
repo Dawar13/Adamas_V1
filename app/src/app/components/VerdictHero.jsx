@@ -20,26 +20,13 @@
  * beside it. A `modelled` run says modelled.
  */
 
-const TIER_RANK = { verified: 3, modelled: 2, declared: 1 };
-
-/**
- * The tier of a run is the WEAKEST tier among its machines, not the tier of
- * the device under test. A verified board talking to a modelled peer produced
- * a result that depended on the modelled one.
+/*
+ * runTier used to live here and has moved to the run loader, which sees every
+ * test rather than the one on screen. It is not re-exported: a second, weaker
+ * implementation sitting unused beside the real one is a trap for whoever needs
+ * a tier next. (The version removed here also ranked an unknown tier as 0, so
+ * once held it could never be displaced by a genuinely weaker one.)
  */
-export function runTier(tests) {
-  let weakest = null;
-  let note = null;
-  for (const record of tests) {
-    const tier = record?.run?.tier;
-    if (!tier) continue;
-    if (weakest === null || (TIER_RANK[tier] ?? 0) < (TIER_RANK[weakest] ?? 0)) {
-      weakest = tier;
-      note = record.run.tier_note ?? null;
-    }
-  }
-  return { tier: weakest, note };
-}
 
 function duration(seconds) {
   if (seconds === null || seconds === undefined) return null;
@@ -86,7 +73,10 @@ export default function VerdictHero({ run, tier }) {
 
       <div className="hero-chips">
         {tier.tier ? (
-          <span className={`chip chip-tier is-${tier.tier}`}>
+          <span
+            className={`chip chip-tier is-${tier.unknown ? "unknown" : tier.tier}`}
+            title={tier.unknown ? "This tier is not one this screen knows how to rank." : undefined}
+          >
             {tier.tier.toUpperCase()}
           </span>
         ) : (
@@ -104,6 +94,11 @@ export default function VerdictHero({ run, tier }) {
         ) : null}
         {summary.complete === false && (
           <span className="chip chip-warn">PARTIAL — not a suite result</span>
+        )}
+        {summary.complete === undefined && (
+          // Absent is not complete. A run that never said it covered its suite
+          // must not be read as one that did.
+          <span className="chip chip-warn">completeness not recorded</span>
         )}
       </div>
 

@@ -24,7 +24,19 @@ import { listRuns } from "../../server/store/loaders/runs.mjs";
  * at the schema and the loader enforces it again on read; this screen must not
  * work around either.
  */
-const runs = await listRuns();
+/*
+ * A directory-level failure -- the runs root unreadable, a permission error --
+ * used to escape as a 500 with a stack trace on the studio's home page. An
+ * error page that says nothing is the one place a tool cannot afford to be
+ * vague, because it is where someone lands when something is already wrong.
+ */
+let runs = [];
+let listingFailed = null;
+try {
+  runs = await listRuns();
+} catch (err) {
+  listingFailed = err.message;
+}
 
 const readable = runs.filter((run) => run.readable);
 const refused = runs.filter((run) => !run.readable);
@@ -67,7 +79,18 @@ function verdictOf(run) {
 <Base title="Runs — Bench">
   <h1 class="page-head">Stored runs</h1>
 
-  {runs.length === 0 && (
+  {listingFailed && (
+    <section class="empty is-refused">
+      <h3>The stored runs could not be listed.</h3>
+      <p class="mono">{listingFailed}</p>
+      <p>
+        This is a problem reading <code>project/runs/</code>, not a statement
+        that no runs exist. Nothing has been hidden.
+      </p>
+    </section>
+  )}
+
+  {!listingFailed && runs.length === 0 && (
     <section class="empty">
       <h3>No runs are stored yet.</h3>
       <p>

@@ -90,6 +90,25 @@ const board = node?.board_detail ?? null;
         </section>
       )}
 
+      {board?.tier === "declared" && (
+        /*
+         * Section 6.3 and the tier system: `declared` means definable and NOT
+         * executable -- the engine refuses to run it. Rendering it as an
+         * ordinary working machine, separated only by a subdued chip, invites
+         * someone to point a test at a board that cannot run one.
+         */
+        <section class="empty is-refused">
+          <h3>This board is declared, not runnable.</h3>
+          <p>
+            It is defined so the system can be drawn and reasoned about, and the
+            engine refuses to execute it{board.blocked_by
+              ? <> — blocked by <span class="mono">{board.blocked_by}</span></>
+              : null}.
+            Any result attributed to it would be a result nothing produced.
+          </p>
+        </section>
+      )}
+
       {node.is_real && (
         <>
           <section class="detail-block">

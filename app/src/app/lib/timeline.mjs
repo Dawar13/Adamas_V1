@@ -8,13 +8,23 @@
  */
 
 /** Microseconds as milliseconds, at the precision the engine itself reports. */
+/**
+ * Microseconds as milliseconds, always to three decimals.
+ *
+ * It used to print one decimal for a whole millisecond and three otherwise, so
+ * a column of latencies mixed 50.0 with 200.400 and stopped lining up on the
+ * decimal point. Tabular figures exist so a column can be scanned; varying the
+ * decimal count throws that away for the sake of a shorter number, and the
+ * engine measures in microseconds either way.
+ */
 export function ms(us) {
   if (us === null || us === undefined) return null;
-  return (us / 1000).toFixed(us % 1000 === 0 ? 1 : 3);
+  return (us / 1000).toFixed(3);
 }
 
 export function hex(id) {
   if (id === null || id === undefined) return null;
+  // padStart only pads; an extended identifier keeps its own width.
   return `0x${id.toString(16).toUpperCase().padStart(3, "0")}`;
 }
 

@@ -133,7 +133,10 @@ export async function listRuns() {
         passed: summary.passed ?? null,
         counts: summary.counts ?? {},
         shards: summary.shards ?? null,
-        complete: summary.complete !== false,
+        // Absent is not complete. `summary.complete !== false` called an
+        // unflagged run a whole suite, which is the flattering reading of a
+        // field that exists precisely to say a run covered less than its suite.
+        complete: summary.complete === true ? true : summary.complete === false ? false : null,
         shard_seconds_total: summary.shard_seconds_total ?? summary.duration_s ?? null,
         suite_fingerprint: summary.suite_fingerprint ?? null,
         firmware: provenance.firmware,

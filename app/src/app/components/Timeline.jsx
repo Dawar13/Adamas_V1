@@ -43,7 +43,7 @@ function ReactionText({ headline }) {
   return <span className="tl-detail mono">{parts.join("   ")}</span>;
 }
 
-export default function Timeline({ record }) {
+export default function Timeline({ record, outcome }) {
   const tl = useMemo(() => readTimeline(record), [record]);
 
   if (!tl) {
@@ -132,13 +132,39 @@ export default function Timeline({ record }) {
         )}
       </div>
 
-      <p className={`tl-verdict ${overran ? "is-fault" : reactedUs === null ? "is-absent" : "is-pass"}`}>
+      {/*
+        * The colour follows the TEST, not just this one interval.
+        *
+        * It used to go reserved green whenever the reaction landed inside the
+        * budget -- so a test that failed on a different assertion entirely
+        * displayed a green timing line, which is a pass colour on a failing
+        * test. The interval is still reported exactly; only the claim the
+        * colour makes is now conditioned on the test's own outcome.
+        */}
+      <p className={`tl-verdict ${
+        overran || (outcome && outcome !== "pass")
+          ? "is-fault"
+          : reactedUs === null
+            ? "is-absent"
+            : "is-pass"
+      }`}>
         {reactedUs === null ? (
-          <>No reaction was observed within the {budgetMs} ms budget.</>
+          budgetMs === null ? (
+            <>No reaction was observed, and this test declared no budget.</>
+          ) : (
+            <>No reaction was observed within the {budgetMs} ms budget.</>
+          )
         ) : overran ? (
           <>
             Reacted in <strong className="mono">{ms(latencyUs)} ms</strong>, past
             the <strong className="mono">{budgetMs} ms</strong> budget.
+          </>
+        ) : budgetMs === null ? (
+          // A sentence with a hole where the number belongs is worse than a
+          // shorter sentence that is true.
+          <>
+            Reacted in <strong className="mono">{ms(latencyUs)} ms</strong>. This
+            test declared no deadline.
           </>
         ) : (
           <>

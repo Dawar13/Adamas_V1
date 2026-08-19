@@ -26,9 +26,28 @@ export function margin(entry) {
 export function chooseFocus(tests) {
   if (!tests || !tests.length) return null;
 
-  const failures = tests.filter((t) => t.outcome !== "pass");
+  /*
+   * A test that did not pass did not necessarily FAIL.
+   *
+   * This selected the first `outcome !== "pass"` and announced it on screen as
+   * "the first failure" -- so a refused, timed-out, crashed or self-
+   * contradicting test was reported to the reader as firmware that broke. The
+   * same overstatement as the failures heading, in the one line that exists to
+   * explain why this test is the one being shown.
+   */
+  const failures = tests.filter((t) => t.outcome === "fail");
   if (failures.length) {
     return { test: failures[0].test, why: "the first failure" };
+  }
+
+  const unresolved = tests.filter(
+    (t) => t.outcome && t.outcome !== "pass" && t.outcome !== "fail"
+  );
+  if (unresolved.length) {
+    return {
+      test: unresolved[0].test,
+      why: `the first test that reached no verdict — ${unresolved[0].outcome}`,
+    };
   }
 
   let closest = null;
@@ -44,7 +63,11 @@ export function chooseFocus(tests) {
     };
   }
 
-  // Nothing in this run measured a latency against a budget. Say so rather
-  // than implying the first test was chosen for a reason.
-  return { test: tests[0].test, why: "the first test — no test in this run has a timing budget" };
+  // Nothing here has a latency AND a budget to compare it against, which is
+  // not the same as "no test declares a budget" -- the earlier wording claimed
+  // the second while having established only the first.
+  return {
+    test: tests[0].test,
+    why: "the first test — no test in this run has both a latency and a budget to compare",
+  };
 }

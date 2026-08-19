@@ -40,7 +40,16 @@ export async function loadTopology(file = "network.yml") {
   const script = path.join(REPO_ROOT, "harness", "network.py");
   let stdout;
   try {
-    ({ stdout } = await run(PYTHON, [...PYTHON_ARGS, script, file], {
+    /*
+     * `--` before the path, so a value starting with a dash is a PATH.
+     *
+     * Without it argparse consumes "-x" as an option, the positional defaults,
+     * and the engine loads the REPOSITORY'S topology while the studio believes
+     * it asked for another. The canvas would then draw a real, correct picture
+     * of the wrong system -- and nothing on screen would be wrong except which
+     * system it is.
+     */
+    ({ stdout } = await run(PYTHON, [...PYTHON_ARGS, script, "--", file], {
       cwd: REPO_ROOT,
       maxBuffer: 8 * 1024 * 1024,
     }));

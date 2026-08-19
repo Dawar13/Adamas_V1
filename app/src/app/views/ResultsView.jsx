@@ -182,7 +182,17 @@ function TestsTab({ run, tests, focus, setFocus, runId }) {
             return (
               <tr
                 key={entry.test}
-                className={`${active ? "is-active" : ""} ${entry.outcome !== "pass" ? "is-fault" : ""}`}
+                /*
+                 * Reserved fault red only for an actual fail. It was painted on
+                 * every non-pass row, so refused, unusable, timeout,
+                 * inconsistent and crashed -- all of which mean the run did not
+                 * happen -- were coloured as things the firmware did wrong.
+                 */
+                className={[
+                  active ? "is-active" : "",
+                  entry.outcome === "fail" ? "is-fault" : "",
+                  entry.outcome && NO_VERDICT.has(entry.outcome) ? "is-unresolved" : "",
+                ].join(" ").trim()}
               >
                 <td>
                   <button className="link" onClick={() => setFocus(entry.test)}>
@@ -215,12 +225,16 @@ function FramesTab({ record, runId, focus }) {
   return (
     <section>
       <p className="frames-lead">
+        {/*
+          `?? 0` rendered three measured-looking zeros for a record that carried
+          no counts at all. An em dash is not a number, which is the point.
+        */}
         <strong className="mono">{counts.frames ?? timeline.length}</strong> events
-        recorded — <strong className="mono">{counts.transmitted_by_device_under_test ?? 0}</strong> from
+        recorded — <strong className="mono">{counts.transmitted_by_device_under_test ?? "—"}</strong> from
         the device under test,{" "}
-        <strong className="mono">{counts.transmitted_by_other_nodes ?? 0}</strong> from
+        <strong className="mono">{counts.transmitted_by_other_nodes ?? "—"}</strong> from
         other nodes,{" "}
-        <strong className="mono">{counts.injected ?? 0}</strong> injected.
+        <strong className="mono">{counts.injected ?? "—"}</strong> injected.
         <a className="btn" href={`/api/runs/${runId}/tests/${focus}/frames`}>
           download candump log
         </a>
@@ -237,7 +251,24 @@ function FramesTab({ record, runId, focus }) {
         </thead>
         <tbody>
           {bus.slice(0, 500).map((event, index) => {
-            const [node, id, dlc, data] = event.fields;
+            /*
+             * The engine's own frame reader skips any frame event with too few
+             * fields rather than trusting the positions. Destructuring blindly
+             * here would render `undefined` as an identifier or a payload --
+             * printing a frame that was never on the bus.
+             */
+            const fields = event.fields || [];
+            if (fields.length < 4) {
+              return (
+                <tr key={index} className="is-unresolved">
+                  <td className="num mono">{ms(event.us)}</td>
+                  <td colSpan={4} className="muted">
+                    this event carries {fields.length} field(s); a frame needs four
+                  </td>
+                </tr>
+              );
+            }
+            const [node, id, dlc, data] = fields;
             return (
               <tr key={index} className={event.kind === "TX" ? "is-dut" : ""}>
                 <td className="num mono">{ms(event.us)}</td>
@@ -460,12 +491,23 @@ export default function ResultsView({ runId, run, initialFocus, initialRecord })
 
       <section className="focus">
         <header className="focus-head">
-          <h2 className="mono">{focus}</h2>
+          <h2 className="mono">{focus ?? "No test to show"}</h2>
           {focusWhy && <span className="focus-why">shown because it is {focusWhy}</span>}
         </header>
+        {!focus && (
+          <p className="muted">
+            This run stores no test records, so there is no timeline to draw. The
+            summary above is all it contains.
+          </p>
+        )}
         {record.loading && <p className="muted">Reading the timeline…</p>}
         {record.error && <p className="is-fault">{record.error}</p>}
-        {record.data && <Timeline record={record.data} />}
+        {record.data && (
+          <Timeline
+            record={record.data}
+            outcome={tests.find((t) => t.test === focus)?.outcome}
+          />
+        )}
         {record.data && record.data.scenario?.description && (
           <p className="focus-desc">{record.data.scenario.description}</p>
         )}

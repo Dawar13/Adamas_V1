@@ -50,10 +50,35 @@ describe("which test the timeline shows", () => {
     assert.equal(chosen.test, "tight");
   });
 
-  it("says so when no test has a budget, rather than implying a reason", () => {
+  it("does not claim more than it established when nothing is comparable", () => {
+    // The wording used to be "no test in this run has a timing budget" -- a
+    // claim about the records that this function never checks. All it knows is
+    // that no test had BOTH a latency and a budget to compare.
     const chosen = chooseFocus([pass("a", null, null), pass("b", null, null)]);
     assert.equal(chosen.test, "a");
-    assert.match(chosen.why, /no test in this run has a timing budget/);
+    assert.match(chosen.why, /both a latency and a budget/);
+  });
+
+  it("shows a test that reached no verdict, and does not call it a failure", () => {
+    // refused, timeout, crashed and inconsistent mean no verdict was reached.
+    // Announcing one as "the first failure" reports firmware that broke.
+    const chosen = chooseFocus([
+      pass("a", 400, 50),
+      { test: "b", outcome: "crashed", latency_us: null, budget_ms: null },
+    ]);
+    assert.equal(chosen.test, "b");
+    assert.doesNotMatch(chosen.why, /failure/);
+    assert.match(chosen.why, /no verdict/);
+    assert.match(chosen.why, /crashed/);
+  });
+
+  it("still prefers a real failure over a test that reached no verdict", () => {
+    const chosen = chooseFocus([
+      { test: "crash", outcome: "timeout", latency_us: null, budget_ms: null },
+      { test: "real", outcome: "fail", latency_us: null, budget_ms: 50 },
+    ]);
+    assert.equal(chosen.test, "real");
+    assert.match(chosen.why, /failure/);
   });
 
   it("returns nothing for an empty run", () => {
@@ -141,13 +166,20 @@ describe("reading the three instants", () => {
 });
 
 describe("formatting", () => {
-  it("keeps microsecond precision when there is any", () => {
+  it("keeps microsecond precision", () => {
     assert.equal(ms(400), "0.400");
     assert.equal(ms(200400), "200.400");
   });
 
-  it("does not invent precision on a round number", () => {
-    assert.equal(ms(50000), "50.0");
+  it("uses the same decimal count for every number, including round ones", () => {
+    // This asserted "50.0" -- one decimal for a whole millisecond, three
+    // otherwise. That was wrong, and the reason is the spec: tabular figures
+    // exist so a column of latencies can be scanned, and a varying decimal
+    // count stops them lining up on the decimal point. The engine measures in
+    // microseconds regardless, so the trailing zeros are real precision.
+    assert.equal(ms(50000), "50.000");
+    assert.equal(ms(0), "0.000");
+    assert.equal([ms(400), ms(50000)].every((x) => x.split(".")[1].length === 3), true);
   });
 
   it("says nothing for an absent measurement", () => {

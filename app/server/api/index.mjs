@@ -44,7 +44,8 @@ const ROUTES = [
   {
     pattern: /^\/api\/runs\/([^/]+)\/?$/,
     async handle(_res, match) {
-      return await openRun(decodeURIComponent(match[1]));
+      const id = decodeURIComponent(match[1]);
+      return await openRun(id);
     },
   },
   {
@@ -84,6 +85,20 @@ const DOS_DEVICES = new Set([
   ...Array.from({ length: 9 }, (_, i) => `lpt${i + 1}`),
 ]);
 
+/*
+ * Containment, compared the way the filesystem compares.
+ *
+ * A case-sensitive prefix test on Windows rejects legitimate in-repo paths
+ * whose drive letter or directory case differs, and it is the wrong comparison
+ * for a case-insensitive filesystem in both directions.
+ */
+function contained(requested) {
+  const full = path.resolve(REPO_ROOT, requested);
+  const relative = path.relative(REPO_ROOT, full);
+  if (relative === "") return true;
+  return !relative.startsWith("..") && !path.isAbsolute(relative);
+}
+
 function namesADevice(full) {
   return full
     .split(/[\\/]/)
@@ -91,14 +106,13 @@ function namesADevice(full) {
 }
 
 async function serveFile(res, requested) {
-  const full = path.resolve(REPO_ROOT, requested);
-  const inside = full === REPO_ROOT || full.startsWith(REPO_ROOT + path.sep);
-  if (!inside) {
+  if (!contained(requested)) {
     json(res, 403, {
       error: `'${requested}' is outside the project, so it is not shown here.`,
     });
     return;
   }
+  const full = path.resolve(REPO_ROOT, requested);
   if (namesADevice(full)) {
     json(res, 403, {
       error: `'${requested}' names a system device, not a file in the project.`,
@@ -142,6 +156,10 @@ async function serveFrames(res, id, test) {
     // the response rather than finish it and let a truncated log look whole.
     res.destroy();
   });
+  // And if the client leaves, close the file rather than leaking a handle for
+  // every abandoned download.
+  res.on("close", () => stream.destroy());
+  res.on("error", () => stream.destroy());
   stream.pipe(res);
 }
 
@@ -159,10 +177,27 @@ export async function handleApi(req, res) {
     return true;
   }
 
+  // A malformed percent-escape makes decodeURIComponent throw URIError, which
+  // fell through to the generic 500 -- answering a bad request with an internal
+  // error, and telling the caller nothing about what to fix.
+  const decode = (value) => {
+    try {
+      return decodeURIComponent(value);
+    } catch {
+      return null;
+    }
+  };
+
   try {
     const frames = pathname.match(/^\/api\/runs\/([^/]+)\/tests\/([^/]+)\/frames\/?$/);
     if (frames) {
-      await serveFrames(res, decodeURIComponent(frames[1]), decodeURIComponent(frames[2]));
+      const id = decode(frames[1]);
+      const test = decode(frames[2]);
+      if (id === null || test === null) {
+        json(res, 400, { error: "the request path is not valid URL encoding" });
+        return true;
+      }
+      await serveFrames(res, id, test);
       return true;
     }
 
@@ -180,8 +215,7 @@ export async function handleApi(req, res) {
       const wanted = url.searchParams.get("file");
       if (wanted !== null) {
         const full = path.resolve(REPO_ROOT, wanted);
-        const inside = full === REPO_ROOT || full.startsWith(REPO_ROOT + path.sep);
-        if (!inside || namesADevice(full) ||
+        if (!contained(wanted) || namesADevice(full) ||
             !VIEWABLE.has(path.extname(full).toLowerCase())) {
           json(res, 403, {
             error: `'${wanted}' is not a topology file inside this project.`,
@@ -206,6 +240,10 @@ export async function handleApi(req, res) {
     for (const route of ROUTES) {
       const match = pathname.match(route.pattern);
       if (match) {
+        if (match.slice(1).some((part) => decode(part) === null)) {
+          json(res, 400, { error: "the request path is not valid URL encoding" });
+          return true;
+        }
         json(res, 200, await route.handle(res, match));
         return true;
       }

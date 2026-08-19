@@ -916,3 +916,12 @@ tr.is-fault td {
 .brand-note {
   margin-left: auto;
 }
+
+/*
+ * A row whose test reached no verdict. Not green, not red -- both would claim
+ * something about firmware that was never determined.
+ */
+tr.is-unresolved td {
+  background: var(--bg-sunken);
+  color: var(--ink-muted);
+}
