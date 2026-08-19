@@ -1,0 +1,12 @@
+{
+  "firmware": {
+    "bms": "7f780a868eb3b436d28b736528869b5729771d350f2678e55bdc53052a2faec2",
+    "vcu": "0270a64bf62d3d5796f66b250c1143bff8348edc80cde6702921693fd4250823",
+    "charger": "be522fd0745e1b7e495035691c308331ed3752b53f735d9733bcd9dced490d54"
+  },
+  "tool_versions": {
+    "BENCH_RENODE_VERSION": "1.16.1",
+    "BENCH_ZEPHYR_VERSION": "v3.5.0",
+    "BENCH_SDK_VERSION": "0.16.8"
+  }
+}

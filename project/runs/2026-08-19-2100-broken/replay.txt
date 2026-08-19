@@ -1,0 +1,1 @@
+bash scripts/run-suite-sharded.sh --shards 4 --topology harness/out/network-bms-broken.yml

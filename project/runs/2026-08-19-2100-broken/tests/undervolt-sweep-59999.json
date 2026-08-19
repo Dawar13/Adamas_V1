@@ -1,0 +1,7868 @@
+{
+  "test": "undervolt-sweep-59999",
+  "outcome": "pass",
+  "exit_code": 0,
+  "verdict": "PASS",
+  "latency_us": 400,
+  "out_dir": "harness/out/shard3/undervolt-sweep-59999",
+  "scenario": {
+    "id": "undervolt-sweep-59999",
+    "title": "Pack under-voltage applies while driving and not while parked -- limit = 59999, expected fault",
+    "description": "Walk the under-voltage limit across its boundary in both states. Parked, no value may raise a fault however low it goes. Driving, the limit itself is legal and the first value below it must fault with UNDERVOLT and latch.\nGenerated from pattern 'state-dependent-rule' by harness/expand.py.\nThis variant places limit at 59999, which is the mandatory fault member of the boundary of limit = 60000 under a strict comparison.\nThe expected outcome for this variant is fault.",
+    "path": ".generated/tests/undervolt-sweep-59999.yml",
+    "sha256": "5f319672bf6924fc08dca39afe914d6b4fc7e9609579b8df8316dc8fdbc7531b",
+    "steps": [
+      {
+        "step": 1,
+        "verb": "wait_uart",
+        "params": {
+          "node": "bms",
+          "text": "BMS ready",
+          "timeout_ms": 100
+        }
+      },
+      {
+        "step": 2,
+        "verb": "expect_can",
+        "params": {
+          "id": 1538,
+          "signals": {
+            "contactor_state": "OPEN"
+          },
+          "within_ms": 200,
+          "label": "nothing is tripped before this test does anything"
+        }
+      },
+      {
+        "step": 3,
+        "verb": "mark",
+        "params": "held in the state this rule does not apply in"
+      },
+      {
+        "step": 4,
+        "verb": "node_signal",
+        "params": {
+          "node": "charger",
+          "id": 768,
+          "signals": {
+            "charge_state": "IDLE"
+          }
+        }
+      },
+      {
+        "step": 5,
+        "verb": "node_signal",
+        "params": {
+          "node": "vcu",
+          "id": 512,
+          "signals": {
+            "drive_state": "PARKED"
+          }
+        }
+      },
+      {
+        "step": 6,
+        "verb": "mark",
+        "params": "59999 mV injected where the rule does not apply"
+      },
+      {
+        "step": 7,
+        "verb": "write_symbol",
+        "params": {
+          "node": "bms",
+          "symbol": "g_pack_mv",
+          "value": 59999
+        }
+      },
+      {
+        "step": 8,
+        "verb": "expect_no_can",
+        "params": {
+          "id": 1540,
+          "for_ms": 300,
+          "label": "59999 mV is not a safety event in this state"
+        }
+      },
+      {
+        "step": 9,
+        "verb": "expect_symbol",
+        "params": {
+          "node": "bms",
+          "symbol": "g_pack_mv",
+          "equals": 59999,
+          "label": "the value the rule compares really is 59999 mV"
+        }
+      },
+      {
+        "step": 10,
+        "verb": "wait_uart",
+        "params": {
+          "node": "bms",
+          "text": "state=STANDBY contactor=OPEN fault=NONE",
+          "timeout_ms": 800,
+          "label": "the device reports the state this rule does not apply in"
+        }
+      },
+      {
+        "step": 11,
+        "verb": "mark",
+        "params": "healthy again, then the state the rule does apply in"
+      },
+      {
+        "step": 12,
+        "verb": "write_symbol",
+        "params": {
+          "node": "bms",
+          "symbol": "g_pack_mv",
+          "value": 72000
+        }
+      },
+      {
+        "step": 13,
+        "verb": "node_signal",
+        "params": {
+          "node": "vcu",
+          "id": 512,
+          "signals": {
+            "drive_state": "DRIVE"
+          }
+        }
+      },
+      {
+        "step": 14,
+        "verb": "wait_uart",
+        "params": {
+          "node": "bms",
+          "text": "bms state PRECHARGE -> RUNNING",
+          "timeout_ms": 800,
+          "label": "the device reports the state this rule applies in"
+        }
+      },
+      {
+        "step": 15,
+        "verb": "mark",
+        "params": "the same 59999 mV, now where the rule applies \u2014 expected fault"
+      },
+      {
+        "step": 16,
+        "verb": "write_symbol",
+        "params": {
+          "node": "bms",
+          "symbol": "g_pack_mv",
+          "value": 59999
+        }
+      },
+      {
+        "step": 17,
+        "verb": "expect_can",
+        "params": {
+          "id": 1540,
+          "signals": {
+            "fault_code": "UNDERVOLT"
+          },
+          "within_ms": 50,
+          "label": "59999 mV faults with UNDERVOLT where the rule applies"
+        }
+      },
+      {
+        "step": 18,
+        "verb": "expect_can",
+        "params": {
+          "id": 1536,
+          "signals": {
+            "pack_voltage_mv": 59999
+          },
+          "within_ms": 200,
+          "label": "the device publishes the reading it faulted on"
+        }
+      },
+      {
+        "step": 19,
+        "verb": "write_symbol",
+        "params": {
+          "node": "bms",
+          "symbol": "g_pack_mv",
+          "value": 72000
+        }
+      },
+      {
+        "step": 20,
+        "verb": "expect_can",
+        "params": {
+          "id": 1540,
+          "signals": {
+            "fault_code": "UNDERVOLT"
+          },
+          "within_ms": 600,
+          "label": "the fault stays latched after the value returns"
+        }
+      }
+    ]
+  },
+  "timeline": [
+    {
+      "us": 0,
+      "kind": "MARK",
+      "fields": [
+        "scenario",
+        "undervolt-sweep-59999"
+      ]
+    },
+    {
+      "us": 0,
+      "kind": "EXPECT_ARM",
+      "fields": [
+        "t1",
+        "0",
+        "424d53207265616479",
+        "0",
+        "100000",
+        "console:",
+        "BMS",
+        "ready"
+      ]
+    },
+    {
+      "us": 100,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "200",
+        "8",
+        "0000000000000000"
+      ]
+    },
+    {
+      "us": 100,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "201",
+        "8",
+        "0000000000000000"
+      ]
+    },
+    {
+      "us": 100,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "202",
+        "4",
+        "01a00000"
+      ]
+    },
+    {
+      "us": 200,
+      "kind": "EXPECT_MET",
+      "fields": [
+        "t1",
+        "200"
+      ]
+    },
+    {
+      "us": 20000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 20000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 20000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 40000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 40000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 40000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 60000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 60000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 60000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 80000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 80000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 80000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 100000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 100000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 100000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 100000,
+      "kind": "EXPECT_ARM",
+      "fields": [
+        "t2",
+        "602",
+        "000000000000",
+        "00000000ff00",
+        "200000",
+        "nothing",
+        "is",
+        "tripped",
+        "before",
+        "this",
+        "test",
+        "does",
+        "anything"
+      ]
+    },
+    {
+      "us": 100000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "200",
+        "8",
+        "0000000001000000"
+      ]
+    },
+    {
+      "us": 100000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "201",
+        "8",
+        "0000000000000000"
+      ]
+    },
+    {
+      "us": 100000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "202",
+        "4",
+        "01a00000"
+      ]
+    },
+    {
+      "us": 100300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "600",
+        "8",
+        "4019010000003200"
+      ]
+    },
+    {
+      "us": 100300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "602",
+        "6",
+        "000000000000"
+      ]
+    },
+    {
+      "us": 100300,
+      "kind": "EXPECT_MET",
+      "fields": [
+        "t2",
+        "100300"
+      ]
+    },
+    {
+      "us": 120000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 120000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 120000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 140000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 140000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 140000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 160000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 160000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 160000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 180000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 180000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 180000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 200000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 200000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 200000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 200000,
+      "kind": "INJ",
+      "fields": [
+        "dash",
+        "500",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 200000,
+      "kind": "INJ",
+      "fields": [
+        "dash",
+        "501",
+        "6",
+        "d8040000003e"
+      ]
+    },
+    {
+      "us": 200000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "200",
+        "8",
+        "0000000002000000"
+      ]
+    },
+    {
+      "us": 200000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "201",
+        "8",
+        "0000000000000000"
+      ]
+    },
+    {
+      "us": 200000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "202",
+        "4",
+        "01a00000"
+      ]
+    },
+    {
+      "us": 200015,
+      "kind": "TXN",
+      "fields": [
+        "charger",
+        "300",
+        "8",
+        "0000000000000000"
+      ]
+    },
+    {
+      "us": 200300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "600",
+        "8",
+        "4019010000003201"
+      ]
+    },
+    {
+      "us": 200300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "602",
+        "6",
+        "000000000000"
+      ]
+    },
+    {
+      "us": 220000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 220000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 220000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 240000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 240000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 240000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 250300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "601",
+        "6",
+        "fa00fa00fa00"
+      ]
+    },
+    {
+      "us": 260000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 260000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 260000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 280000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 280000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 280000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 300000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 300000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 300000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 300000,
+      "kind": "MARK",
+      "fields": [
+        "held",
+        "in",
+        "the",
+        "state",
+        "this",
+        "rule",
+        "does",
+        "not",
+        "apply",
+        "in"
+      ]
+    },
+    {
+      "us": 300000,
+      "kind": "STIM",
+      "fields": [
+        "write_symbol",
+        "charger.g_charge_state_force=0@2400006c:1"
+      ]
+    },
+    {
+      "us": 300000,
+      "kind": "STIM",
+      "fields": [
+        "write_symbol",
+        "vcu.g_drive_state=0@2400043c:1"
+      ]
+    },
+    {
+      "us": 300000,
+      "kind": "MARK",
+      "fields": [
+        "59999",
+        "mV",
+        "injected",
+        "where",
+        "the",
+        "rule",
+        "does",
+        "not",
+        "apply"
+      ]
+    },
+    {
+      "us": 300000,
+      "kind": "STIM",
+      "fields": [
+        "write_symbol",
+        "bms.g_pack_mv=59999@24000000:4"
+      ]
+    },
+    {
+      "us": 300000,
+      "kind": "FORBID_ARM",
+      "fields": [
+        "t3",
+        "604",
+        "0000000000000000",
+        "0000000000000000",
+        "300000",
+        "59999",
+        "mV",
+        "is",
+        "not",
+        "a",
+        "safety",
+        "event",
+        "in",
+        "this",
+        "state"
+      ]
+    },
+    {
+      "us": 300000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "200",
+        "8",
+        "0000000003000000"
+      ]
+    },
+    {
+      "us": 300000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "201",
+        "8",
+        "0000000000000000"
+      ]
+    },
+    {
+      "us": 300000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "202",
+        "4",
+        "01a00000"
+      ]
+    },
+    {
+      "us": 300300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "600",
+        "8",
+        "5fea000000000002"
+      ]
+    },
+    {
+      "us": 300300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "602",
+        "6",
+        "000000000000"
+      ]
+    },
+    {
+      "us": 320000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 320000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 320000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 340000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 340000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 340000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 360000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 360000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 360000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 380000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 380000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 380000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 400000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 400000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 400000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 400000,
+      "kind": "INJ",
+      "fields": [
+        "dash",
+        "500",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 400000,
+      "kind": "INJ",
+      "fields": [
+        "dash",
+        "501",
+        "6",
+        "d8040000003e"
+      ]
+    },
+    {
+      "us": 400000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "200",
+        "8",
+        "0000000004000000"
+      ]
+    },
+    {
+      "us": 400000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "201",
+        "8",
+        "0000000000000000"
+      ]
+    },
+    {
+      "us": 400000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "202",
+        "4",
+        "01a00000"
+      ]
+    },
+    {
+      "us": 400023,
+      "kind": "TXN",
+      "fields": [
+        "charger",
+        "300",
+        "8",
+        "0000000000000000"
+      ]
+    },
+    {
+      "us": 400300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "600",
+        "8",
+        "5fea000000000003"
+      ]
+    },
+    {
+      "us": 400300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "602",
+        "6",
+        "000000000000"
+      ]
+    },
+    {
+      "us": 420000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 420000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 420000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 440000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 440000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 440000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 460000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 460000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 460000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 480000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 480000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 480000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 500000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 500000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 500000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 500000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "200",
+        "8",
+        "0000000005000000"
+      ]
+    },
+    {
+      "us": 500000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "201",
+        "8",
+        "0000000000000000"
+      ]
+    },
+    {
+      "us": 500000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "202",
+        "4",
+        "01a00000"
+      ]
+    },
+    {
+      "us": 500026,
+      "kind": "TXN",
+      "fields": [
+        "charger",
+        "301",
+        "4",
+        "02a00000"
+      ]
+    },
+    {
+      "us": 500300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "600",
+        "8",
+        "5fea000000000004"
+      ]
+    },
+    {
+      "us": 500300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "602",
+        "6",
+        "000000000000"
+      ]
+    },
+    {
+      "us": 500300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "601",
+        "6",
+        "fa00fa00fa00"
+      ]
+    },
+    {
+      "us": 500300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "603",
+        "6",
+        "c60ba80b6200"
+      ]
+    },
+    {
+      "us": 520000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 520000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 520000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 540000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 540000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 540000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 560000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 560000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 560000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 580000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 580000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 580000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 600000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 600000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 600000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 600000,
+      "kind": "INJ",
+      "fields": [
+        "dash",
+        "500",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 600000,
+      "kind": "INJ",
+      "fields": [
+        "dash",
+        "501",
+        "6",
+        "d8040000003e"
+      ]
+    },
+    {
+      "us": 600000,
+      "kind": "EXPECT_ARM",
+      "fields": [
+        "t4",
+        "0",
+        "0000ea5f",
+        "ffffffff",
+        "0",
+        "the",
+        "value",
+        "the",
+        "rule",
+        "compares",
+        "really",
+        "is",
+        "59999",
+        "mV"
+      ]
+    },
+    {
+      "us": 600000,
+      "kind": "EXPECT_MET",
+      "fields": [
+        "t4",
+        "600000"
+      ]
+    },
+    {
+      "us": 600000,
+      "kind": "EXPECT_ARM",
+      "fields": [
+        "t5",
+        "0",
+        "73746174653d5354414e44425920636f6e746163746f723d4f50454e206661756c743d4e4f4e45",
+        "0",
+        "800000",
+        "the",
+        "device",
+        "reports",
+        "the",
+        "state",
+        "this",
+        "rule",
+        "does",
+        "not",
+        "apply",
+        "in"
+      ]
+    },
+    {
+      "us": 600000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "200",
+        "8",
+        "0000000006000000"
+      ]
+    },
+    {
+      "us": 600000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "201",
+        "8",
+        "0000000000000000"
+      ]
+    },
+    {
+      "us": 600000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "202",
+        "4",
+        "01a00000"
+      ]
+    },
+    {
+      "us": 600030,
+      "kind": "TXN",
+      "fields": [
+        "charger",
+        "300",
+        "8",
+        "0000000000000000"
+      ]
+    },
+    {
+      "us": 600300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "600",
+        "8",
+        "5fea000000000005"
+      ]
+    },
+    {
+      "us": 600300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "602",
+        "6",
+        "000000000000"
+      ]
+    },
+    {
+      "us": 620000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 620000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 620000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 640000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 640000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 640000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 660000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 660000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 660000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 680000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 680000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 680000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 700000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 700000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 700000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 700000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "200",
+        "8",
+        "0000000007000000"
+      ]
+    },
+    {
+      "us": 700000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "201",
+        "8",
+        "0000000000000000"
+      ]
+    },
+    {
+      "us": 700000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "202",
+        "4",
+        "01a00000"
+      ]
+    },
+    {
+      "us": 700300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "600",
+        "8",
+        "5fea000000000006"
+      ]
+    },
+    {
+      "us": 700300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "602",
+        "6",
+        "000000000000"
+      ]
+    },
+    {
+      "us": 720000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 720000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 720000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 740000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 740000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 740000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 750300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "601",
+        "6",
+        "fa00fa00fa00"
+      ]
+    },
+    {
+      "us": 760000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 760000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 760000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 780000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 780000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 780000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 800000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 800000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 800000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 800000,
+      "kind": "INJ",
+      "fields": [
+        "dash",
+        "500",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 800000,
+      "kind": "INJ",
+      "fields": [
+        "dash",
+        "501",
+        "6",
+        "d8040000003e"
+      ]
+    },
+    {
+      "us": 800000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "200",
+        "8",
+        "0000000008000000"
+      ]
+    },
+    {
+      "us": 800000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "201",
+        "8",
+        "0000000000000000"
+      ]
+    },
+    {
+      "us": 800000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "202",
+        "4",
+        "01a00000"
+      ]
+    },
+    {
+      "us": 800037,
+      "kind": "TXN",
+      "fields": [
+        "charger",
+        "300",
+        "8",
+        "0000000000000000"
+      ]
+    },
+    {
+      "us": 800300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "600",
+        "8",
+        "5fea000000000007"
+      ]
+    },
+    {
+      "us": 800300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "602",
+        "6",
+        "000000000000"
+      ]
+    },
+    {
+      "us": 820000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 820000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 820000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 840000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 840000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 840000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 860000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 860000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 860000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 880000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 880000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 880000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 900000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 900000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 900000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 900000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "200",
+        "8",
+        "0000000009000000"
+      ]
+    },
+    {
+      "us": 900000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "201",
+        "8",
+        "0000000000000000"
+      ]
+    },
+    {
+      "us": 900000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "202",
+        "4",
+        "01a00000"
+      ]
+    },
+    {
+      "us": 900300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "600",
+        "8",
+        "5fea000000000008"
+      ]
+    },
+    {
+      "us": 900300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "602",
+        "6",
+        "000000000000"
+      ]
+    },
+    {
+      "us": 920000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 920000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 920000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 940000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 940000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 940000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 960000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 960000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 960000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 980000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 980000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 980000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1000000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1000000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1000000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1000000,
+      "kind": "INJ",
+      "fields": [
+        "dash",
+        "500",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1000000,
+      "kind": "INJ",
+      "fields": [
+        "dash",
+        "501",
+        "6",
+        "d8040000003e"
+      ]
+    },
+    {
+      "us": 1000000,
+      "kind": "INJ",
+      "fields": [
+        "bms_diag",
+        "610",
+        "8",
+        "0000000000000000"
+      ]
+    },
+    {
+      "us": 1000000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "200",
+        "8",
+        "000000000a000000"
+      ]
+    },
+    {
+      "us": 1000000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "201",
+        "8",
+        "0000000000000000"
+      ]
+    },
+    {
+      "us": 1000000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "202",
+        "4",
+        "01a00000"
+      ]
+    },
+    {
+      "us": 1000045,
+      "kind": "TXN",
+      "fields": [
+        "charger",
+        "300",
+        "8",
+        "0000000000000000"
+      ]
+    },
+    {
+      "us": 1000045,
+      "kind": "TXN",
+      "fields": [
+        "charger",
+        "301",
+        "4",
+        "02a00000"
+      ]
+    },
+    {
+      "us": 1000300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "600",
+        "8",
+        "5fea000000000009"
+      ]
+    },
+    {
+      "us": 1000300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "602",
+        "6",
+        "000000000000"
+      ]
+    },
+    {
+      "us": 1000300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "601",
+        "6",
+        "fa00fa00fa00"
+      ]
+    },
+    {
+      "us": 1000300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "603",
+        "6",
+        "c60ba80b6200"
+      ]
+    },
+    {
+      "us": 1000400,
+      "kind": "EXPECT_MET",
+      "fields": [
+        "t5",
+        "1000400"
+      ]
+    },
+    {
+      "us": 1020000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1020000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1020000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1040000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1040000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1040000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1060000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1060000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1060000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1080000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1080000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1080000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1100000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1100000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1100000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1100000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "200",
+        "8",
+        "000000000b000000"
+      ]
+    },
+    {
+      "us": 1100000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "201",
+        "8",
+        "0000000000000000"
+      ]
+    },
+    {
+      "us": 1100000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "202",
+        "4",
+        "01a00000"
+      ]
+    },
+    {
+      "us": 1100300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "600",
+        "8",
+        "5fea00000000000a"
+      ]
+    },
+    {
+      "us": 1100300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "602",
+        "6",
+        "000000000000"
+      ]
+    },
+    {
+      "us": 1120000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1120000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1120000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1140000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1140000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1140000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1160000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1160000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1160000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1180000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1180000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1180000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1200000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1200000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1200000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1200000,
+      "kind": "INJ",
+      "fields": [
+        "dash",
+        "500",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1200000,
+      "kind": "INJ",
+      "fields": [
+        "dash",
+        "501",
+        "6",
+        "d8040000003e"
+      ]
+    },
+    {
+      "us": 1200000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "200",
+        "8",
+        "000000000c000000"
+      ]
+    },
+    {
+      "us": 1200000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "201",
+        "8",
+        "0000000000000000"
+      ]
+    },
+    {
+      "us": 1200000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "202",
+        "4",
+        "01a00000"
+      ]
+    },
+    {
+      "us": 1200052,
+      "kind": "TXN",
+      "fields": [
+        "charger",
+        "300",
+        "8",
+        "0000000000000000"
+      ]
+    },
+    {
+      "us": 1200300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "600",
+        "8",
+        "5fea00000000000b"
+      ]
+    },
+    {
+      "us": 1200300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "602",
+        "6",
+        "000000000000"
+      ]
+    },
+    {
+      "us": 1220000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1220000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1220000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1240000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1240000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1240000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1250300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "601",
+        "6",
+        "fa00fa00fa00"
+      ]
+    },
+    {
+      "us": 1260000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1260000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1260000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1280000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1280000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1280000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1300000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1300000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1300000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1300000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "200",
+        "8",
+        "000000000d000000"
+      ]
+    },
+    {
+      "us": 1300000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "201",
+        "8",
+        "0000000000000000"
+      ]
+    },
+    {
+      "us": 1300000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "202",
+        "4",
+        "01a00000"
+      ]
+    },
+    {
+      "us": 1300300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "600",
+        "8",
+        "5fea00000000000c"
+      ]
+    },
+    {
+      "us": 1300300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "602",
+        "6",
+        "000000000000"
+      ]
+    },
+    {
+      "us": 1320000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1320000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1320000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1340000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1340000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1340000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1360000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1360000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1360000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1380000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1380000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1380000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1400000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1400000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1400000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1400000,
+      "kind": "INJ",
+      "fields": [
+        "dash",
+        "500",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1400000,
+      "kind": "INJ",
+      "fields": [
+        "dash",
+        "501",
+        "6",
+        "d8040000003e"
+      ]
+    },
+    {
+      "us": 1400000,
+      "kind": "MARK",
+      "fields": [
+        "healthy",
+        "again,",
+        "then",
+        "the",
+        "state",
+        "the",
+        "rule",
+        "does",
+        "apply",
+        "in"
+      ]
+    },
+    {
+      "us": 1400000,
+      "kind": "STIM",
+      "fields": [
+        "write_symbol",
+        "bms.g_pack_mv=72000@24000000:4"
+      ]
+    },
+    {
+      "us": 1400000,
+      "kind": "STIM",
+      "fields": [
+        "write_symbol",
+        "vcu.g_drive_state=2@2400043c:1"
+      ]
+    },
+    {
+      "us": 1400000,
+      "kind": "EXPECT_ARM",
+      "fields": [
+        "t6",
+        "0",
+        "626d7320737461746520505245434841524745202d3e2052554e4e494e47",
+        "0",
+        "800000",
+        "the",
+        "device",
+        "reports",
+        "the",
+        "state",
+        "this",
+        "rule",
+        "applies",
+        "in"
+      ]
+    },
+    {
+      "us": 1400000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "200",
+        "8",
+        "023002460e000000"
+      ]
+    },
+    {
+      "us": 1400000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "201",
+        "8",
+        "a401020000000000"
+      ]
+    },
+    {
+      "us": 1400000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "202",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1400060,
+      "kind": "TXN",
+      "fields": [
+        "charger",
+        "300",
+        "8",
+        "0000000000000000"
+      ]
+    },
+    {
+      "us": 1400300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "600",
+        "8",
+        "401901000000320d"
+      ]
+    },
+    {
+      "us": 1400300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "602",
+        "6",
+        "000000000100"
+      ]
+    },
+    {
+      "us": 1420000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1420000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1420000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1440000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1440000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1440000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1460000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1460000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1460000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1480000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1480000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1480000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1500000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1500000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1500000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1500000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "200",
+        "8",
+        "0258024b0f000000"
+      ]
+    },
+    {
+      "us": 1500000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "201",
+        "8",
+        "c201020000000000"
+      ]
+    },
+    {
+      "us": 1500000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "202",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1500063,
+      "kind": "TXN",
+      "fields": [
+        "charger",
+        "301",
+        "4",
+        "02a00000"
+      ]
+    },
+    {
+      "us": 1500300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "600",
+        "8",
+        "401901000000320e"
+      ]
+    },
+    {
+      "us": 1500300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "602",
+        "6",
+        "000000000100"
+      ]
+    },
+    {
+      "us": 1500300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "601",
+        "6",
+        "fa00fa00fa00"
+      ]
+    },
+    {
+      "us": 1500300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "603",
+        "6",
+        "1f0e010e6200"
+      ]
+    },
+    {
+      "us": 1520000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1520000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1520000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1540000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1540000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1540000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1560000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1560000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1560000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1580000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1580000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1580000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1600000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1600000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1600000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1600000,
+      "kind": "INJ",
+      "fields": [
+        "dash",
+        "500",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1600000,
+      "kind": "INJ",
+      "fields": [
+        "dash",
+        "501",
+        "6",
+        "d8040000003e"
+      ]
+    },
+    {
+      "us": 1600000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "200",
+        "8",
+        "0280025010000000"
+      ]
+    },
+    {
+      "us": 1600000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "201",
+        "8",
+        "e001020000000000"
+      ]
+    },
+    {
+      "us": 1600000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "202",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1600067,
+      "kind": "TXN",
+      "fields": [
+        "charger",
+        "300",
+        "8",
+        "0000000000000000"
+      ]
+    },
+    {
+      "us": 1600300,
+      "kind": "EXPECT_MET",
+      "fields": [
+        "t6",
+        "1600300"
+      ]
+    },
+    {
+      "us": 1600300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "600",
+        "8",
+        "401901000000320f"
+      ]
+    },
+    {
+      "us": 1600300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "602",
+        "6",
+        "dc052c010200"
+      ]
+    },
+    {
+      "us": 1620000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1620000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1620000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1640000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1640000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1640000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1660000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1660000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1660000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1680000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1680000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1680000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1700000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1700000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1700000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1700000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "200",
+        "8",
+        "02a8025511000000"
+      ]
+    },
+    {
+      "us": 1700000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "201",
+        "8",
+        "fe01020000000000"
+      ]
+    },
+    {
+      "us": 1700000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "202",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1700300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "600",
+        "8",
+        "4019010000003210"
+      ]
+    },
+    {
+      "us": 1700300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "602",
+        "6",
+        "dc052c010200"
+      ]
+    },
+    {
+      "us": 1720000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1720000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1720000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1740000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1740000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1740000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1750300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "601",
+        "6",
+        "fa00fa00fa00"
+      ]
+    },
+    {
+      "us": 1760000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1760000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1760000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1780000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1780000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1780000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1800000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1800000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1800000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1800000,
+      "kind": "INJ",
+      "fields": [
+        "dash",
+        "500",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1800000,
+      "kind": "INJ",
+      "fields": [
+        "dash",
+        "501",
+        "6",
+        "d8040000003e"
+      ]
+    },
+    {
+      "us": 1800000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "200",
+        "8",
+        "02d0025a12000000"
+      ]
+    },
+    {
+      "us": 1800000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "201",
+        "8",
+        "1c02020000000000"
+      ]
+    },
+    {
+      "us": 1800000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "202",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1800074,
+      "kind": "TXN",
+      "fields": [
+        "charger",
+        "300",
+        "8",
+        "0000000000000000"
+      ]
+    },
+    {
+      "us": 1800300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "600",
+        "8",
+        "4019010000003211"
+      ]
+    },
+    {
+      "us": 1800300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "602",
+        "6",
+        "dc052c010200"
+      ]
+    },
+    {
+      "us": 1820000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1820000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1820000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1840000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1840000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1840000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1860000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1860000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1860000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1880000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1880000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1880000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1900000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1900000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1900000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1900000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "200",
+        "8",
+        "02f8025f13000000"
+      ]
+    },
+    {
+      "us": 1900000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "201",
+        "8",
+        "3a02020000000000"
+      ]
+    },
+    {
+      "us": 1900000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "202",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1900300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "600",
+        "8",
+        "4019010000003212"
+      ]
+    },
+    {
+      "us": 1900300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "602",
+        "6",
+        "dc052c010200"
+      ]
+    },
+    {
+      "us": 1920000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1920000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1920000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1940000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1940000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1940000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1960000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1960000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1960000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 1980000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 1980000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 1980000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2000000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2000000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2000000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2000000,
+      "kind": "INJ",
+      "fields": [
+        "dash",
+        "500",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2000000,
+      "kind": "INJ",
+      "fields": [
+        "dash",
+        "501",
+        "6",
+        "d8040000003e"
+      ]
+    },
+    {
+      "us": 2000000,
+      "kind": "INJ",
+      "fields": [
+        "bms_diag",
+        "610",
+        "8",
+        "0000000000000000"
+      ]
+    },
+    {
+      "us": 2000000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "200",
+        "8",
+        "0200000014000000"
+      ]
+    },
+    {
+      "us": 2000000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "201",
+        "8",
+        "0000022800000000"
+      ]
+    },
+    {
+      "us": 2000000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "202",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2000082,
+      "kind": "TXN",
+      "fields": [
+        "charger",
+        "300",
+        "8",
+        "0000000000000000"
+      ]
+    },
+    {
+      "us": 2000100,
+      "kind": "TXN",
+      "fields": [
+        "charger",
+        "301",
+        "4",
+        "02a00000"
+      ]
+    },
+    {
+      "us": 2000300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "600",
+        "8",
+        "4019010000003213"
+      ]
+    },
+    {
+      "us": 2000300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "602",
+        "6",
+        "dc052c010200"
+      ]
+    },
+    {
+      "us": 2000300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "601",
+        "6",
+        "fa00fa00fa00"
+      ]
+    },
+    {
+      "us": 2000300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "603",
+        "6",
+        "1f0e010e6200"
+      ]
+    },
+    {
+      "us": 2020000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2020000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2020000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2040000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2040000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2040000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2060000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2060000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2060000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2080000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2080000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2080000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2100000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2100000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2100000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2100000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "200",
+        "8",
+        "0228000515000000"
+      ]
+    },
+    {
+      "us": 2100000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "201",
+        "8",
+        "1e00020000000000"
+      ]
+    },
+    {
+      "us": 2100000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "202",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2100300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "600",
+        "8",
+        "4019010000003214"
+      ]
+    },
+    {
+      "us": 2100300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "602",
+        "6",
+        "dc052c010200"
+      ]
+    },
+    {
+      "us": 2120000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2120000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2120000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2140000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2140000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2140000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2160000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2160000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2160000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2180000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2180000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2180000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2200000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2200000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2200000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2200000,
+      "kind": "INJ",
+      "fields": [
+        "dash",
+        "500",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2200000,
+      "kind": "INJ",
+      "fields": [
+        "dash",
+        "501",
+        "6",
+        "d8040000003e"
+      ]
+    },
+    {
+      "us": 2200000,
+      "kind": "MARK",
+      "fields": [
+        "the",
+        "same",
+        "59999",
+        "mV,",
+        "now",
+        "where",
+        "the",
+        "rule",
+        "applies",
+        "",
+        "expected",
+        "fault"
+      ]
+    },
+    {
+      "us": 2200000,
+      "kind": "STIM",
+      "fields": [
+        "write_symbol",
+        "bms.g_pack_mv=59999@24000000:4"
+      ]
+    },
+    {
+      "us": 2200000,
+      "kind": "EXPECT_ARM",
+      "fields": [
+        "t7",
+        "604",
+        "0300000000000000",
+        "ff00000000000000",
+        "50000",
+        "59999",
+        "mV",
+        "faults",
+        "with",
+        "UNDERVOLT",
+        "where",
+        "the",
+        "rule",
+        "applies"
+      ]
+    },
+    {
+      "us": 2200000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "200",
+        "8",
+        "0250000a16000000"
+      ]
+    },
+    {
+      "us": 2200000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "201",
+        "8",
+        "3c00020000000000"
+      ]
+    },
+    {
+      "us": 2200000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "202",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2200100,
+      "kind": "TXN",
+      "fields": [
+        "charger",
+        "300",
+        "8",
+        "0000000000000000"
+      ]
+    },
+    {
+      "us": 2200400,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "604",
+        "8",
+        "0300000000000000"
+      ]
+    },
+    {
+      "us": 2200400,
+      "kind": "EXPECT_MET",
+      "fields": [
+        "t7",
+        "2200400"
+      ]
+    },
+    {
+      "us": 2200400,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "600",
+        "8",
+        "5fea000000000015"
+      ]
+    },
+    {
+      "us": 2200400,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "602",
+        "6",
+        "000000000000"
+      ]
+    },
+    {
+      "us": 2220000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2220000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2220000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2240000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2240000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2240000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2250000,
+      "kind": "EXPECT_ARM",
+      "fields": [
+        "t8",
+        "600",
+        "5fea000000000000",
+        "ffffff0000000000",
+        "200000",
+        "the",
+        "device",
+        "publishes",
+        "the",
+        "reading",
+        "it",
+        "faulted",
+        "on"
+      ]
+    },
+    {
+      "us": 2250300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "601",
+        "6",
+        "fa00fa00fa00"
+      ]
+    },
+    {
+      "us": 2260000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2260000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2260000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2280000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2280000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2280000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2300000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2300000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2300000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2300000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "200",
+        "8",
+        "0278000f17000000"
+      ]
+    },
+    {
+      "us": 2300000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "201",
+        "8",
+        "5a00020000000000"
+      ]
+    },
+    {
+      "us": 2300000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "202",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2300300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "600",
+        "8",
+        "5fea000000000016"
+      ]
+    },
+    {
+      "us": 2300300,
+      "kind": "EXPECT_MET",
+      "fields": [
+        "t8",
+        "2300300"
+      ]
+    },
+    {
+      "us": 2300300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "602",
+        "6",
+        "000000000000"
+      ]
+    },
+    {
+      "us": 2320000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2320000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2320000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2340000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2340000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2340000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2360000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2360000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2360000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2380000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2380000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2380000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2400000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2400000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2400000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2400000,
+      "kind": "INJ",
+      "fields": [
+        "dash",
+        "500",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2400000,
+      "kind": "INJ",
+      "fields": [
+        "dash",
+        "501",
+        "6",
+        "d8040000003e"
+      ]
+    },
+    {
+      "us": 2400000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "200",
+        "8",
+        "02a0001418000000"
+      ]
+    },
+    {
+      "us": 2400000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "201",
+        "8",
+        "7800020000000000"
+      ]
+    },
+    {
+      "us": 2400000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "202",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2400100,
+      "kind": "TXN",
+      "fields": [
+        "charger",
+        "300",
+        "8",
+        "0000000000000000"
+      ]
+    },
+    {
+      "us": 2400300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "600",
+        "8",
+        "5fea000000000017"
+      ]
+    },
+    {
+      "us": 2400300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "602",
+        "6",
+        "000000000000"
+      ]
+    },
+    {
+      "us": 2420000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2420000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2420000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2440000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2440000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2440000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2450000,
+      "kind": "STIM",
+      "fields": [
+        "write_symbol",
+        "bms.g_pack_mv=72000@24000000:4"
+      ]
+    },
+    {
+      "us": 2450000,
+      "kind": "EXPECT_ARM",
+      "fields": [
+        "t9",
+        "604",
+        "0300000000000000",
+        "ff00000000000000",
+        "600000",
+        "the",
+        "fault",
+        "stays",
+        "latched",
+        "after",
+        "the",
+        "value",
+        "returns"
+      ]
+    },
+    {
+      "us": 2460000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2460000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2460000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2480000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2480000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2480000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2500000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2500000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2500000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2500000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "200",
+        "8",
+        "02c8001919000000"
+      ]
+    },
+    {
+      "us": 2500000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "201",
+        "8",
+        "9600020000000000"
+      ]
+    },
+    {
+      "us": 2500000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "202",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2500100,
+      "kind": "TXN",
+      "fields": [
+        "charger",
+        "301",
+        "4",
+        "02a00000"
+      ]
+    },
+    {
+      "us": 2500300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "600",
+        "8",
+        "4019010000003218"
+      ]
+    },
+    {
+      "us": 2500300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "602",
+        "6",
+        "000000000000"
+      ]
+    },
+    {
+      "us": 2500300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "601",
+        "6",
+        "fa00fa00fa00"
+      ]
+    },
+    {
+      "us": 2500300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "603",
+        "6",
+        "1f0e010e6200"
+      ]
+    },
+    {
+      "us": 2500300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "604",
+        "8",
+        "0301000000000000"
+      ]
+    },
+    {
+      "us": 2500300,
+      "kind": "EXPECT_MET",
+      "fields": [
+        "t9",
+        "2500300"
+      ]
+    },
+    {
+      "us": 2520000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2520000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2520000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2540000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2540000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2540000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2560000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2560000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2560000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2580000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2580000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2580000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2600000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2600000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2600000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2600000,
+      "kind": "INJ",
+      "fields": [
+        "dash",
+        "500",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2600000,
+      "kind": "INJ",
+      "fields": [
+        "dash",
+        "501",
+        "6",
+        "d8040000003e"
+      ]
+    },
+    {
+      "us": 2600000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "200",
+        "8",
+        "02f0001e1a000000"
+      ]
+    },
+    {
+      "us": 2600000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "201",
+        "8",
+        "b400020000000000"
+      ]
+    },
+    {
+      "us": 2600000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "202",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2600104,
+      "kind": "TXN",
+      "fields": [
+        "charger",
+        "300",
+        "8",
+        "0000000000000000"
+      ]
+    },
+    {
+      "us": 2600300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "600",
+        "8",
+        "4019010000003219"
+      ]
+    },
+    {
+      "us": 2600400,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "602",
+        "6",
+        "000000000000"
+      ]
+    },
+    {
+      "us": 2620000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2620000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2620000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2640000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2640000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2640000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2660000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2660000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2660000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2680000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2680000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2680000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2700000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2700000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2700000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2700000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "200",
+        "8",
+        "021801231b000000"
+      ]
+    },
+    {
+      "us": 2700000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "201",
+        "8",
+        "d200020000000000"
+      ]
+    },
+    {
+      "us": 2700000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "202",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2700300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "600",
+        "8",
+        "401901000000321a"
+      ]
+    },
+    {
+      "us": 2700400,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "602",
+        "6",
+        "000000000000"
+      ]
+    },
+    {
+      "us": 2720000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2720000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2720000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2740000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2740000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2740000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2750300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "601",
+        "6",
+        "fa00fa00fa00"
+      ]
+    },
+    {
+      "us": 2760000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2760000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2760000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2780000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2780000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2780000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2800000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2800000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2800000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2800000,
+      "kind": "INJ",
+      "fields": [
+        "dash",
+        "500",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2800000,
+      "kind": "INJ",
+      "fields": [
+        "dash",
+        "501",
+        "6",
+        "d8040000003e"
+      ]
+    },
+    {
+      "us": 2800000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "200",
+        "8",
+        "024001281c000000"
+      ]
+    },
+    {
+      "us": 2800000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "201",
+        "8",
+        "f000020000000000"
+      ]
+    },
+    {
+      "us": 2800000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "202",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2800112,
+      "kind": "TXN",
+      "fields": [
+        "charger",
+        "300",
+        "8",
+        "0000000000000000"
+      ]
+    },
+    {
+      "us": 2800300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "600",
+        "8",
+        "401901000000321b"
+      ]
+    },
+    {
+      "us": 2800400,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "602",
+        "6",
+        "000000000000"
+      ]
+    },
+    {
+      "us": 2820000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2820000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2820000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2840000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2840000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2840000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2860000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2860000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2860000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2880000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2880000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2880000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2900000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2900000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2900000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2900000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "200",
+        "8",
+        "0268012d1d000000"
+      ]
+    },
+    {
+      "us": 2900000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "201",
+        "8",
+        "0e01020000000000"
+      ]
+    },
+    {
+      "us": 2900000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "202",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2900300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "600",
+        "8",
+        "401901000000321c"
+      ]
+    },
+    {
+      "us": 2900400,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "602",
+        "6",
+        "000000000000"
+      ]
+    },
+    {
+      "us": 2920000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2920000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2920000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2940000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2940000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2940000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2960000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2960000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2960000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 2980000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 2980000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 2980000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 3000000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 3000000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 3000000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 3000000,
+      "kind": "INJ",
+      "fields": [
+        "dash",
+        "500",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 3000000,
+      "kind": "INJ",
+      "fields": [
+        "dash",
+        "501",
+        "6",
+        "d8040000003e"
+      ]
+    },
+    {
+      "us": 3000000,
+      "kind": "INJ",
+      "fields": [
+        "bms_diag",
+        "610",
+        "8",
+        "0000000000000000"
+      ]
+    },
+    {
+      "us": 3000000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "200",
+        "8",
+        "029001321e000000"
+      ]
+    },
+    {
+      "us": 3000000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "201",
+        "8",
+        "2c01020000000000"
+      ]
+    },
+    {
+      "us": 3000000,
+      "kind": "TXN",
+      "fields": [
+        "vcu",
+        "202",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 3000119,
+      "kind": "TXN",
+      "fields": [
+        "charger",
+        "300",
+        "8",
+        "0000000000000000"
+      ]
+    },
+    {
+      "us": 3000119,
+      "kind": "TXN",
+      "fields": [
+        "charger",
+        "301",
+        "4",
+        "02a00000"
+      ]
+    },
+    {
+      "us": 3000300,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "600",
+        "8",
+        "401901000000321d"
+      ]
+    },
+    {
+      "us": 3000400,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "602",
+        "6",
+        "000000000000"
+      ]
+    },
+    {
+      "us": 3000500,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "601",
+        "6",
+        "fa00fa00fa00"
+      ]
+    },
+    {
+      "us": 3000600,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "603",
+        "6",
+        "1f0e010e6200"
+      ]
+    },
+    {
+      "us": 3000700,
+      "kind": "TX",
+      "fields": [
+        "bms",
+        "604",
+        "8",
+        "0302000000000000"
+      ]
+    },
+    {
+      "us": 3020000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 3020000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 3020000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    },
+    {
+      "us": 3040000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "400",
+        "8",
+        "0000190100000000"
+      ]
+    },
+    {
+      "us": 3040000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "401",
+        "6",
+        "401901000000"
+      ]
+    },
+    {
+      "us": 3040000,
+      "kind": "INJ",
+      "fields": [
+        "motor",
+        "402",
+        "4",
+        "00000000"
+      ]
+    }
+  ],
+  "assertions": [
+    {
+      "token": "t1",
+      "verb": "wait_uart",
+      "label": "console: BMS ready",
+      "step": 1,
+      "message_id": null,
+      "window_ms": 100,
+      "detail": {
+        "node": "bms",
+        "text": "BMS ready"
+      },
+      "armed_us": 0,
+      "met_us": 200,
+      "latency_us": null,
+      "latency_ms": null,
+      "matched_frame": null,
+      "verdict": "PASS",
+      "reason": "matched at 200 us"
+    },
+    {
+      "token": "t2",
+      "verb": "expect_can",
+      "label": "nothing is tripped before this test does anything",
+      "step": 2,
+      "message_id": "0x602",
+      "window_ms": 200,
+      "detail": {
+        "signals": {
+          "contactor_state": "OPEN"
+        },
+        "message": "bms_limits"
+      },
+      "armed_us": 100000,
+      "met_us": 100300,
+      "latency_us": null,
+      "latency_ms": null,
+      "matched_frame": {
+        "us": 100300,
+        "kind": "TX",
+        "node": "bms",
+        "id": 1538,
+        "dlc": 6,
+        "data": "000000000000"
+      },
+      "verdict": "PASS",
+      "reason": "matched at 100300 us"
+    },
+    {
+      "token": "t3",
+      "verb": "expect_no_can",
+      "label": "59999 mV is not a safety event in this state",
+      "step": 8,
+      "message_id": "0x604",
+      "window_ms": 300,
+      "detail": {
+        "signals": {},
+        "message": "bms_fault"
+      },
+      "armed_us": 300000,
+      "met_us": null,
+      "latency_us": null,
+      "latency_ms": null,
+      "matched_frame": null,
+      "verdict": "PASS",
+      "reason": "no matching frame occurred in the window"
+    },
+    {
+      "token": "t4",
+      "verb": "expect_symbol",
+      "label": "the value the rule compares really is 59999 mV",
+      "step": 9,
+      "message_id": null,
+      "window_ms": 0,
+      "detail": {
+        "node": "bms",
+        "symbol": "g_pack_mv",
+        "equals": 59999
+      },
+      "armed_us": 600000,
+      "met_us": 600000,
+      "latency_us": 300000,
+      "latency_ms": "300",
+      "matched_frame": null,
+      "verdict": "PASS",
+      "reason": "matched at 600000 us",
+      "stimulus_us": 300000
+    },
+    {
+      "token": "t5",
+      "verb": "wait_uart",
+      "label": "the device reports the state this rule does not apply in",
+      "step": 10,
+      "message_id": null,
+      "window_ms": 800,
+      "detail": {
+        "node": "bms",
+        "text": "state=STANDBY contactor=OPEN fault=NONE"
+      },
+      "armed_us": 600000,
+      "met_us": 1000400,
+      "latency_us": 700400,
+      "latency_ms": "700.4",
+      "matched_frame": null,
+      "verdict": "PASS",
+      "reason": "matched at 1000400 us",
+      "stimulus_us": 300000
+    },
+    {
+      "token": "t6",
+      "verb": "wait_uart",
+      "label": "the device reports the state this rule applies in",
+      "step": 14,
+      "message_id": null,
+      "window_ms": 800,
+      "detail": {
+        "node": "bms",
+        "text": "bms state PRECHARGE -> RUNNING"
+      },
+      "armed_us": 1400000,
+      "met_us": 1600300,
+      "latency_us": 200300,
+      "latency_ms": "200.3",
+      "matched_frame": null,
+      "verdict": "PASS",
+      "reason": "matched at 1600300 us",
+      "stimulus_us": 1400000
+    },
+    {
+      "token": "t7",
+      "verb": "expect_can",
+      "label": "59999 mV faults with UNDERVOLT where the rule applies",
+      "step": 17,
+      "message_id": "0x604",
+      "window_ms": 50,
+      "detail": {
+        "signals": {
+          "fault_code": "UNDERVOLT"
+        },
+        "message": "bms_fault"
+      },
+      "armed_us": 2200000,
+      "met_us": 2200400,
+      "latency_us": 400,
+      "latency_ms": "0.4",
+      "matched_frame": {
+        "us": 2200400,
+        "kind": "TX",
+        "node": "bms",
+        "id": 1540,
+        "dlc": 8,
+        "data": "0300000000000000"
+      },
+      "verdict": "PASS",
+      "reason": "matched at 2200400 us",
+      "stimulus_us": 2200000,
+      "pattern_present_before_stimulus": false
+    },
+    {
+      "token": "t8",
+      "verb": "expect_can",
+      "label": "the device publishes the reading it faulted on",
+      "step": 18,
+      "message_id": "0x600",
+      "window_ms": 200,
+      "detail": {
+        "signals": {
+          "pack_voltage_mv": 59999
+        },
+        "message": "bms_status"
+      },
+      "armed_us": 2250000,
+      "met_us": 2300300,
+      "latency_us": 100300,
+      "latency_ms": "100.3",
+      "matched_frame": {
+        "us": 2300300,
+        "kind": "TX",
+        "node": "bms",
+        "id": 1536,
+        "dlc": 8,
+        "data": "5fea000000000016"
+      },
+      "verdict": "PASS",
+      "reason": "matched at 2300300 us",
+      "stimulus_us": 2200000,
+      "pattern_present_before_stimulus": true
+    },
+    {
+      "token": "t9",
+      "verb": "expect_can",
+      "label": "the fault stays latched after the value returns",
+      "step": 20,
+      "message_id": "0x604",
+      "window_ms": 600,
+      "detail": {
+        "signals": {
+          "fault_code": "UNDERVOLT"
+        },
+        "message": "bms_fault"
+      },
+      "armed_us": 2450000,
+      "met_us": 2500300,
+      "latency_us": 50300,
+      "latency_ms": "50.3",
+      "matched_frame": {
+        "us": 2500300,
+        "kind": "TX",
+        "node": "bms",
+        "id": 1540,
+        "dlc": 8,
+        "data": "0301000000000000"
+      },
+      "verdict": "PASS",
+      "reason": "matched at 2500300 us",
+      "stimulus_us": 2450000,
+      "pattern_present_before_stimulus": true
+    }
+  ],
+  "stimuli": [
+    {
+      "us": 300000,
+      "what": "write_symbol",
+      "detail": "charger.g_charge_state_force=0@2400006c:1"
+    },
+    {
+      "us": 300000,
+      "what": "write_symbol",
+      "detail": "vcu.g_drive_state=0@2400043c:1"
+    },
+    {
+      "us": 300000,
+      "what": "write_symbol",
+      "detail": "bms.g_pack_mv=59999@24000000:4"
+    },
+    {
+      "us": 1400000,
+      "what": "write_symbol",
+      "detail": "bms.g_pack_mv=72000@24000000:4"
+    },
+    {
+      "us": 1400000,
+      "what": "write_symbol",
+      "detail": "vcu.g_drive_state=2@2400043c:1"
+    },
+    {
+      "us": 2200000,
+      "what": "write_symbol",
+      "detail": "bms.g_pack_mv=59999@24000000:4"
+    },
+    {
+      "us": 2450000,
+      "what": "write_symbol",
+      "detail": "bms.g_pack_mv=72000@24000000:4"
+    }
+  ],
+  "symbol_writes": [
+    {
+      "step": 4,
+      "node": "charger",
+      "symbol": "g_charge_state_force",
+      "value": 0,
+      "applied": true
+    },
+    {
+      "step": 5,
+      "node": "vcu",
+      "symbol": "g_drive_state",
+      "value": 0,
+      "applied": true
+    },
+    {
+      "step": 7,
+      "node": "bms",
+      "symbol": "g_pack_mv",
+      "value": 59999,
+      "applied": true
+    },
+    {
+      "step": 12,
+      "node": "bms",
+      "symbol": "g_pack_mv",
+      "value": 72000,
+      "applied": true
+    },
+    {
+      "step": 13,
+      "node": "vcu",
+      "symbol": "g_drive_state",
+      "value": 2,
+      "applied": true
+    },
+    {
+      "step": 16,
+      "node": "bms",
+      "symbol": "g_pack_mv",
+      "value": 59999,
+      "applied": true
+    },
+    {
+      "step": 19,
+      "node": "bms",
+      "symbol": "g_pack_mv",
+      "value": 72000,
+      "applied": true
+    }
+  ],
+  "latency": {
+    "headline_us": 400,
+    "headline_ms": "0.4",
+    "headline_token": "t7",
+    "budget_ms": 50,
+    "headline_note": null,
+    "fastest_reaction_us": 400,
+    "fastest_reaction_ms": "0.4",
+    "excluded_no_reaction": [
+      "t1",
+      "t2"
+    ],
+    "excluded_not_a_bus_reaction": [
+      "t4",
+      "t5",
+      "t6"
+    ]
+  },
+  "boot": [
+    {
+      "node": "bms",
+      "boot_text": "BMS ready",
+      "banner_seen": true,
+      "console": "console_bms.log",
+      "console_bytes": 725
+    },
+    {
+      "node": "vcu",
+      "boot_text": "VCU ready",
+      "banner_seen": true,
+      "console": "console_vcu.log",
+      "console_bytes": 284
+    },
+    {
+      "node": "charger",
+      "boot_text": "CHG ready",
+      "banner_seen": true,
+      "console": "console_charger.log",
+      "console_bytes": 155
+    }
+  ],
+  "counts": {
+    "frames": 684,
+    "transmitted_by_device_under_test": 81,
+    "transmitted_by_other_nodes": 114,
+    "injected": 489,
+    "assertions": 9,
+    "assertions_passed": 9
+  },
+  "run": {
+    "tier": "modelled",
+    "tier_note": "the emulator supports these boards; not verified end to end, so this result is shown and is not authoritative",
+    "hub": "canHub",
+    "bus": "powertrain",
+    "machines": [
+      {
+        "node": "bms",
+        "board": "bms_ecu",
+        "tier": "modelled",
+        "platform": "platforms/boards/bms_ecu.repl",
+        "binary": "firmware/bms-broken/build/zephyr/zephyr.elf",
+        "binary_sha256": "7f780a868eb3b436d28b736528869b5729771d350f2678e55bdc53052a2faec2",
+        "can_peripheral": "sysbus.fdcan1",
+        "uart_peripheral": "sysbus.usart3",
+        "hub": "canHub",
+        "boot_text": "BMS ready",
+        "console": "console_bms.log",
+        "execution_trace": null
+      },
+      {
+        "node": "vcu",
+        "board": "vcu_ecu",
+        "tier": "modelled",
+        "platform": "platforms/boards/vcu_ecu.repl",
+        "binary": "firmware/vcu/build/zephyr/zephyr.elf",
+        "binary_sha256": "0270a64bf62d3d5796f66b250c1143bff8348edc80cde6702921693fd4250823",
+        "can_peripheral": "sysbus.fdcan1",
+        "uart_peripheral": "sysbus.usart3",
+        "hub": "canHub",
+        "boot_text": "VCU ready",
+        "console": "console_vcu.log",
+        "execution_trace": null
+      },
+      {
+        "node": "charger",
+        "board": "chg_ecu",
+        "tier": "modelled",
+        "platform": "platforms/boards/chg_ecu.repl",
+        "binary": "firmware/charger/build/zephyr/zephyr.elf",
+        "binary_sha256": "be522fd0745e1b7e495035691c308331ed3752b53f735d9733bcd9dced490d54",
+        "can_peripheral": "sysbus.fdcan1",
+        "uart_peripheral": "sysbus.usart3",
+        "hub": "canHub",
+        "boot_text": "CHG ready",
+        "console": "console_charger.log",
+        "execution_trace": null
+      }
+    ],
+    "players": [
+      {
+        "node": "motor",
+        "message_id": "0x400",
+        "message": "motor_status",
+        "period_ms": 20,
+        "payload": "0000190100000000"
+      },
+      {
+        "node": "motor",
+        "message_id": "0x401",
+        "message": "motor_power",
+        "period_ms": 20,
+        "payload": "401901000000"
+      },
+      {
+        "node": "motor",
+        "message_id": "0x402",
+        "message": "motor_wheel",
+        "period_ms": 20,
+        "payload": "00000000"
+      },
+      {
+        "node": "dash",
+        "message_id": "0x500",
+        "message": "dash_telltales",
+        "period_ms": 200,
+        "payload": "00000000"
+      },
+      {
+        "node": "dash",
+        "message_id": "0x501",
+        "message": "dash_trip",
+        "period_ms": 200,
+        "payload": "d8040000003e"
+      },
+      {
+        "node": "bms_diag",
+        "message_id": "0x610",
+        "message": "bms_diag_response",
+        "period_ms": 1000,
+        "payload": "0000000000000000"
+      }
+    ],
+    "emulator_exit_code": 0,
+    "virtual_time_us": 3040000,
+    "event_log_lines": 713,
+    "warnings": [
+      "/mnt/c/Users/djtde/Downloads/Emulator/.generated/tests/undervolt-sweep-59999.yml: step 15 (mark): transliterated to ASCII for the emulator: 'the same 59999 mV, now where the rule applies \u2014 expected fault' -> 'the same 59999 mV, now where the rule applies  expected fault'"
+    ],
+    "hard_failures": []
+  }
+}

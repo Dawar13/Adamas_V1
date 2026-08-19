@@ -92,17 +92,27 @@ function Failure({ entry, runId }) {
         </p>
       ) : (
         failed.map((a) => (
+          /*
+           * The window is its own row, not appended to the label.
+           *
+           * Appending it produced "no fault frame for 300 ms within 300 ms" on
+           * real data, because a scenario's label usually already states its own
+           * duration. Guessing whether a label mentions one would be guessing at
+           * prose; giving the number its own labelled row states it once and
+           * keeps it in the mono column where every other figure lives.
+           */
           <dl className="failure-body" key={a.token}>
             <dt>expected</dt>
             <dd>
               <span className="mono">{a.verb}</span>
               {a.label ? ` — ${a.label}` : null}
-              {a.window_ms ? (
-                <>
-                  {" "}within <span className="mono">{a.window_ms} ms</span>
-                </>
-              ) : null}
             </dd>
+            {a.window_ms ? (
+              <>
+                <dt>window</dt>
+                <dd className="mono">{a.window_ms} ms</dd>
+              </>
+            ) : null}
             <dt>observed</dt>
             <dd className="is-fault">{a.reason || "no reason recorded"}</dd>
           </dl>

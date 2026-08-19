@@ -77,6 +77,24 @@ export default function Timeline({ record, outcome }) {
             <span className="mono">{latency.excluded_no_reaction.join(" ")}</span>
           </p>
         )}
+        {latency.excluded_not_a_bus_reaction?.length > 0 && (
+          // The engine records this separately: an assertion that resolved
+          // without a frame on the bus is not a reaction time, and printing it
+          // as one would quote a latency for something that never transmitted.
+          <p className="tl-why">
+            Excluded for not being a bus reaction:{" "}
+            <span className="mono">
+              {latency.excluded_not_a_bus_reaction.join(" ")}
+            </span>
+          </p>
+        )}
+        {latency.fastest_reaction_ms && (
+          <p className="tl-why">
+            The fastest reaction the engine did observe was{" "}
+            <span className="mono">{latency.fastest_reaction_ms} ms</span>, which
+            it declines to quote as this test's latency for the reason above.
+          </p>
+        )}
       </div>
     );
   }
