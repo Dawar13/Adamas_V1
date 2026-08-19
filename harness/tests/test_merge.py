@@ -90,6 +90,10 @@ class MergeTestCase(unittest.TestCase):
             paths.append(str(path))
         argv = ["--shards"] + paths + ["--id", run_id,
                                       "--runs", str(self.root / "runs")]
+        if kw.get("coverage"):
+            argv += ["--coverage", kw["coverage"]]
+        if kw.get("divergence"):
+            argv += ["--divergence", kw["divergence"]]
         quiet = io.StringIO()
         with redirect_stdout(quiet):
             return merge.main(argv)
@@ -257,6 +261,41 @@ class MergeTestCase(unittest.TestCase):
     def test_a_relative_path_resolves_against_the_repository(self):
         found = list(merge._candidate_paths("harness/out/shard1/t1"))
         self.assertIn(REPO_ROOT / "harness" / "out" / "shard1" / "t1", found)
+
+    # -- optional reports attached to the run ------------------------------
+
+    def a_coverage_report(self, tests):
+        path = self.root / "coverage.json"
+        with io.open(path, "w", encoding="utf-8") as handle:
+            json.dump({"schema": "x", "tests": sorted(tests),
+                       "nodes": {}, "discrimination": {"available": False}},
+                      handle)
+        return str(path)
+
+    def test_a_coverage_report_is_stored_with_the_run(self):
+        tally = self.a_shard(1, 1, ["t1", "t2"], declared=2)
+        code = self.run_merge(tally, coverage=self.a_coverage_report(["t1", "t2"]))
+        self.assertEqual(code, 0)
+        stored = self.stored("coverage.json")
+        self.assertEqual(stored["tests"], ["t1", "t2"])
+
+    def test_refuses_a_coverage_report_from_a_different_run(self):
+        """Figures that look like this run and describe another one.
+
+        Worse than attaching nothing: the numbers would be read as this run's
+        and would be measurements of a different execution entirely.
+        """
+        tally = self.a_shard(1, 1, ["t1", "t2"], declared=2)
+        reason = self.refusal(tally,
+                              coverage=self.a_coverage_report(["t1", "t9"]))
+        self.assertIn("does not describe this run", reason)
+        self.assertIn("t2", reason)
+        self.assertIn("t9", reason)
+
+    def test_a_run_without_a_coverage_report_still_merges(self):
+        self.assertEqual(self.run_merge(self.a_shard(1, 1, ["t1"], declared=1)), 0)
+        self.assertFalse((self.root / "runs" / "2026-01-01-0900"
+                          / "coverage.json").exists())
 
     # -- section 2.7 -------------------------------------------------------
 

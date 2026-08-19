@@ -244,6 +244,12 @@ def main(argv=None) -> int:
                         help="the run id to store under (chronological)")
     parser.add_argument("--runs", default=None, help="runs root")
     parser.add_argument("--replay", default="", help="reproduction note")
+    parser.add_argument("--coverage", default=None,
+                        help="a coverage report measured from this very run, to "
+                             "store alongside it")
+    parser.add_argument("--divergence", default=None,
+                        help="a divergence report for this suite, to store "
+                             "alongside it")
     args = parser.parse_args(argv)
 
     paths = []
@@ -316,6 +322,39 @@ def main(argv=None) -> int:
         return 2
 
     record = {"summary": summary, "provenance": provenance, "results": records}
+
+    # Coverage and divergence are optional, and attaching one measured from a
+    # DIFFERENT run would be worse than attaching none: the figures would look
+    # like this run's and describe another. So the coverage report has to name
+    # the same tests this run covers, and is refused if it does not.
+    for flag, key, check_tests in ((args.coverage, "coverage", True),
+                                   (args.divergence, "divergence", False)):
+        if not flag:
+            continue
+        try:
+            with io.open(flag, encoding="utf-8") as handle:
+                document = json.load(handle)
+        except (OSError, ValueError) as exc:
+            print("\nERROR: cannot read the %s report %s: %s\n"
+                  % (key, flag, exc), file=sys.stderr)
+            return 2
+        if check_tests:
+            named = set(document.get("tests") or ())
+            ours = {row.get("test") for row in records}
+            if named != ours:
+                missing = sorted(ours - named)[:4]
+                extra = sorted(named - ours)[:4]
+                print("\nERROR: the %s report does not describe this run: it "
+                      "covers %d test(s) against this run's %d.\n"
+                      "       not in the report: %s\n"
+                      "       not in the run:    %s\n"
+                      "A report measured from a different run would show "
+                      "figures that look like this one's.\n"
+                      % (key, len(named), len(ours),
+                         ", ".join(missing) or "-", ", ".join(extra) or "-"),
+                      file=sys.stderr)
+                return 2
+        record[key] = document
     try:
         target = store.save_run(args.id, record, replay_text=args.replay,
                                 traces=traces, runs_root=runs_root)

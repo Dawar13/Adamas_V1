@@ -204,7 +204,8 @@ class TestTheTallyCannotOverstateItself(unittest.TestCase):
         self.tally = self.root / "tally.json"
 
     def main(self, *extra):
-        def fake_run_one(python, test, out_root, timeout, topology):
+        def fake_run_one(python, test, out_root, timeout, topology,
+                         coverage=False):
             return {"test": test.stem, "outcome": "pass", "exit_code": 0,
                     "verdict": "PASS", "latency_us": 1,
                     "out_dir": str(out_root / test.stem)}
@@ -248,7 +249,8 @@ class TestTheTallyCannotOverstateItself(unittest.TestCase):
         self.assertIn("PARTIAL", captured.getvalue())
 
     def main_loud(self, *extra):
-        def fake_run_one(python, test, out_root, timeout, topology):
+        def fake_run_one(python, test, out_root, timeout, topology,
+                         coverage=False):
             return {"test": test.stem, "outcome": "pass", "exit_code": 0,
                     "verdict": "PASS", "latency_us": 1,
                     "out_dir": str(out_root / test.stem)}

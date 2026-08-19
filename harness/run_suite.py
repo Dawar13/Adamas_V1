@@ -262,12 +262,18 @@ def shard_of(tests, shard: int, of: int):
 
 
 def run_one(python, test: Path, out_root: Path, timeout_s: int,
-            topology) -> dict:
+            topology, coverage=False) -> dict:
     """Run one test in its own directory, and never lose it from the tally."""
     out_dir = out_root / test.stem
     command = python + [str(ENGINE), str(test), "--quiet", "--out", str(out_dir)]
     if topology:
         command += ["--topology", topology]
+    if coverage:
+        # Coverage has to be measured while the tests run; it cannot be added
+        # to a finished run. Without this the whole suite could never be
+        # traced, and the only coverage figures this project had came from a
+        # handful of scenarios invoked one at a time.
+        command += ["--coverage"]
 
     # Repo-relative, not absolute.
     #
@@ -360,6 +366,11 @@ def main(argv=None) -> int:
                         help="run only this shard, numbered from 1")
     parser.add_argument("--of", type=int, default=None,
                         help="how many shards the suite is split into")
+    parser.add_argument("--coverage", action="store_true",
+                        help="record which instructions each machine executed, "
+                             "so harness/coverage.py can attribute them. Costs "
+                             "host wall clock: each traced machine compresses "
+                             "on a thread of its own")
     parser.add_argument("--json", default=None, help="write the tally here")
     parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args(argv)
@@ -404,7 +415,7 @@ def main(argv=None) -> int:
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {
             pool.submit(run_one, python, test, out_root, args.timeout,
-                        args.topology): test
+                        args.topology, args.coverage): test
             for test in tests
         }
         for future in concurrent.futures.as_completed(futures):
