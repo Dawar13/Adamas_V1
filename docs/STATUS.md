@@ -472,9 +472,168 @@ anyway, so it was not a workaround.
 
 **89 tests, not 118, remains the honest count.**
 
-## Phase 3 — The UI
+## Phase 3 — The interface
 
-- [ ] Upload firmware, run, read the result
+Phase 2's engine tested firmware properly and nobody could see any of it. That was
+the whole problem this phase exists to fix.
+
+### The two Phase 2 gaps, closed first
+
+**Determinism under parallelism.** Two shards, 18 tests, N=1 against N=4 — identical
+verdicts, identical latencies to the microsecond, and identical event logs byte for
+byte. The Phase 2 record said this was verified too narrowly, comparing only verdicts
+and headline latencies while peer transmit instants drifted by 8–100 µs. That drift is
+gone. Wall clock moved (269.7 → 127.0 s and 365.4 → 192.1 s) and virtual time did not
+move at all.
+
+**The full suite completed.** Never before, as one job — three attempts were killed by
+an environment limit on long processes. As four shards it finished, and a merge combined
+them into one record.
+
+```
+shard 1  23 of 23  6m 55s      merged   89 of 89 passed across 4 shards
+shard 2  22 of 22  8m 02s      bms 927fe278 · vcu 0270a64b · charger be522fd0
+shard 3  22 of 22  6m 38s      stored as project/runs/2026-08-19-1500
+shard 4  22 of 22  5m 55s
+```
+
+### What was built
+
+```
+app/server/store/loaders/runs.mjs       the run librarian, and its refusals
+app/server/store/loaders/design.mjs     the topology, through the engine's parser
+app/server/store/loaders/injection.mjs  what is injected instead of emulated
+app/server/api/index.mjs                the librarian as Vite middleware
+app/src/app/views/ResultsView.jsx       verdict, timeline, failures, four tabs
+app/src/app/components/                 VerdictHero, Timeline, HonestLimits
+app/src/app/lib/focus.mjs               which test the timeline shows, and why
+app/src/app/lib/timeline.mjs            the three instants, or an explicit absence
+app/src/pages/                          runs, run detail, canvas, node detail
+scripts/run-suite-sharded.sh            the sharded run, as a command
+harness/merge.py                        timelines and traces stored with the run
+harness/network.py                      as_document() and a --json CLI
+```
+
+Astro 5 + React 19, hand-rolled CSS, no component library. **No webfont**: the studio
+must work air-gapped with no login, and a font from a CDN is a network dependency in the
+one product whose promise is that it runs on your own machine with nothing phoning home
+— and when it fails to load, every number silently loses its tabular alignment.
+
+Every dependency pinned exactly, like every other tool here. `@astrojs/node@11` wants
+Astro 7, so the adapter is pinned to 9 rather than forcing a resolution the tree says is
+wrong.
+
+### Observed
+
+The Results view against the real stored run, nothing invented:
+
+```
+89 / 89 PASS      MODELLED      4 shards      27m 33s of work
+
+heartbeat-sweep-300ms — shown because it is the closest call, 66.8% of its budget
+  INJECTED   0 ms         vcu.g_tx_enable=0
+  REACTED    200.400 ms   0x604   fault_code = HEARTBEAT_LOST
+  DEADLINE   300 ms       200.400 of 300 ms
+```
+
+**The tier chip says MODELLED.** Section 5's layout sketch shows a chip reading
+AUTHORITATIVE. These runs are `modelled`, and the engine's own note says the result "is
+shown and is not authoritative". Drawing the sketch's chip would have been the most
+damaging thing on this screen: a stronger claim than the engine made, in the largest
+type on the page, in a product whose pitch is that it does not do that.
+
+**The timeline picks the closest call, not the fastest.** It needs one test, and
+choosing silently would make the screen quietly editorial. A failure outranks every
+pass; otherwise the test that came nearest its budget wins, compared by margin rather
+than raw latency, and the reason is printed on screen. Picking the fastest would flatter
+the run.
+
+### Findings
+
+**A stored run pointed at its evidence instead of holding it.** Each per-test record
+carried four numbers and a path. The timeline, every assertion with its arming and
+resolution instants, the stimuli and the boot record stayed in a working directory keyed
+on the test name — which the next run overwrites. So Phase 2's "open loads the stored
+result, every timeline exactly as recorded" was not true. A month-old run would have
+opened showing last night's timeline, or an empty screen for a test that really did run,
+and nothing about either would have looked like a failure. The record now holds 89
+timelines and 89 traces, 5.7 MB, and refuses a run whose evidence is only partly there.
+
+**merge had no unit tests.** Its six refusals had been verified by hand only — the wrong
+place for that, since merge is what decides whether a run record can be trusted.
+Twenty-two now, each asserting on the *reason* rather than the exit code, because a
+merge that refuses for the wrong reason sends whoever reads it hunting a problem that is
+not there.
+
+**A crash could be counted as a test failure, and once was.** The defective-binary suite
+was refused by the merge:
+
+```
+ERROR: the shards tested different firmware
+       (bms: 7f780a868eb3 vs 927fe278d929). They are not one run.
+```
+
+One sharded run appeared to have tested both the broken binary and the good one. The
+refusal was correct and the cause was five links long, every one invisible alone:
+
+1. the engine hit an unhandled exception, and Python exits 1 for that
+2. exit 1 is `EXIT_FAIL`, so a crash reached the runner as "the firmware did not do what
+   the test asserted"
+3. the exception fired *before* the engine clears its run directory, so the previous
+   run's `results.json` was still sitting there
+4. the runner read that stale file — stale verdict PASS against exit-code FAIL — and
+   reported `inconsistent`
+5. the stale file also carried the previous run's **provenance**, so four good shards
+   looked like two different binaries tested as one
+
+It was caught only because the stale answer happened to disagree. A stale FAIL beside a
+crashed exit 1 would have agreed with it and been counted as a legitimate test failure.
+Two guards fired, from two unrelated directions — the exit-code/verdict cross-check and
+the merge's firmware check — and neither was the guard that should have prevented it.
+
+Three fixes, so any one alone would stop it: `EXIT_CRASHED = 5` so no path out of the
+engine can impersonate a verdict; the runner clears the previous answer before launching,
+because it is the only party that knows the directory before the process exists; and
+stderr is kept for anything that is not a clean pass, where it used to be kept only for
+exit codes the outcome map did not recognise — so the traceback was discarded and this
+investigation had to start from file timestamps.
+
+Verified end to end afterwards by planting a stale answer carrying the good binary's
+hash and running the broken binary over it: the fresh record carries `7f780a868eb3`.
+Five of the thirteen new tests fail if the clearing is removed, checked by removing it.
+
+**The UI cited a script that did not exist.** The run list's empty state named
+`scripts/run-suite-sharded.sh` as the way to produce a run. An interface telling someone
+to run a command that is not there is the failure this project exists to prevent,
+committed by the screen built to prevent it. The sharded run was real but had only ever
+been done by hand; it is a script now, and refuses to merge when a shard exits above 1,
+because merging the rest would store a subset that reads as a whole suite.
+
+**Coverage could never have been measured for a whole suite.** `--coverage` existed on
+the engine and not on the runner, so the only coverage figures this project had came
+from a handful of scenarios invoked one at a time, and the store's `coverage.json` slot
+had never been filled. The runner passes it through now, and merge refuses a coverage
+report that does not name exactly this run's tests — attaching one measured from a
+different run would be worse than attaching none, because the figures would read as this
+run's while describing another execution.
+
+**The purity guard caught prose four more times** — the ninth through twelfth. Every one
+in a comment or docstring, never in logic: `RUN` inside "A STORED RUN MUST BE
+SELF-CONTAINED", `RUN` in an argument's help text, `RUN` in "COST A WHOLE SUITE RUN",
+and a comment that named the two enum spellings YAML 1.1 turns into booleans. The last
+slipped into a commit because only the app tests were run after editing an engine file;
+the guard caught it one commit late, which is one commit later than it should have been.
+
+### Not yet built
+
+Sections 3.5 through 3.9 — firmware upload, Render, running tests from the interface,
+canvas editing, and the second example system. The canvas is read-only, which section
+3.8 permits explicitly.
+
+Two controls on screen are drawn as unavailable and say so: "replay this test" names
+section 3.7, and the Coverage tab names the command that would produce a report instead
+of showing a figure. A button that looked live would break the placeholder rule in the
+most expensive place — in front of someone evaluating whether the tool tells the truth.
 
 ## Phase 4 — Hosting and CI
 
