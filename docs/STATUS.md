@@ -617,6 +617,72 @@ report that does not name exactly this run's tests — attaching one measured fr
 different run would be worse than attaching none, because the figures would read as this
 run's while describing another execution.
 
+**The crash fix, proven by a run rather than by its tests.** The defective-binary suite was
+re-run clean after the three fixes above:
+
+```
+85 of 89 passed across 4 shards       fail 4
+firmware: bms 7f780a868eb3, charger be522fd0745e, vcu 0270a64bf62d
+stored as project/runs/2026-08-19-2100-broken
+```
+
+One firmware across all four shards, so the merge stored it rather than refusing. Zero
+`inconsistent`, zero `crashed`, where the same suite previously produced three
+`inconsistent` and a refusal.
+
+All four failures are temperature **exactly 550** — the limit — and each is the same
+shape: `expect_no_can` caught a frame it forbade. `bms-broken` uses `>=` where the
+firmware should use `>`, so it faults *at* the limit where the correct build does not.
+Nothing else in the suite fails. That is the argument for boundary tests in one line: all
+eight original Phase 1 scenarios passed against this binary.
+
+**An adversarial audit found eleven defects in the studio, and every one flattered.** Five
+lenses over the UI, each finding attacked by two skeptics before it counted: 57 candidates,
+30 verified, 16 survived, 11 distinct bugs. The majority were one defect in different
+places — the screen asserting something it had not measured — which is the single thing
+this product may not do. None produced a visible error. All produced confident sentences.
+
+The worst was the history row's verdict, `run.passed === run.tests`. The loader supplies
+`null` for both when a summary omits them, so `null === null` painted the reserved green
+and the word "pass" over two absent measurements, and the inverse painted an unmeasured
+"fail" in red — a two-branch comparison across three states. `harness/store.py` refuses to
+*write* such a summary; nothing checked it on *read*.
+
+In the same family: the Coverage tab asserted "no coverage was recorded for this run" while
+never reading `coverage.json`, so it would have denied a report the merge had just
+attached. Failure cards received `record={null}` for every test but the focused one and
+printed "no assertion recorded a failure — that disagreement is itself the finding" about
+assertions they had not been handed. The tier badge reported whichever test the timeline
+happened to show as the whole run's tier.
+
+Two were security. `/api/design` forwarded its `file` parameter to a subprocess with none
+of the three checks `/api/file` applies — the checks were written once for the viewer and
+never applied to the route added afterwards. And a lexical containment check is not enough
+on Windows: `platforms/NUL.repl` sits inside the repository, ends in `.repl`, and opens a
+device.
+
+**The audit's own harness made the mistake it was auditing for.** It verified the first six
+findings per lens and silently discarded the other 27 of 57, logging nothing. Read
+afterwards, most were real. The sharpest: the topology path went into `argv` with no `--`
+separator, so a value starting with a dash was consumed by argparse and the engine loaded
+the *default* topology — the canvas would have drawn a real, correct picture of the wrong
+system. Also in that batch: the timeline coloured its verdict line reserved green from
+timing alone, so a test failing on another assertion showed green; `?? 0` rendered three
+measured-looking zeros; and a `declared` board, which the engine refuses to run, was drawn
+as an ordinary working machine.
+
+It also spawned 65 agents against a stated guideline of under 15, and contended with the
+emulator for CPU — which is part of why one 22-test shard took 236 minutes.
+
+**Two copy defects only real failing data could show.** The window was appended to an
+assertion's label, producing "no fault frame for 300 ms within 300 ms", because a
+scenario's label usually already states its own duration; it has its own row now. And the
+timeline's absence panel discarded two of the engine's three explanations — for
+`overtemp-boundary` the engine refuses to quote any latency at all, because no assertion
+had its causing stimulus inside its own deadline window, and it measured a fastest reaction
+of 50.3 ms that it declines to call that test's latency. All three now appear, including
+the number it will not quote and the reason.
+
 **The purity guard caught prose four more times** — the ninth through twelfth. Every one
 in a comment or docstring, never in logic: `RUN` inside "A STORED RUN MUST BE
 SELF-CONTAINED", `RUN` in an argument's help text, `RUN` in "COST A WHOLE SUITE RUN",
