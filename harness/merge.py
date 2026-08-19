@@ -156,6 +156,35 @@ def check_coverage(tallies) -> list:
     return sorted(records, key=lambda r: r.get("test") or "")
 
 
+def engine_record(out_dir: str):
+    """The engine's full record for one test, and the trace beside it.
+
+    A stored run must be self-contained -- this is the whole point of storing it.
+
+    The runner's own row carries the outcome, the verdict and the latency -- four
+    numbers. Everything that makes a result readable afterwards lives in the
+    engine's results file: the timeline, every assertion with its arming and
+    resolution instants, the stimuli, the boot record. That file sits in a
+    working directory keyed on the test name, which the NEXT run overwrites.
+
+    So a run record that pointed at it would decay silently: open a month-old
+    run and get last night's timeline, or nothing. "Open loads the stored result,
+    every timeline exactly as recorded" is only true if the record holds them.
+    """
+    for candidate in _candidate_paths(out_dir):
+        results = candidate / "results.json"
+        if not results.is_file():
+            continue
+        try:
+            with io.open(results, encoding="utf-8") as handle:
+                full = json.load(handle)
+        except (OSError, ValueError):
+            return None, None
+        traces = sorted(candidate.glob("trace_*.log"))
+        return full, (traces[0] if traces else None)
+    return None, None
+
+
 def collect_provenance(records, runs_root: Path) -> dict:
     """Provenance from the per-test records, and it must agree everywhere.
 
@@ -256,10 +285,40 @@ def main(argv=None) -> int:
         "complete": True,
     }
 
+    # Fold the engine's own record into each row, so the stored run holds the
+    # evidence rather than a path to somewhere it used to be.
+    traces, thin = [], []
+    for row in records:
+        full, trace = engine_record(row.get("out_dir") or "")
+        if full is None:
+            thin.append(row.get("test"))
+            continue
+        row["scenario"] = full.get("scenario")
+        row["timeline"] = full.get("timeline")
+        row["assertions"] = full.get("assertions")
+        row["stimuli"] = full.get("stimuli")
+        row["symbol_writes"] = full.get("symbol_writes")
+        row["latency"] = full.get("latency")
+        row["boot"] = full.get("boot")
+        row["counts"] = full.get("counts")
+        row["run"] = full.get("run")
+        if trace is not None:
+            traces.append(trace)
+
+    if thin:
+        # Refusing here rather than storing a run whose timelines are missing:
+        # the record would validate, list, and open, and every screen built on
+        # it would show an empty timeline for a test that really did run.
+        print("\nERROR: %d test(s) have no engine record to store, so the run "
+              "would not be self-contained: %s\nA stored run whose timelines "
+              "are absent still opens and still looks like evidence.\n"
+              % (len(thin), ", ".join(str(t) for t in thin[:6])), file=sys.stderr)
+        return 2
+
     record = {"summary": summary, "provenance": provenance, "results": records}
     try:
         target = store.save_run(args.id, record, replay_text=args.replay,
-                                runs_root=runs_root)
+                                traces=traces, runs_root=runs_root)
     except store.StoreError as exc:
         print("\nERROR: the merged run was refused by the store: %s\n" % exc,
               file=sys.stderr)
