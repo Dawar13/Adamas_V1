@@ -40,6 +40,17 @@
 #   for every test is written into the gate's own record, under `baseline`, so
 #   consuming it costs nothing and nothing is executed twice.
 #
+# COVERAGE IS REPORTED BESIDE DISCRIMINATION, BY THIS SCRIPT
+#   Coverage on its own is confirmation bias with a percentage sign: a function
+#   at 100% that no defective build can be caught in is a function whose tests
+#   confirm rather than probe. The join was supported and never wired, so it
+#   happened only when a human remembered to run two commands in the right
+#   order with the right paths -- which is to say, in the whole repository,
+#   never. With --coverage this script traces the baseline arm, then measures
+#   coverage over exactly those runs and joins it to exactly this gate's
+#   record. The paths come out of the record, so the two halves cannot drift
+#   apart or be pointed at different runs.
+#
 # EXIT CODES
 #     0  the gate held: every documented divergence was observed, exactly
 #     1  a real answer, and it was wrong: divergence unexpected, missing, or
@@ -64,6 +75,10 @@ usage() {
 	  defective build, and asserts the verdict sets differ in exactly the
 	  documented tests.
 
+	  Options this script acts on:
+	    --coverage         trace the baseline arm and report coverage beside
+	                       the discrimination, joined to this run's record
+
 	  Useful options, passed straight to the gate:
 	    --list             print the plan and execute nothing
 	    --workers N        concurrent tests (default: derived from this host)
@@ -80,8 +95,17 @@ usage() {
 }
 
 expand=1
+coverage=0
+out=""
+take_out=0
 forwarded=()
 for argument in "$@"; do
+	if [ "$take_out" -eq 1 ]; then
+		out="$argument"
+		take_out=0
+		forwarded+=("$argument")
+		continue
+	fi
 	case "$argument" in
 		-h | --help)
 			usage
@@ -90,11 +114,28 @@ for argument in "$@"; do
 		--no-expand)
 			expand=0
 			;;
+		--coverage)
+			coverage=1
+			forwarded+=("$argument")
+			;;
+		--out)
+			take_out=1
+			forwarded+=("$argument")
+			;;
+		--out=*)
+			out="${argument#--out=}"
+			forwarded+=("$argument")
+			;;
 		*)
 			forwarded+=("$argument")
 			;;
 	esac
 done
+
+# Where the gate writes, when nobody said. Pinned to the gate's own default by
+# a unit test rather than kept in step by hand: two spellings of one path is
+# how a report comes to be measured over runs it is not about.
+DEFAULT_GATE_OUT="harness/out/divergence"
 
 for required in "$generator" "$gate"; do
 	if [ ! -f "$required" ]; then
@@ -164,4 +205,48 @@ if [ "${#forwarded[@]}" -gt 0 ]; then
 else
 	"${python_cmd[@]}" "$gate" --tests "$tests_dir"
 fi
-exit $?
+gate_status=$?
+
+if [ "$coverage" -eq 0 ]; then
+	exit "$gate_status"
+fi
+
+# The gate ran the baseline arm traced. Coverage is now measured over those
+# runs and joined to that record -- both paths read out of the record itself,
+# so this cannot end up describing some other run.
+[ -n "$out" ] || out="$DEFAULT_GATE_OUT"
+record="$out/divergence.json"
+if [ ! -f "$record" ]; then
+	echo "" >&2
+	echo "ERROR: --coverage was asked for and the gate wrote no record at" >&2
+	echo "       $record, so there is nothing to report coverage beside." >&2
+	echo "" >&2
+	exit 2
+fi
+
+runs="$("${python_cmd[@]}" -c 'import json,sys
+document = json.load(open(sys.argv[1], encoding="utf-8"))
+baseline = document.get("baseline") or {}
+if not baseline.get("traced"):
+    sys.exit("the baseline arm was not traced, so no coverage was measured")
+sys.stdout.write(baseline.get("runs") or "")' "$record")" || {
+	echo "" >&2
+	echo "ERROR: $record does not describe a traced baseline arm:" >&2
+	echo "       $runs" >&2
+	echo "" >&2
+	exit 2
+}
+
+echo ""
+echo "--- coverage, beside the discrimination above ---"
+"${python_cmd[@]}" "$repo/harness/coverage.py" \
+	--runs "$runs" --divergence "$record" \
+	--out "$out/coverage.json" --work "$out/coverage-work"
+coverage_status=$?
+
+# The gate's answer outranks coverage's: a coverage finding is a finding, and a
+# gate that did not hold is a broken proof.
+if [ "$gate_status" -ne 0 ]; then
+	exit "$gate_status"
+fi
+exit "$coverage_status"

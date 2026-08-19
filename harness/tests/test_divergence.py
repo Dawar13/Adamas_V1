@@ -577,11 +577,21 @@ class TestSuiteLoads(WorkspaceCase):
         self.assertEqual(suite.ids, ("gamma", "alpha", "beta"))
         self.assertEqual(len(suite), 3)
 
-    def test_a_stray_file_the_manifest_does_not_declare_is_not_run(self):
+    def test_a_stray_file_the_manifest_does_not_declare_is_refused(self):
+        """Not merely left out of the run: refused, loudly.
+
+        Leaving it out is safe in this loader and unsafe in any caller that
+        lists the directory instead -- which is what the suite runner used to
+        do. One entry point would then run 75 tests and the other 9, and both
+        would print a complete-looking number. The size of the suite has to be
+        one fact, so a file that is not in the manifest stops the run.
+        """
         self.space.manifest(["alpha"])
         self.space.test("left-behind")
-        suite = divergence.Suite.load(self.space.tests)
-        self.assertEqual(suite.ids, ("alpha",))
+        with self.assertRaises(divergence.DivergenceError) as caught:
+            divergence.Suite.load(self.space.tests)
+        self.assertIn("left-behind.yml", str(caught.exception))
+        self.assertIn("does not declare", str(caught.exception))
 
     def test_a_missing_manifest_is_refused(self):
         with self.assertRaises(divergence.DivergenceError) as caught:
@@ -1422,6 +1432,116 @@ class TestR1GateHoldsNoProjectData(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# 11b. an expectation may name a family of tests
+# ---------------------------------------------------------------------------
+
+
+class TestExpectationResolvesAgainstTheSuite(unittest.TestCase):
+    """Tests are generated, so what is documented is a CLASS of them.
+
+    THE DEFECT THIS PINS. The expected-divergence sets held the identifiers of
+    hand-written tests. Once the scenarios expanded into sweeps, a defect
+    visible at one value became visible in every variant at that value -- so the
+    files were wrong the moment the suite grew, and the gate they fed reported a
+    stored PASS from a nine-test suite that no longer existed.
+
+    A wildcard cannot absorb a surprise, and that is the property the gate rests
+    on: the observed set must still equal the matched set exactly.
+    """
+
+    def expectation(self, entries):
+        return divergence.Expectation(
+            Path("nowhere.yml"), "a defect", entries, "why " * 20)
+
+    def test_an_exact_name_matches_only_itself(self):
+        matched, barren = self.expectation(["alpha"]).resolve(
+            ["alpha", "alpha-2"])
+        self.assertEqual(matched, ["alpha"])
+        self.assertEqual(barren, [])
+
+    def test_a_wildcard_matches_a_family(self):
+        matched, barren = self.expectation(["alpha-*"]).resolve(
+            ["alpha", "alpha-1", "alpha-2", "beta-1"])
+        self.assertEqual(matched, ["alpha-1", "alpha-2"])
+        self.assertEqual(barren, [])
+
+    def test_the_order_is_the_suites(self):
+        matched, _ = self.expectation(["*-2", "*-1"]).resolve(
+            ["alpha-1", "alpha-2"])
+        self.assertEqual(matched, ["alpha-1", "alpha-2"])
+
+    def test_an_entry_matching_nothing_is_reported_not_ignored(self):
+        # A pattern that matches nothing is a documented expectation nothing
+        # checks -- exactly as bad as a name that is not in the suite, and the
+        # gate fails on both.
+        matched, barren = self.expectation(["alpha-*", "gone-*"]).resolve(
+            ["alpha-1"])
+        self.assertEqual(matched, ["alpha-1"])
+        self.assertEqual(barren, ["gone-*"])
+
+    def test_overlapping_entries_do_not_double_count(self):
+        matched, barren = self.expectation(["alpha-*", "alpha-1"]).resolve(
+            ["alpha-1", "alpha-2"])
+        self.assertEqual(matched, ["alpha-1", "alpha-2"])
+        self.assertEqual(barren, [])
+
+    def test_a_pattern_is_recognised_by_its_own_characters(self):
+        for entry in ("a-*", "a-?", "a-[12]"):
+            with self.subTest(entry=entry):
+                self.assertTrue(divergence._is_pattern(entry))
+        self.assertFalse(divergence._is_pattern("alpha-550-at-200ms"))
+
+    def test_matching_is_case_exact(self):
+        matched, barren = self.expectation(["ALPHA-*"]).resolve(["alpha-1"])
+        self.assertEqual(matched, [])
+        self.assertEqual(barren, ["ALPHA-*"])
+
+
+class TestAWideEntryStillCannotAbsorbASurprise(EndToEndCase):
+    """The end-to-end property, through the real gate.
+
+    A wildcard is only safe because the comparison stays exact in both
+    directions. Every way a pattern can be wrong is run here, and every one of
+    them has to fail the gate.
+    """
+
+    def gate_with(self, declared, verdicts):
+        self.space.variant("bent", defect="a limit moved", diverging=declared)
+        self.space.plan("bent", verdicts=verdicts)
+        return self.run_gate()
+
+    def test_a_pattern_matching_exactly_what_diverged_holds(self):
+        code, out, err = self.gate_with(
+            ["beta*", "gamma"], {"beta": "FAIL", "gamma": "FAIL"})
+        self.assertEqual(code, divergence.EXIT_OK, out + err)
+        self.assertIn("gate held", out)
+
+    def test_a_pattern_matching_more_than_diverged_fails(self):
+        code, out, err = self.gate_with(["beta", "gamma*"], {"beta": "FAIL"})
+        self.assertEqual(code, divergence.EXIT_WRONG, out + err)
+        self.assertIn("gamma", out + err)
+
+    def test_a_pattern_matching_less_than_diverged_fails(self):
+        code, out, err = self.gate_with(
+            ["beta*"], {"beta": "FAIL", "gamma": "FAIL"})
+        self.assertEqual(code, divergence.EXIT_WRONG, out + err)
+        self.assertIn("gamma", out + err)
+
+    def test_a_pattern_matching_nothing_in_the_suite_fails(self):
+        code, out, err = self.gate_with(["beta", "never-*"], {"beta": "FAIL"})
+        self.assertEqual(code, divergence.EXIT_WRONG, out + err)
+        self.assertIn("never-*", out + err)
+
+    def test_the_record_carries_what_the_patterns_resolved_to(self):
+        code, out, err = self.gate_with(
+            ["beta*", "gamma"], {"beta": "FAIL", "gamma": "FAIL"})
+        self.assertEqual(code, divergence.EXIT_OK, out + err)
+        variant = self.record()["variants"][0]
+        self.assertEqual(variant["expected_diverging"], ["beta*", "gamma"])
+        self.assertEqual(variant["expected_resolved"], ["beta", "gamma"])
+
+
+# ---------------------------------------------------------------------------
 # 12. the shipped marker files and the shipped entry point
 # ---------------------------------------------------------------------------
 
@@ -1480,8 +1600,51 @@ class TestShippedEntryPoint(unittest.TestCase):
                         self.text.index("divergence.py"))
 
     def test_it_runs_the_gate_and_returns_its_verdict(self):
+        """The gate's answer must survive whatever else the script does.
+
+        It now runs coverage afterwards, so the verdict is carried in a variable
+        rather than in $? -- and a script that reported coverage's exit code in
+        place of the gate's would turn a broken proof into a clean run.
+        """
         self.assertIn("divergence.py", self.text)
-        self.assertIn("exit $?", self.text)
+        self.assertIn("gate_status=$?", self.text)
+        self.assertIn('exit "$gate_status"', self.text)
+
+    def test_coverage_is_joined_to_this_run_and_not_to_a_remembered_path(self):
+        # PHASE-2 §10: coverage beside discrimination. The wiring existed only
+        # in a human's memory, so it happened in this repository exactly never.
+        self.assertIn("coverage.py", self.text)
+        self.assertIn("--divergence", self.text)
+        self.assertIn("divergence.json", self.text)
+
+    def test_the_scripts_default_output_path_is_the_gates_own(self):
+        """Derived, not restated.
+
+        The script has to know where the gate wrote in order to point coverage
+        at those runs. Two spellings of one path is how a coverage report comes
+        to be measured over runs it is not about, so the spelling in the script
+        is pinned to the module's default here.
+        """
+        import re as _re
+        match = _re.search(r'DEFAULT_GATE_OUT="([^"]+)"', self.text)
+        self.assertIsNotNone(match, "the script names no default output path")
+        parser = divergence.build_parser()
+        # The module's default is expressed in main() as a path under the repo
+        # root; take it from there rather than restating it.
+        source = GATE_SOURCE.read_text(encoding="utf-8")
+        self.assertIn('REPO_ROOT / "harness" / "out" / "divergence"', source)
+        self.assertEqual(match.group(1), "harness/out/divergence")
+        self.assertIsNone(parser.get_default("out"),
+                          "the gate's --out default moved into argparse; pin "
+                          "the script against it there instead")
+
+    def test_only_the_baseline_arm_is_traced(self):
+        # Coverage is a statement about the binary under test. Tracing every arm
+        # would pay the host cost three more times to measure builds nobody
+        # ships.
+        source = GATE_SOURCE.read_text(encoding="utf-8")
+        self.assertIn("coverage=args.coverage", source)
+        self.assertEqual(source.count("coverage=args.coverage"), 1)
 
     def test_it_documents_every_exit_code_the_gate_can_return(self):
         for code in (divergence.EXIT_OK, divergence.EXIT_WRONG,

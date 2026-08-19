@@ -17,16 +17,50 @@ refused is recorded as a NON-PASS with its own outcome -- never dropped, and
 never silently retried. Retrying a flaky test until it passes would be the same
 failure in friendlier clothing.
 
+-----------------------------------------------------------------------------
+THE SUITE IS THE MANIFEST, NOT A DIRECTORY LISTING
+-----------------------------------------------------------------------------
+What counts as "the suite" is read from the expansion manifest, through the
+same loader the divergence gate uses, so the two entry points cannot disagree
+about what the suite is.
+
+This closes the gap that let a generated count be quoted as a verified one. The
+generator emitted 75 tests and 9 of them had ever produced a verdict; nothing
+compared the two numbers, because this file counted what it happened to run and
+the manifest counted what had been written. Now every tally carries both --
+`declared` from the manifest and `selected` after any filter -- and says
+outright when it covers less than the whole suite. A partial tally is a
+legitimate thing to want; a partial tally that reads like a whole one is not.
+
 The outcomes are kept distinct because they mean different things to a reader:
 
-    pass       the firmware did what the test asserted
-    fail       the firmware did not -- a real result, with real numbers
-    unusable   the inputs could not be compiled, so nothing ran
-    refused    definable, but no execution path exists (a declared board)
-    timeout    the emulator did not finish inside the budget
-    crashed    the engine itself died, or claimed a pass with no results file
+    pass          the firmware did what the test asserted
+    fail          the firmware did not -- a real result, with real numbers
+    unusable      the inputs could not be compiled, so nothing ran
+    refused       definable, but no execution path exists (a declared board)
+    timeout       the emulator did not finish inside the budget
+    crashed       the engine itself died, or claimed a pass with no results file
+    inconsistent  the engine said one thing twice and the two disagree
 
 Only `pass` is success. Every other outcome makes the suite exit non-zero.
+
+-----------------------------------------------------------------------------
+THE TWO STATEMENTS ARE CROSS-CHECKED, NOT TRUSTED SEPARATELY
+-----------------------------------------------------------------------------
+The engine states its verdict twice: once as an exit code, and once inside the
+results file it writes. Reading both and reporting only one is not a
+cross-check -- it is a choice of which to believe, made silently.
+
+That was the defect here. A test whose stored results said FAIL was counted as
+a pass whenever the engine happened to exit 0, and the record kept both values
+side by side while only the tally was printed. Under R3 a disagreement between
+two independent statements about the same run is exactly the input an aggregate
+cannot handle, and the answer is a loud failure: the run is reported
+`inconsistent` and the suite fails. Neither statement is preferred, because
+there is no way to tell from here which of them is wrong.
+
+A results file that cannot be read is the same class and is treated the same
+way. "Exit 0, and the evidence is unreadable" is not a pass.
 
 -----------------------------------------------------------------------------
 DETERMINISM MUST SURVIVE PARALLELISM
@@ -62,6 +96,10 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from harness.divergence import DivergenceError, Suite   # noqa: E402
 
 ENGINE = HERE / "run_scenarios.py"
 EXPANDER = HERE / "expand.py"
@@ -82,10 +120,41 @@ OUTCOME_FOR_CODE = {
     ENGINE_DRY_RUN: "dry-run",
 }
 
-#: A single test boots several machines and runs a second or two of virtual
-#: time. Five minutes is generous; a test that exceeds it is reported as a
-#: timeout, which is a failure and never a skip.
-DEFAULT_TIMEOUT_S = 300
+#: The stored verdict that must accompany each exit code that means "a run
+#: happened". The engine derives its exit code FROM the verdict it wrote, so
+#: these two are one statement made twice; anything else means one of them is
+#: wrong and this file cannot tell which. Codes not listed here describe a run
+#: that did not happen and carry no verdict at all.
+VERDICT_FOR_CODE = {
+    ENGINE_PASS: "PASS",
+    ENGINE_FAIL: "FAIL",
+}
+
+#: Reported when the two statements disagree, or when the evidence behind one
+#: of them cannot be read. Never `pass`.
+OUTCOME_INCONSISTENT = "inconsistent"
+
+#: A timeout is a SAFETY NET, not a schedule.
+#:
+#: It exists to stop a hung emulator holding the suite open forever. Sizing it
+#: near what a test is expected to take turns it into a scheduling deadline, and
+#: then ordinary contention -- not a fault -- fails tests.
+#:
+#: That is exactly what happened, measured on this machine:
+#:
+#:   heartbeat-loss, alone, one worker           46 s   pass
+#:   heartbeat-loss, inside an 89-test suite    >300 s  TIMEOUT
+#:
+#: A 6.5x slowdown, well past the ~2x that four workers on twelve cores would
+#: suggest. The long scenarios hold three emulated machines through several
+#: seconds of virtual time and are far hungrier than the threshold sweeps, so
+#: four of them at once oversubscribe the host badly. Twelve tests failed, none
+#: of them for anything the firmware did.
+#:
+#: Thirty minutes is chosen to be far above any real test and still finite. A
+#: test that reaches it is genuinely stuck, which is the only thing this number
+#: should ever detect.
+DEFAULT_TIMEOUT_S = 1800
 
 
 class SuiteError(Exception):
@@ -126,19 +195,32 @@ def expand(python, tests_dir: Path, say) -> None:
             say("  " + line.rstrip())
 
 
-def discover(tests_dir: Path, pattern) -> list:
+def declared(tests_dir: Path) -> list:
+    """The suite, as the generator declared it. Never a directory listing.
+
+    Read through the divergence gate's loader rather than a second copy of the
+    same reading, so a tally and a gate run over one expansion cannot cover
+    different sets of tests and both look complete.
+    """
     if not tests_dir.is_dir():
         raise SuiteError(
             "no generated tests at %s. Run the expander first, or pass "
             "--tests." % tests_dir
         )
-    found = sorted(p for p in tests_dir.glob("*.yml"))
+    try:
+        suite = Suite.load(tests_dir)
+    except DivergenceError as exc:
+        raise SuiteError(str(exc)) from None
+    return [path for _, path in suite.tests]
+
+
+def select(found: list, pattern) -> list:
     if pattern:
         found = [p for p in found if fnmatch.fnmatch(p.stem, pattern)]
     if not found:
         raise SuiteError(
-            "no tests matched, so a green tally would mean nothing. Looked in "
-            "%s%s." % (tests_dir, " for %r" % pattern if pattern else "")
+            "no tests matched %r, so a green tally would mean nothing."
+            % pattern
         )
     return found
 
@@ -176,21 +258,36 @@ def run_one(python, test: Path, out_root: Path, timeout_s: int,
     if finished.returncode not in OUTCOME_FOR_CODE:
         record["detail"] = (finished.stderr or finished.stdout or "").strip()[-400:]
 
-    # The verdict is read from the engine's own file rather than inferred from
-    # the exit code alone, so the two can be cross-checked instead of trusted
-    # separately.
+    # The verdict is read from the engine's own file and then CHECKED against
+    # the exit code. Reading both and reporting one is not a cross-check.
+    expected_verdict = VERDICT_FOR_CODE.get(finished.returncode)
     results_file = out_dir / "results.json"
     if results_file.is_file():
         try:
             data = json.loads(results_file.read_text(encoding="utf-8"))
-            record["verdict"] = data.get("verdict")
-            record["latency_us"] = (data.get("latency") or {}).get("headline_us")
         except (ValueError, OSError) as exc:
-            record["detail"] = "results.json unreadable: %s" % exc
-    elif record["outcome"] == "pass":
-        # A pass with no results file is not a pass.
+            # Exit 0 with unreadable evidence is not a pass. The engine's own
+            # word is all that is left, and this file exists to not take it.
+            record["outcome"] = OUTCOME_INCONSISTENT
+            record["detail"] = (
+                "the engine exited %d but the results.json it wrote cannot be "
+                "read: %s" % (finished.returncode, exc))
+            return record
+        record["verdict"] = data.get("verdict")
+        record["latency_us"] = (data.get("latency") or {}).get("headline_us")
+        if expected_verdict is not None and record["verdict"] != expected_verdict:
+            record["outcome"] = OUTCOME_INCONSISTENT
+            record["detail"] = (
+                "the engine exited %d, which means verdict %s, and the "
+                "results.json it wrote for the same run says verdict %r. One "
+                "of the two is wrong and nothing here can tell which, so this "
+                "test is not counted as anything."
+                % (finished.returncode, expected_verdict, record["verdict"]))
+    elif expected_verdict is not None:
+        # A verdict-carrying exit code with no results file is not a verdict.
         record["outcome"] = "crashed"
-        record["detail"] = "exit 0 but no results.json was written"
+        record["detail"] = ("exit %d but no results.json was written"
+                            % finished.returncode)
     return record
 
 
@@ -227,13 +324,16 @@ def main(argv=None) -> int:
     try:
         if not args.no_expand:
             expand(python, tests_dir, say)
-        tests = discover(tests_dir, args.filter)
+        every = declared(tests_dir)
+        tests = select(every, args.filter)
     except SuiteError as exc:
         print("\nERROR: %s\n" % exc, file=sys.stderr)
         return 2
 
     out_root.mkdir(parents=True, exist_ok=True)
-    say("\n  running %d tests on %d workers ...\n" % (len(tests), workers))
+    complete = len(tests) == len(every)
+    say("\n  running %d of the %d declared tests on %d workers ...\n"
+        % (len(tests), len(every), workers))
 
     # Wall clock for the human summary only. Nothing here reaches a verdict.
     started = time.time()
@@ -260,6 +360,11 @@ def main(argv=None) -> int:
     say("")
     say("  %d of %d passed in %dm %02ds on %d workers"
         % (passed, len(records), int(elapsed) // 60, int(elapsed) % 60, workers))
+    if not complete:
+        # Said every time, not only in the file. A partial tally quoted as a
+        # suite result is the shape of the defect this guard exists for.
+        say("  PARTIAL: %d of the %d tests the manifest declares were run. "
+            "This is not a suite result." % (len(records), len(every)))
     for outcome in sorted(k for k in counts if k != "pass"):
         say("    %-9s %d" % (outcome, counts[outcome]))
     for record in records:
@@ -271,6 +376,14 @@ def main(argv=None) -> int:
     tally = {
         "tests": len(records),
         "passed": passed,
+        # What the generator declared, beside what this run covered. Both,
+        # always: a reader who sees only the second cannot tell a whole suite
+        # from a filtered slice of one, and that is how a generated count comes
+        # to be quoted as a verified one.
+        "declared": len(every),
+        "selected": len(tests),
+        "complete": complete,
+        "filter": args.filter,
         "counts": counts,
         "workers": workers,
         "duration_s": round(elapsed, 3),

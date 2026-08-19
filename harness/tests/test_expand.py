@@ -93,6 +93,51 @@ steps:
 
 #: A shape that applies its stimulus at a nominated instant, so `sweep.at` means
 #: something for it.
+WITNESSED_PATTERN = """
+id: witnessed-limit
+name: A reading crosses a limit at a nominated instant, in a named condition
+description: The condition the device is in is what makes one moment differ.
+parameters:
+  - { name: unit_under_test, type: node }
+  - { name: input_symbol,    type: injectable_symbol }
+  - { name: limit,           type: number }
+  - { name: announcement,    type: message_id }
+  - { name: budget,          type: duration }
+  - { name: condition_message, type: message_id }
+  - { name: condition_signal,  type: signal }
+  - { name: condition_window,  type: duration }
+sweep:
+  around: limit
+  comparison: strict
+  step: 1
+  at_lead_by: "{{condition_window}}"
+steps:
+  - run_for:       { ms: "{{at_lead}}" }
+  - expect_can:    { id: "{{condition_message}}",
+                     signals: { "{{condition_signal}}": "{{at_state}}" },
+                     within_ms: "{{condition_window}}",
+                     label: "at {{at}} the device reports {{at_state}}" }
+  - write_symbol:  { node: "{{unit_under_test}}", symbol: "{{input_symbol}}",
+                     value: "{{value}}" }
+  - when_legal:
+      - expect_no_can: { id: "{{announcement}}", for_ms: "{{budget}}",
+                         label: "{{value}} at {{at}} is legal" }
+  - when_fault:
+      - expect_can:    { id: "{{announcement}}", within_ms: "{{budget}}",
+                         label: "{{value}} at {{at}} announces a fault" }
+"""
+
+WITNESSED_PARAMS = """
+  unit_under_test: some_device
+  input_symbol: g_some_reading
+  limit: 550
+  announcement: 0x7A0
+  budget: 300ms
+  condition_message: 0x7A1
+  condition_signal: some_condition
+  condition_window: 150ms
+"""
+
 TIMED_PATTERN = """
 id: timed-limit
 name: A reading crosses a limit at a nominated instant
@@ -626,6 +671,101 @@ class TestShippedScenariosAreUnchanged(unittest.TestCase):
                 self.assertTrue(scenario.steps)
 
 
+class TestTheShippedSuiteAgreesAboutTheStartingPICTURE(unittest.TestCase):
+    """No two tests may disagree about what the device does before anything
+    happens to it.
+
+    THE DEFECT THIS PINS. A swept scenario bound the wrong value to the
+    pattern's "nothing is tripped yet" parameter: it asserted a field would read
+    one thing at boot when the firmware reads another until some 800 ms in. All
+    nine tests of that family failed against the CORRECT binary, on their FIRST
+    assertion, with every later assertion passing -- and they were committed
+    without ever being executed.
+
+    No unit test can know what a firmware reports at 200 ms; only a run can.
+    What IS derivable, and is the invariant here, is that two files describing
+    one device cannot both be right if they disagree about its starting picture.
+    Every claim made before the first stimulus is collected out of the whole
+    expansion and grouped: if one test says a field reads X before anything has
+    been done to the device and another says it reads Y, one of them is wrong,
+    and this says so without an emulator.
+
+    Nothing here is a list. The verbs are read from the engine's own vocabulary
+    and the claims from the shipped expansion.
+    """
+
+    #: Verbs that do something TO the device or the bus. Everything after the
+    #: first of these is a reaction to what the test did, and two tests may
+    #: legitimately differ there.
+    STIMULUS_VERBS = frozenset({
+        "write_symbol", "node_signal", "node_silence", "can_send", "flood",
+    })
+
+    #: And the verb that deliberately lets virtual time pass. A claim made after
+    #: it is a claim about a later instant, not about the starting picture, so
+    #: the window closes here too -- this is exactly what lets a moment sweep
+    #: witness three different conditions without contradicting anybody.
+    TIME_VERBS = frozenset({"run_for"})
+
+    @classmethod
+    def setUpClass(cls):
+        cls.plan = expand.build_plan(repo_root=REPO_ROOT)
+
+    def test_the_verbs_named_here_are_the_engines_own(self):
+        # Derived, so a verb renamed later fails this check rather than leaving
+        # it reading a stale list and quietly widening the window it inspects.
+        known = set(engine.VERBS)
+        named = self.STIMULUS_VERBS | self.TIME_VERBS
+        self.assertTrue(named <= known, sorted(named - known))
+        # And every verb the engine has is accounted for: either it acts, or it
+        # advances time, or it is an assertion or a note. A verb this check has
+        # never heard of would sit inside the window it inspects.
+        remaining = known - named
+        self.assertEqual(
+            sorted(remaining),
+            sorted(set(engine.EXPECT_VERBS) | set(engine.FORBID_VERBS)
+                   | {"mark"}),
+            "the engine's verb list changed; decide which side of the starting "
+            "picture the new verb falls on")
+
+    def starting_claims(self):
+        """(id, signal) -> {value: [test, ...]} for claims made before any
+        stimulus."""
+        claims = {}
+        for test in self.plan.tests:
+            document = load_document(test.text())
+            for step in document["steps"]:
+                verb = next(iter(step))
+                if verb in self.STIMULUS_VERBS or verb in self.TIME_VERBS:
+                    break
+                if verb != "expect_can":
+                    continue
+                body = step[verb]
+                signals = body.get("signals") or {}
+                for signal, value in signals.items():
+                    key = (str(body.get("id")), str(signal))
+                    claims.setdefault(key, {}).setdefault(
+                        str(value), []).append(test.id)
+        return claims
+
+    def test_no_two_tests_disagree_about_it(self):
+        claims = self.starting_claims()
+        self.assertTrue(claims,
+                        "no test asserts anything before its first stimulus, so "
+                        "this check is vacuous")
+        for (identifier, signal), values in sorted(claims.items()):
+            with self.subTest(message=identifier, signal=signal):
+                self.assertEqual(
+                    len(values), 1,
+                    "before anything has been done to the device, %s %s is "
+                    "asserted to read %s. One of these is wrong -- a value the "
+                    "firmware does not show at that instant fails against the "
+                    "CORRECT binary."
+                    % (identifier, signal,
+                       " and ".join("%s (%s)" % (value, ", ".join(tests[:3]))
+                                    for value, tests in sorted(values.items()))))
+
+
 # ---------------------------------------------------------------------------
 # 6. Stable ids
 # ---------------------------------------------------------------------------
@@ -787,6 +927,144 @@ class TestTimeDimension(ExpandTestCase):
         with self.assertRaises(expand.ExpandError) as caught:
             other.plan()
         self.assertIn("appears twice", str(caught.exception))
+
+
+# ---------------------------------------------------------------------------
+# 7b. A swept moment has to be witnessed
+# ---------------------------------------------------------------------------
+
+
+class TestWitnessedMoments(ExpandTestCase):
+    """A moment earns a test by meeting the device in a different condition.
+
+    THE DEFECT THIS PINS. The moment dimension tripled a suite's test count
+    while every variant it produced carried a byte-identical assertion list: the
+    only difference between three files was the length of a wait. Thirty-eight
+    tests asserted nothing a sibling did not, and the scenario's own written
+    justification for the three moments named a condition the firmware never
+    reaches -- unnoticed, because nothing checked it.
+
+    So a pattern that sweeps the moment may require the condition to be
+    witnessed, per moment, before the stimulus; and where it does, the generator
+    refuses a moment with no witness and two moments with the same one.
+    """
+
+    def swept(self, sweep, name="thing"):
+        space = Workspace(Path(self._tmp.name) / name)
+        space.pattern(WITNESSED_PATTERN)
+        space.swept_scenario(name=name, pattern="witnessed-limit",
+                             params=WITNESSED_PARAMS, sweep=sweep)
+        return space
+
+    def test_each_moment_witnesses_its_own_condition(self):
+        plan = self.swept(
+            "  values: [549, 550, 551]\n"
+            "  at:\n"
+            "    - { ms: 200ms, state: FIRST }\n"
+            "    - { ms: 900ms, state: SECOND }\n").plan()
+        self.assertEqual(len(plan.tests), 6)
+        first = self.emitted(plan, "thing-550-at-200ms")
+        second = self.emitted(plan, "thing-550-at-900ms")
+        # The two differ in an ASSERTION, not only in a wait. That is the whole
+        # property: the sibling test makes a claim this one does not.
+        self.assertNotEqual(first["steps"][1], second["steps"][1])
+        self.assertEqual(first["steps"][1]["expect_can"]["signals"],
+                         {"some_condition": "FIRST"})
+        self.assertEqual(second["steps"][1]["expect_can"]["signals"],
+                         {"some_condition": "SECOND"})
+
+    def test_the_stimulus_still_lands_at_the_declared_moment(self):
+        """The witness comes out of the wait, never off the end.
+
+        Otherwise every moment slides by the width of its own witness and the
+        identifier names an instant the test does not use.
+        """
+        plan = self.swept(
+            "  values: [549, 550, 551]\n"
+            "  at:\n"
+            "    - { ms: 900ms, state: SECOND }\n").plan()
+        document = self.emitted(plan, "thing-550-at-900ms")
+        self.assertEqual(document["steps"][0], {"run_for": {"ms": 750}})
+        self.assertEqual(document["steps"][1]["expect_can"]["within_ms"], 150)
+        # 750 + 150 = 900: the write lands exactly at the moment named.
+        self.assertEqual(next(iter(document["steps"][2])), "write_symbol")
+
+    def test_a_moment_with_no_witness_is_refused(self):
+        with self.assertRaises(expand.ExpandError) as caught:
+            self.swept("  values: [549, 550, 551]\n  at: [200ms]\n",
+                       name="bare").plan()
+        self.assertIn("counting padding as coverage", str(caught.exception))
+
+    def test_two_moments_witnessing_the_same_condition_are_refused(self):
+        with self.assertRaises(expand.ExpandError) as caught:
+            self.swept(
+                "  values: [549, 550, 551]\n"
+                "  at:\n"
+                "    - { ms: 300ms, state: SAME }\n"
+                "    - { ms: 900ms, state: SAME }\n", name="same").plan()
+        self.assertIn("one test run twice", str(caught.exception))
+
+    def test_a_moment_earlier_than_its_own_witness_is_refused(self):
+        with self.assertRaises(expand.ExpandError) as caught:
+            self.swept(
+                "  values: [549, 550, 551]\n"
+                "  at:\n"
+                "    - { ms: 100ms, state: FIRST }\n", name="early").plan()
+        self.assertIn("no room to observe it", str(caught.exception))
+
+    def test_an_unknown_key_on_a_moment_is_refused(self):
+        with self.assertRaises(expand.ExpandError) as caught:
+            self.swept(
+                "  values: [549, 550, 551]\n"
+                "  at:\n"
+                "    - { ms: 300ms, state: FIRST, when: soon }\n",
+                name="extra").plan()
+        self.assertIn("unrecognised key", str(caught.exception))
+
+    def test_a_witness_a_pattern_never_reads_is_refused(self):
+        space = Workspace(Path(self._tmp.name) / "unread")
+        space.pattern(TIMED_PATTERN)
+        space.swept_scenario(name="unread", pattern="timed-limit",
+                             sweep="  values: [549, 550, 551]\n"
+                                   "  at:\n"
+                                   "    - { ms: 300ms, state: FIRST }\n")
+        with self.assertRaises(expand.ExpandError) as caught:
+            space.plan()
+        self.assertIn("never reads it", str(caught.exception))
+
+    def test_the_witness_reaches_the_provenance_and_the_manifest(self):
+        plan = self.swept(
+            "  values: [549, 550, 551]\n"
+            "  at:\n"
+            "    - { ms: 900ms, state: SECOND }\n", name="record").plan()
+        entry = [t for t in plan.tests if t.id == "record-550-at-900ms"][0]
+        self.assertEqual(entry.provenance["at_state"], "SECOND")
+        manifest = plan.manifest()
+        self.assertEqual(manifest["expansions"][0]["at"],
+                         [{"ms": "900ms", "state": "SECOND"}])
+
+
+class TestAPatternMustReadWhatItDeclares(ExpandTestCase):
+    """Both halves of the witness, or neither. A declared-and-unread key is
+    worse than a missing one: the pattern looks as though it makes the claim."""
+
+    def refuse(self, text) -> str:
+        space = Workspace(Path(self._tmp.name) / "half")
+        space.pattern(text)
+        with self.assertRaises(expand.ExpandError) as caught:
+            space.plan()
+        return str(caught.exception)
+
+    def test_a_witness_step_without_the_lead_is_refused(self):
+        text = WITNESSED_PATTERN.replace(
+            '  at_lead_by: "{{condition_window}}"\n', "")
+        self.assertIn("at_lead_by", self.refuse(text))
+
+    def test_a_lead_without_a_witness_step_is_refused(self):
+        # Every reading of the witness removed, including the one inside the
+        # label: a placeholder anywhere in the steps counts as reading it.
+        text = WITNESSED_PATTERN.replace("{{at_state}}", "{{unit_under_test}}")
+        self.assertIn("no step witnesses", self.refuse(text))
 
 
 # ---------------------------------------------------------------------------

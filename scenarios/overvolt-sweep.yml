@@ -34,10 +34,26 @@ params:
   latch_ms: 600
   boot_timeout: 100
 
+  # Where the pack says what it is doing, so each moment below is witnessed
+  # rather than assumed. Same frame, field and window as overtemp-sweep: the
+  # conditions the pack passes through are a property of this bus, not of which
+  # limit is being swept.
+  state_message: 0x602
+  state_signal: contactor_state
+  state_window: 150
+
 sweep:
   # 84000 is the limit and 84001 the first faulting value: the mandatory pair.
   # A millivolt apart, and that is the point -- it is the only place in the
   # range where `>` and `>=` disagree.
   values: [72000, 80000, 83000, 83999, 84000, 84001, 85000, 88000, 92000]
-  # Each moment meets the firmware in a different state.
-  at: [200, 800, 1500]
+
+  # WHEN the reading arrives, and WHAT the pack reports at that instant. Over-
+  # voltage applies in every state, so the claim being made three times is that
+  # it still applies in each of the three conditions this pack actually passes
+  # through -- open, precharging, closed. Observed from a real run; see
+  # overtemp-sweep.yml for the trace these came from.
+  at:
+    - { ms: 200,  state: OPEN }
+    - { ms: 600,  state: PRECHARGE }
+    - { ms: 900,  state: CLOSED }

@@ -550,6 +550,114 @@ class TestDiscrimination(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# 6b. the perturbation claim is a measurement or an absence, never a sentence
+# ---------------------------------------------------------------------------
+
+
+PERTURBATION = {
+    "schema": coverage.PERTURBATION_SCHEMA,
+    "verdict": "IDENTICAL",
+    "tests": ["one", "two"],
+    "test_count": 2,
+    "identical": ["one", "two"],
+    "differing": [],
+}
+
+
+class TestPerturbation(unittest.TestCase):
+    """THE DEFECT THIS PINS.
+
+    Every report this module wrote carried, as a fact, "over a whole suite run
+    twice, traced and untraced, every event log was byte-identical". Nobody had
+    re-run it; the artifacts it was written from contained a counterexample; and
+    a sentence in a dictionary literal cannot go red. The field is now either a
+    measurement somebody made or an explicit statement that nobody did.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.addCleanup(self.tmp.cleanup)
+
+    def write(self, document):
+        path = self.root / "perturbation.json"
+        path.write_text(json.dumps(document), encoding="utf-8")
+        return path
+
+    def test_no_record_says_nobody_measured_and_never_that_nothing_moved(self):
+        found = coverage.read_perturbation(None, ["one"])
+        self.assertFalse(found.measured)
+        self.assertIsNone(found.verdict)
+        self.assertIn("not a report that nothing moved", found.statement)
+
+    def test_a_clean_record_is_reported_with_its_scope(self):
+        found = coverage.read_perturbation(self.write(PERTURBATION),
+                                           ["one", "two", "three"])
+        self.assertTrue(found.measured)
+        self.assertEqual(found.verdict, "IDENTICAL")
+        # The scope is stated, because a measurement over two of three tests is
+        # not a measurement over the suite.
+        self.assertIn("2 of the 3", found.statement)
+
+    def test_a_record_that_found_a_difference_says_so(self):
+        document = dict(PERTURBATION, verdict="DIFFERS",
+                        identical=["two"],
+                        differing=[{"test": "one", "differences": []}])
+        found = coverage.read_perturbation(self.write(document), ["one", "two"])
+        self.assertTrue(found.measured)
+        self.assertEqual(found.verdict, "DIFFERS")
+        self.assertEqual(found.differing, ["one"])
+        self.assertIn("NOT identical", found.statement)
+
+    def test_a_measurement_over_other_runs_is_refused(self):
+        # A comparison made on tests this report does not cover cannot speak
+        # for the tests it does.
+        document = dict(PERTURBATION, tests=["one", "elsewhere"])
+        with self.assertRaises(coverage.CoverageError) as caught:
+            coverage.read_perturbation(self.write(document), ["one", "two"])
+        self.assertIn("elsewhere", str(caught.exception))
+
+    def test_an_unrecognised_schema_is_refused(self):
+        document = dict(PERTURBATION, schema="something/else")
+        with self.assertRaises(coverage.CoverageError):
+            coverage.read_perturbation(self.write(document), ["one", "two"])
+
+    def test_an_empty_record_is_refused(self):
+        document = dict(PERTURBATION, tests=[])
+        with self.assertRaises(coverage.CoverageError):
+            coverage.read_perturbation(self.write(document), ["one"])
+
+    def test_a_missing_file_is_an_absence_and_not_a_refusal(self):
+        found = coverage.read_perturbation(self.root / "nowhere.json", ["one"])
+        self.assertFalse(found.measured)
+
+    def test_unreadable_json_is_refused_rather_than_treated_as_absent(self):
+        path = self.root / "perturbation.json"
+        path.write_text("{ not json", encoding="utf-8")
+        with self.assertRaises(coverage.CoverageError):
+            coverage.read_perturbation(path, ["one"])
+
+    def test_the_module_no_longer_asserts_the_claim_anywhere(self):
+        """The sentence itself, hunted down.
+
+        It is quoted once, in the past tense, as the thing that was wrong. What
+        must not exist is an unqualified present-tense assertion, in this module
+        or in the engine, that tracing changes nothing.
+        """
+        source = (REPO_ROOT / "harness" / "coverage.py").read_text(
+            encoding="utf-8")
+        engine = (REPO_ROOT / "harness" / "run_scenarios.py").read_text(
+            encoding="utf-8")
+        for text, where in ((source, "coverage.py"), (engine, "run_scenarios.py")):
+            with self.subTest(module=where):
+                self.assertNotIn("every event log came out byte-identical", text)
+                self.assertNotIn("none observed", text)
+        # And the claim's replacement names the module that can now fail.
+        self.assertIn("perturbation.py", source)
+        self.assertIn("perturbation.py", engine)
+
+
+# ---------------------------------------------------------------------------
 # 7. the report
 # ---------------------------------------------------------------------------
 
@@ -637,6 +745,13 @@ class TestReport(unittest.TestCase):
                 self.assertFalse(entry["functions"][name]["confirmed_only"])
                 self.assertNotIn(name, entry["confirmed_only"])
 
+    def test_the_counts_close_against_the_zero_list(self):
+        entry = self.report()["nodes"]["one"]
+        self.assertEqual(entry["function_entries_executed"],
+                         entry["function_entries_in_binary"]
+                         - entry["never_executed_count"])
+        self.assertEqual(entry["ambiguous_names"], {})
+
     def test_the_report_says_it_was_measured_and_not_inferred(self):
         measured = self.report()["measured_by"]
         self.assertFalse(measured["inferred"])
@@ -685,6 +800,74 @@ class TestReport(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # 8. the whole tool, end to end, with a stubbed symbol reader
 # ---------------------------------------------------------------------------
+
+
+class TestRepeatedNames(unittest.TestCase):
+    """One name defined at several addresses must not collapse into one entry.
+
+    Observed in this project's own binary: file-local functions in different
+    translation units share a name, and the compiler clones a function per call
+    site. Keyed on the name alone, the last definition overwrote the rest and
+    the name was published as never executed while other definitions had run --
+    a name in the zero list and in the executed list at the same time.
+    """
+
+    SECTIONS = [("text", 0x1000, 0x100)]
+    SYMBOLS = [
+        symbol_line(0x1000, "l     F", "text", 0x10, "twice"),
+        symbol_line(0x1020, "l     F", "text", 0x10, "twice"),
+        symbol_line(0x1040, "g     F", "text", 0x10, "once"),
+    ]
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.addCleanup(self.tmp.cleanup)
+        table = coverage.parse_symbols(
+            symbol_table(self.SECTIONS, self.SYMBOLS), "a.elf")
+        # Only the first definition of `twice` runs, and `once` runs.
+        self.runs = [coverage.read_run(a_run_dir(self.root, "one",
+                                                 addresses=[0x1000, 0x1040]))]
+        self.nodes = coverage.collect(self.runs, StubToolchain(table))
+        self.document = coverage.build_report(
+            self.runs, self.nodes,
+            coverage.read_discrimination(None, ["one"], {}), "one")
+        self.entry = self.document["nodes"]["one"]
+
+    def test_each_definition_gets_its_own_entry(self):
+        functions = self.entry["functions"]
+        self.assertIn("twice@0x00001000", functions)
+        self.assertIn("twice@0x00001020", functions)
+        self.assertTrue(functions["twice@0x00001000"]["executed"])
+        self.assertFalse(functions["twice@0x00001020"]["executed"])
+
+    def test_a_unique_name_is_still_keyed_by_its_name_alone(self):
+        # The join with the divergence record is by function name, so keys must
+        # not be decorated where there is nothing to disambiguate.
+        self.assertIn("once", self.entry["functions"])
+        self.assertEqual(self.entry["functions"]["once"]["name"], "once")
+
+    def test_the_dead_definition_is_in_the_zero_list_and_the_live_one_is_not(self):
+        self.assertEqual(self.entry["never_executed"], ["twice@0x00001020"])
+
+    def test_a_name_never_appears_as_both_executed_and_never_executed(self):
+        executed = {key for key, function in self.entry["functions"].items()
+                    if function["executed"]}
+        self.assertEqual(executed & set(self.entry["never_executed"]), set())
+
+    def test_the_repeated_name_is_declared_rather_than_left_to_be_noticed(self):
+        self.assertEqual(self.entry["ambiguous_names"],
+                         {"twice": ["twice@0x00001000", "twice@0x00001020"]})
+        out = io.StringIO()
+        coverage.render(self.document, out)
+        self.assertIn("more than one address", out.getvalue())
+
+    def test_the_counts_close(self):
+        self.assertEqual(self.entry["function_entries_in_binary"], 3)
+        self.assertEqual(self.entry["distinct_names_in_binary"], 2)
+        self.assertEqual(self.entry["function_entries_executed"],
+                         self.entry["function_entries_in_binary"]
+                         - self.entry["never_executed_count"])
 
 
 class TestMain(unittest.TestCase):

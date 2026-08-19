@@ -50,15 +50,32 @@ params:
 
   # The device names its own state on the console, so the scenario waits for
   # the state rather than assuming a delay was long enough.
-  excluded_state_text: "STANDBY"
-  applying_state_text: "RUNNING"
+  #
+  # The excluded half's line is the WHOLE status line, not the state word alone.
+  # The contactor is open in standby and open in a fault, so "STANDBY" on its own
+  # would be satisfied by a device that had already latched -- and a firmware that
+  # faults in standby is precisely the defect this shape exists to catch. The
+  # state, the contactor and the fault code together are the only reading that
+  # separates the two, and this is the line the Phase 1 scenario asserts.
+  excluded_state_text: "state=STANDBY contactor=OPEN fault=NONE"
+  applying_state_text: "bms state PRECHARGE -> RUNNING"
   state_timeout: 800
   boot_timeout: 100
 
   # What the fault would operate, so the legal half is not merely an absence.
+  #
+  # OPEN, not CLOSED. This is read BEFORE anything is injected and before any
+  # request has been made, and at that point the pack sits in standby with the
+  # main contactor open: it does not close until a drive or charge request has
+  # precharged, some 800 ms in. CLOSED here asserted a picture the firmware never
+  # shows at that instant, and every variant of this sweep failed against the
+  # CORRECT binary because of it -- the first assertion in the test, with every
+  # later one passing. Taken from the Phase 1 scenario this sweep generalises,
+  # which asserts the same frame, the same field and the same value at the same
+  # point and has been observed to hold.
   untripped_message: 0x602
   untripped_signal: contactor_state
-  untripped_value: CLOSED
+  untripped_value: OPEN
 
   bus_window: 200
   observe_window: 300

@@ -40,19 +40,59 @@ emulated time: 806,515 instructions, 4,032,585 bytes raw, 81,241 bytes
 compressed on disk, and the compressed size was identical on three consecutive
 runs. (2) wrote 6.9 MB of text for the same run; (3) wrote 15.6 MB.
 
-Cost in wall clock: none that could be measured on this host. A whole scenario
-was run traced and untraced; the spread between repeats of the untraced run
-alone was larger than any difference between traced and untraced, so no honest
-overhead figure can be quoted beyond "below this machine's noise floor". What
-CAN be stated exactly is the thing that matters more: the emulator's event log
-from the traced run was byte-identical to the untraced one, sha256 and all, and
-every reported reaction latency was identical to the microsecond. The tracer
-observes from outside the emulated core, so emulated time cannot see it.
+COST IN WALL CLOCK, MEASURED. Free inside the emulation; not free on the host.
 
-That is the advantage worth stating plainly. On real silicon, measuring
+  one test at a time     traced 40.1 s against untraced 57.0 s -- which is to
+                         say, inside this host's noise, where repeats of the
+                         untraced run alone spanned 24.6 s to 61.1 s
+  nine tests, four       untraced 295.5 s and 289.4 s
+  concurrent workers     traced   331.8 s and 409.0 s
+                         -- 13% and 41% longer, and far more variable
+
+The cost is host contention, not emulation. Each traced machine compresses its
+trace on a thread of its own, so a suite at full worker count adds three
+compressors per test to a machine whose cores are already saturated by the
+emulators. Run one test at a time and it disappears into the noise; run twelve
+emulated machines and twelve compressors on twelve cores and it does not.
+
+WHAT IS NOT PAID -- AND WHY THAT SENTENCE IS NOW A MEASUREMENT AND NOT PROSE.
+
+By construction the emulated machines cannot see the tracer: it is a passive
+observer outside the core, and the core executes the same instructions whether
+or not their addresses are being written down. On real silicon, measuring
 coverage means adding instrumentation that changes timing, and changed timing
-can hide the very defect being chased. Here the emulator was executing every
-instruction anyway; recording them changes nothing.
+can hide the very defect being chased. That is the advantage worth having.
+
+By construction is an argument, not evidence, and this module used to ship the
+evidence as a sentence:
+
+    "Across all nine tests, traced and untraced, every event log was
+     byte-identical -- same sha256 -- and every verdict and every reaction
+     latency matched exactly."
+
+It was written in the past tense, into this docstring, into the engine, and
+into every report this module produced, and it was never checked against the
+artifacts it was written from. Eight of the nine matched. The ninth did not:
+one traced run's event log differed from five other runs of the same test in
+the transmit instants of the peer nodes, in VIRTUAL time, by 8 to 100
+microseconds -- and that run's own execution trace differed with it, by 780
+instructions, which moved a per-function number this report publishes.
+
+Causation to tracing is NOT established, and this file will not claim it
+either: controlled repeats of that test reproduced the canonical log both
+traced and untraced, and a traced whole-suite run matched an untraced one. One
+traced run in two deviated and five untraced runs did not. What is established
+is that two runs of one test disagreed about a virtual-time instant, which is
+the property every number here rests on, and that a prose claim cannot go red.
+
+So the claim is now measured, per report, by harness/perturbation.py: it runs
+the same tests twice and compares the event logs byte for byte along with every
+verdict and every assertion instant. Pass its record to --perturbation and the
+report states what was measured, over exactly which tests. Without it, the
+report says that nobody measured -- never that nothing moved.
+
+Storage is not the constraint: nine tests, three machines each, came to 1.15 MB
+of trace in total.
 
 Tracing is turned on by the engine, and it is off unless asked for.
 
@@ -73,6 +113,16 @@ both were observed in this project's own binary:
   them six names deep. They are one piece of code, so they execute together.
   Reporting five of six as dead code would be a false finding, so an address
   range carries all of its names and they share one verdict.
+
+  REPEATED NAMES. The reverse also happens: one name defined at several
+  addresses, because file-local functions in different translation units may
+  share a name and because the compiler clones a function per call site. This
+  project's own binary has one name at eight addresses and another at two.
+  Keying a report on the name alone silently dropped all but the last, and
+  published that name as never executed while seven of its eight definitions
+  had run. Where a name is not unique the report keys it by name and address
+  and lists it under `ambiguous_names`, rather than merging definitions -- a
+  merge would hide the dead one behind the live one, which is the whole finding.
 
   UNSIZED SYMBOLS. Hand-written assembly often declares no size. Such a range
   is taken to end where the next one begins -- the universal convention -- but
@@ -142,6 +192,7 @@ produce, so every path that could quietly lose executed code is a loud failure:
   one node appearing with two different binaries across the runs
   a symbol table that yields no functions
   a divergence record for a different suite, or for a different build
+  a perturbation record measured over tests this report does not cover
 
 -----------------------------------------------------------------------------
 NO PROJECT DATA
@@ -171,6 +222,7 @@ from harness import run_scenarios as engine   # noqa: E402
 COVERAGE_SCHEMA = "bench.coverage/1"
 RESULTS_SCHEMA = "bench.results/1"
 DIVERGENCE_SCHEMA = "bench.divergence/1"
+PERTURBATION_SCHEMA = "bench.perturbation/1"
 
 EXIT_OK = 0
 EXIT_FINDING = 1
@@ -651,6 +703,100 @@ def collect(runs, toolchain: Toolchain):
 # ---------------------------------------------------------------------------
 
 
+class Perturbation:
+    """Whether switching the measurement on changed what was measured.
+
+    Held as a measurement or as an explicit absence, never as a sentence. The
+    absence reads as "nobody measured", which is a different statement from
+    "nothing moved" -- and the second one was published in every report this
+    module wrote, on the strength of a comparison whose own artifacts contained
+    a counterexample.
+    """
+
+    def __init__(self, measured, statement, source=None, verdict=None,
+                 scope=None, differing=()):
+        self.measured = measured
+        self.statement = statement
+        self.source = source
+        self.verdict = verdict
+        self.scope = scope
+        self.differing = list(differing)
+
+    def as_document(self):
+        return OrderedDict((
+            ("measured", self.measured),
+            ("verdict", self.verdict),
+            ("scope", self.scope),
+            ("source", self.source),
+            ("statement", self.statement),
+            ("differing_tests", self.differing),
+        ))
+
+
+def read_perturbation(path, covered_tests) -> Perturbation:
+    """A perturbation record, or an explicit account of why there is none."""
+    covered = set(covered_tests)
+    if not path:
+        return Perturbation(
+            False,
+            "no perturbation record was supplied, so nothing here says whether "
+            "turning tracing on moved anything the firmware could observe. "
+            "That claim is a measurement -- harness/perturbation.py makes it -- "
+            "and this report does not carry one. It is not a report that "
+            "nothing moved.")
+
+    path = Path(path)
+    if not path.is_file():
+        return Perturbation(False, "no perturbation record at %s" % path)
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise CoverageError(
+            "the perturbation record %s cannot be read: %s. A record that "
+            "cannot be read is refused rather than reported as absent: the two "
+            "mean different things and only one of them is nobody's fault."
+            % (path, exc)) from None
+    if document.get("schema") != PERTURBATION_SCHEMA:
+        raise CoverageError(
+            "the perturbation record %s announces schema %r; this reader "
+            "understands %r." % (path, document.get("schema"),
+                                 PERTURBATION_SCHEMA))
+
+    measured_tests = [str(t) for t in (document.get("tests") or ())]
+    if not measured_tests:
+        raise CoverageError(
+            "the perturbation record %s covers no tests, so it says nothing "
+            "about this report." % path)
+    outside = sorted(set(measured_tests) - covered)
+    if outside:
+        raise CoverageError(
+            "the perturbation record %s was measured over %s, which %s not in "
+            "this coverage report. A measurement made on other runs cannot "
+            "speak for these ones."
+            % (path, ", ".join(outside[:6]) + (", ..." if len(outside) > 6
+                                               else ""),
+               "is" if len(outside) == 1 else "are"))
+
+    verdict = str(document.get("verdict"))
+    differing = [str(entry.get("test"))
+                 for entry in (document.get("differing") or ())]
+    scope = "%d of the %d tests in this report" % (len(measured_tests),
+                                                   len(covered))
+    if verdict == "IDENTICAL":
+        statement = (
+            "measured over %s: the event log, every verdict, every assertion "
+            "instant and the headline latency were identical between the two "
+            "runs compared. Tracing costs host wall clock and, over these "
+            "tests, nothing the firmware can observe." % scope)
+    else:
+        statement = (
+            "measured over %s, and they are NOT identical: %d test(s) differ. "
+            "A virtual-time instant that moves between two runs of one test "
+            "invalidates the measurement rather than being close enough."
+            % (scope, len(differing)))
+    return Perturbation(True, statement, str(path), verdict, scope, differing)
+
+
 class Discrimination:
     """Which tests caught a defective build, from the divergence gate's record.
 
@@ -739,7 +885,8 @@ def read_discrimination(path, covered_tests, node_shas) -> Discrimination:
 # ---------------------------------------------------------------------------
 
 
-def build_report(runs, nodes, discrimination, subject_node) -> dict:
+def build_report(runs, nodes, discrimination, subject_node,
+                 perturbation=None) -> dict:
     tests = sorted(run.test for run in runs)
     document = OrderedDict((
         ("schema", COVERAGE_SCHEMA),
@@ -750,9 +897,12 @@ def build_report(runs, nodes, discrimination, subject_node) -> dict:
             ("note", "Nothing here is derived from which tests are believed "
                      "to touch which code. Every address was written by the "
                      "emulator while it executed the binary."),
-            ("perturbation", "none observed: the event log of a traced run "
-                             "was byte-identical to the same run untraced, "
-                             "and every reaction latency matched exactly"),
+            # A measurement or an explicit absence. Never a sentence
+            # somebody wrote once: the sentence that used to sit here was in
+            # the past tense, was contradicted by the artifacts it was written
+            # from, and was copied into every report this module produced.
+            ("perturbation", (perturbation or read_perturbation(
+                None, [run.test for run in runs])).as_document()),
             ("attribution", "the binary's own symbol table, functions only; "
                             "names sharing one address are one range and "
                             "share one verdict"),
@@ -781,7 +931,20 @@ def build_report(runs, nodes, discrimination, subject_node) -> dict:
     for node, entry in nodes.items():
         table = entry.table
         executed_positions = set(entry.instructions)
+
+        # A name defined at more than one address cannot key a report on its
+        # own: the later definition would overwrite the earlier, and a name
+        # with one live definition and one dead one would be published as
+        # whichever came last. Observed in this project's own binary.
+        where = {}
+        for position, (_, _, group) in enumerate(table.ranges):
+            for name in group:
+                where.setdefault(name, []).append(position)
+        ambiguous = {name: positions for name, positions in where.items()
+                     if len(positions) > 1}
+
         functions = OrderedDict()
+        keys_of = {}
         never = []
         confirmed_only = []
         for position, (start, end, group) in enumerate(table.ranges):
@@ -795,7 +958,11 @@ def build_report(runs, nodes, discrimination, subject_node) -> dict:
             else:
                 discriminating, caught, only_confirms = None, None, None
             for name in group:
-                functions[name] = OrderedDict((
+                key = name if name not in ambiguous \
+                    else "%s@0x%08X" % (name, start)
+                keys_of.setdefault(name, []).append(key)
+                functions[key] = OrderedDict((
+                    ("name", name),
                     ("executed", ran),
                     ("tests", reached_by),
                     ("test_count", len(reached_by)),
@@ -808,18 +975,24 @@ def build_report(runs, nodes, discrimination, subject_node) -> dict:
                     ("confirmed_only", only_confirms),
                 ))
                 if not ran:
-                    never.append(name)
+                    never.append(key)
                 elif only_confirms:
-                    confirmed_only.append(name)
+                    confirmed_only.append(key)
 
         document["nodes"][node] = OrderedDict((
             ("device_under_test", node == subject_node),
             ("binary", entry.binary),
             ("sha256", entry.sha256),
             ("code_ranges_in_binary", len(table)),
-            ("function_names_in_binary", len(table.names())),
+            # One entry per name per range, so the arithmetic below closes even
+            # where a name is defined more than once. `distinct_names` is the
+            # count of names, which is the smaller number.
+            ("function_entries_in_binary", len(functions)),
+            ("distinct_names_in_binary", len(where)),
             ("code_ranges_executed", len(executed_positions)),
-            ("function_names_executed", len(table.names()) - len(never)),
+            ("function_entries_executed", len(functions) - len(never)),
+            ("ambiguous_names", OrderedDict(
+                (name, keys_of[name]) for name in sorted(ambiguous))),
             # The zero line first. It is the finding, not a footnote.
             ("never_executed_count", len(never)),
             ("never_executed", sorted(never)),
@@ -850,6 +1023,15 @@ def render(document, out) -> None:
         % document["test_count"])
     discrimination = document["discrimination"]
 
+    # Printed at the top, every time, in whichever of its two forms applies.
+    # The claim that tracing changes nothing is what makes these numbers
+    # quotable at all, so a report carrying no measurement of it has to say so
+    # where a reader cannot miss it.
+    perturbation = document["measured_by"]["perturbation"]
+    say("    perturbation: %s\n" % perturbation["statement"])
+    for test in perturbation["differing_tests"][:10]:
+        say("        differs: %s\n" % test)
+
     for node, entry in document["nodes"].items():
         marker = "   <- device under test" if entry["device_under_test"] else ""
         say("\n  %s%s\n" % (node, marker))
@@ -857,6 +1039,12 @@ def render(document, out) -> None:
         say("    %d of %d functions executed   %d instructions\n"
             % (entry["code_ranges_executed"], entry["code_ranges_in_binary"],
                entry["instructions_executed"]))
+
+        ambiguous = entry["ambiguous_names"]
+        if ambiguous:
+            say("    %d name(s) are defined at more than one address and are "
+                "reported\n    per address rather than merged: %s\n"
+                % (len(ambiguous), ", ".join(sorted(ambiguous)[:4])))
 
         unattributed = entry["unattributed_addresses"]
         if unattributed["count"]:
@@ -948,6 +1136,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--divergence", default=None,
                         help="the divergence gate's record, so discrimination "
                              "is reported beside coverage")
+    parser.add_argument("--perturbation", default=None,
+                        help="a perturbation record from "
+                             "harness/perturbation.py, so the report can say "
+                             "whether tracing moved anything instead of "
+                             "asserting that it did not")
     parser.add_argument("--out", default="harness/out/coverage.json",
                         help="where the report is written")
     parser.add_argument("--work", default=None,
@@ -979,7 +1172,10 @@ def main(argv=None) -> int:
         discrimination = read_discrimination(
             args.divergence, [run.test for run in runs],
             {node: entry.sha256 for node, entry in nodes.items()})
-        document = build_report(runs, nodes, discrimination, resolve_subject())
+        perturbation = read_perturbation(args.perturbation,
+                                         [run.test for run in runs])
+        document = build_report(runs, nodes, discrimination, resolve_subject(),
+                                perturbation)
     except CoverageError as exc:
         print("\nERROR: %s\n" % exc, file=sys.stderr)
         return EXIT_UNUSABLE

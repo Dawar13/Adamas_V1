@@ -6,28 +6,50 @@
 # The gate fails if the observed set differs from this list in EITHER direction.
 # A test that diverges and is not here means the binary differs in more ways
 # than it admits, or something non-deterministic is leaking into a run.
+#
+# An entry may name one test or a family of them; see
+# firmware/bms-broken/EXPECTED-DIVERGENCE.yml for why, and for why a wildcard
+# cannot absorb a surprise.
 # =============================================================================
 
 defect: over-temperature fault made non-latching, so it self-clears on cooling
 
 diverging_tests:
+  # The two hand-written scenarios that check the latch...
   - overtemp-boundary
   - overtemp-fault
+  # ...and every swept variant that injects a value ABOVE the limit, at every
+  # moment. Those are the variants that raise the fault at all, so those are the
+  # ones whose latch check can fail. The value list is written out rather than
+  # globbed: `overtemp-sweep-5*` would also match the legal side, and the legal
+  # side must not diverge.
+  - overtemp-sweep-551-at-*
+  - overtemp-sweep-555-at-*
+  - overtemp-sweep-570-at-*
+  - overtemp-sweep-600-at-*
+  - overtemp-sweep-650-at-*
 
 rationale: |
   Latching is checked by asking for the fault to still be on the bus AFTER the
-  temperature has returned to normal. Two scenarios make that check, so both
-  see this defect, and both fail the same way: "nothing matched within the
-  window", because the fault cleared itself when the pack cooled.
+  temperature has returned to normal. Every test that raises the over-temperature
+  fault in the first place makes that check, so every one of them sees this
+  defect, and all of them fail the same way: "nothing matched within the window",
+  because the fault cleared itself when the pack cooled.
+
+  The legal side does not diverge, and must not. A value at or below the limit
+  raises no fault under either binary, so there is nothing to stay latched. If a
+  legal-side variant ever appeared in the observed set, the defect would not be
+  the one this file describes.
 
   This binary is the reason more than one defective build exists. The
   over-temperature comparison is byte-for-byte correct here, so every boundary
-  value behaves exactly as it should and the boundary test alone would not
-  notice anything wrong. A suite can have complete coverage of a rule, and even
-  test its threshold precisely, while saying nothing about whether the fault it
-  raises is permitted to disappear.
+  value behaves exactly as it should and the boundary test alone would notice
+  nothing. A suite can have complete coverage of a rule, and even test its
+  threshold precisely, while saying nothing about whether the fault it raises is
+  permitted to disappear.
 
-  IF THIS LIST GROWS OR SHRINKS, investigate before editing. Shrinking would be
-  the more alarming change: it would mean a latch assertion stopped being made
-  somewhere, and the suite would have quietly lost the only thing that detects
-  a self-clearing safety fault.
+  IF THE OBSERVED SET SHRINKS, that is the more alarming direction: it would mean
+  a latch assertion stopped being made somewhere, and the suite would have
+  quietly lost the only thing that detects a self-clearing safety fault. The
+  gate reports it as a missing divergence and fails, rather than reporting a
+  smaller clean set.

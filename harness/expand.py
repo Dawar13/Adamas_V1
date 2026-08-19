@@ -387,7 +387,8 @@ DEFAULT_SIDES = {SIDE_NEAR: "legal", SIDE_FAR: "fault"}
 
 #: Bindings this module owns. A pattern parameter that collides with one is
 #: still reachable, under the alias below -- see `_alias_of`.
-RESERVED_BINDINGS = ("value", "expected", "boot_text", "at")
+RESERVED_BINDINGS = ("value", "expected", "boot_text", "at", "at_state",
+                     "at_lead")
 
 #: The loop over every node the topology declares an entry point for. It is not
 #: a parameter loop: naming those nodes in a pattern would be a second spelling
@@ -406,6 +407,7 @@ PATTERN_SWEEP_KEYS = {
     "far_side",
     "indeterminate_below",
     "indeterminate_above",
+    "at_lead_by",
 }
 PARAMETER_KEYS = {"name", "type", "doc"}
 
@@ -479,6 +481,7 @@ class Sweep:
         "far_side_spec",
         "band_below_spec",
         "band_above_spec",
+        "at_lead_spec",
     )
 
     def __init__(self, raw, where: str):
@@ -553,6 +556,14 @@ class Sweep:
         self.band_below_spec = raw.get("indeterminate_below")
         self.band_above_spec = raw.get("indeterminate_above")
 
+        # How long the witness of the moment takes to observe. A pattern that
+        # asks what the device was doing when the stimulus landed has to spend
+        # time watching the bus for the answer, and that time comes out of the
+        # wait BEFORE the stimulus -- otherwise every moment would silently
+        # slide by the width of its own witness and the id would name an
+        # instant the test does not use.
+        self.at_lead_spec = raw.get("at_lead_by")
+
     def side_names(self) -> tuple:
         return (self.sides[SIDE_NEAR], self.sides[SIDE_FAR])
 
@@ -572,6 +583,7 @@ class Pattern:
         "sweep",
         "steps",
         "uses_at",
+        "uses_at_state",
     )
 
     def __init__(self, doc, path: Path, root=None):
@@ -618,7 +630,46 @@ class Pattern:
         self.sweep = None if raw_sweep is None else Sweep(raw_sweep, self.source)
 
         self._validate()
-        self.uses_at = "at" in _placeholders_in(self.steps)
+        placeholders = _placeholders_in(self.steps)
+        self.uses_at = "at" in placeholders
+        self.uses_at_state = "at_state" in placeholders
+
+        # A moment sweep whose variants all assert the same thing is not a
+        # sweep, it is the same test written out several times. What makes one
+        # moment different from another is the condition the device is in when
+        # the stimulus lands, so a pattern that sweeps the moment either
+        # WITNESSES that condition -- reads it off the bus, per moment, before
+        # injecting -- or does not sweep the moment at all.
+        #
+        # Earned: the moment dimension tripled a suite's test count while every
+        # variant carried a byte-identical assertion list, and the scenario's
+        # own justification for the three moments named a state the firmware
+        # never reaches. Thirty-eight tests asserted nothing a sibling did not,
+        # and they were counted as coverage.
+        if self.uses_at_state and not self.uses_at:
+            raise ExpandError(
+                "%s: the steps witness {{at_state}} without applying anything "
+                "at {{at}}. A condition observed at no particular moment is not "
+                "a witness of one." % self.source
+            )
+        wants_lead = (self.sweep is not None
+                      and self.sweep.at_lead_spec is not None)
+        if self.uses_at_state and not wants_lead:
+            raise ExpandError(
+                "%s: the steps witness {{at_state}} and the sweep declares no "
+                "at_lead_by. Observing the condition costs time on the bus, and "
+                "unless the wait before the stimulus is shortened by exactly "
+                "that much, every moment lands later than the one it is named "
+                "after." % self.source
+            )
+        if wants_lead and not self.uses_at_state:
+            raise ExpandError(
+                "%s: the sweep declares at_lead_by and no step witnesses "
+                "{{at_state}}. Shortening the wait before a stimulus that "
+                "nothing observes moves the stimulus for no reason. "
+                "A declared-and-unread sweep key is worse than a missing one: "
+                "the pattern looks as though it makes the claim." % self.source
+            )
 
     # -- loading ----------------------------------------------------------
 
@@ -1607,7 +1658,8 @@ class Plan:
                          "near_side": e.sweep.sides[SIDE_NEAR],
                          "far_side": e.sweep.sides[SIDE_FAR]}
                         if e.sweep else None),
-                    "at": ([_text_of(a) for a in e.at_values]
+                    "at": ([{"ms": a.text(), "state": a.state}
+                            for a in e.at_values]
                            if e.at_values else None),
                     "default_values_used": bool(e.sweep and e.sweep.defaults_used),
                 }
@@ -1774,6 +1826,31 @@ def _bind_params(scenario: ScenarioSource, pattern: Pattern) -> dict:
     return bound
 
 
+class Moment:
+    """One entry of sweep.at: when the stimulus lands, and what the device is
+    doing at that instant.
+
+    The condition is what makes the moment worth a test of its own. Without it
+    two moments produce two files whose assertions are identical and whose only
+    difference is the length of the wait in front of them, and a count of those
+    is a count of copies.
+    """
+
+    __slots__ = ("ms", "state")
+
+    def __init__(self, ms, state=None):
+        self.ms = ms
+        self.state = state
+
+    def text(self) -> str:
+        return self.ms.text()
+
+
+#: A moment either says only when, or says when and what the device reports
+#: then. Which of the two is allowed is decided by the pattern, never here.
+MOMENT_KEYS = {"ms", "state"}
+
+
 def _bind_at(scenario: ScenarioSource, pattern: Pattern):
     if scenario.raw_at is None:
         if pattern.uses_at:
@@ -1793,15 +1870,65 @@ def _bind_at(scenario: ScenarioSource, pattern: Pattern):
             "a real verdict of something distinct."
             % (scenario.source, pattern.id)
         )
-    seen = {}
+    moments = {}
+    witnessed = {}
     for index, raw in enumerate(scenario.raw_at):
         where = "%s: sweep.at[%d]" % (scenario.source, index)
-        value = _parse_duration(raw, where)
-        if value.us in seen:
+        state = None
+        if isinstance(raw, dict):
+            if not pattern.uses_at_state:
+                raise ExpandError(
+                    "%s: this moment says what the device would be doing then, "
+                    "and pattern %r never reads it -- nothing in its steps "
+                    "interpolates the witness. A witness accepted and then "
+                    "ignored is worse than one that is missing, because the "
+                    "scenario looks as though it makes the claim."
+                    % (where, pattern.id))
+            unknown = sorted(k for k in raw if k not in MOMENT_KEYS)
+            if unknown:
+                raise ExpandError(
+                    "%s: unrecognised key(s) %s; a moment accepts %s"
+                    % (where, ", ".join(repr(k) for k in unknown),
+                       ", ".join(sorted(MOMENT_KEYS))))
+            missing = sorted(MOMENT_KEYS - set(raw))
+            if missing:
+                raise ExpandError(
+                    "%s: a moment is written as {ms: <when>, state: <what the "
+                    "device reports then>}; this one is missing %s"
+                    % (where, ", ".join(missing)))
+            state = raw["state"]
+            if not isinstance(state, str) or not state.strip():
+                raise ExpandError(
+                    "%s: the condition witnessed at this moment must be the "
+                    "value the pattern's own field reads then; it holds %r"
+                    % (where, state))
+            state = state.strip()
+            raw_ms = raw["ms"]
+        else:
+            if pattern.uses_at_state:
+                raise ExpandError(
+                    "%s: pattern %r witnesses what the device is doing at each "
+                    "moment, and this moment says only when. Write it as "
+                    "{ms: %s, state: <what the device reports then>}. A moment "
+                    "with no witness is a copy of its siblings with a different "
+                    "wait in front of it, and counting it is counting padding "
+                    "as coverage." % (where, pattern.id, raw))
+            raw_ms = raw
+        value = _parse_duration(raw_ms, where)
+        if value.us in moments:
             raise ExpandError(
                 "%s: %s appears twice in sweep.at" % (where, value.text()))
-        seen[value.us] = value
-    return [seen[k] for k in sorted(seen)]
+        if state is not None and state in witnessed:
+            raise ExpandError(
+                "%s: %s and %s both witness %r. Two moments that meet the "
+                "device in the same condition are one test run twice -- the "
+                "assertions are identical and only the wait differs. Drop one, "
+                "or find a moment at which the device reports something else."
+                % (where, witnessed[state], value.text(), state))
+        if state is not None:
+            witnessed[state] = value.text()
+        moments[value.us] = Moment(value, state)
+    return [moments[k] for k in sorted(moments)]
 
 
 # ---------------------------------------------------------------------------
@@ -1852,6 +1979,33 @@ def _literal_test(scenario: ScenarioSource) -> GeneratedTest:
     return test
 
 
+def _lead_before(pattern, params: dict, moment, scenario) -> "Duration":
+    """How long to wait before the witness, so the stimulus still lands at the
+    declared moment.
+
+    The witness occupies the bus for as long as the pattern says it needs, and
+    that time is taken out of the wait in front of it rather than added to the
+    end. A moment named 200ms whose stimulus arrived at 350ms because its own
+    witness pushed it there would be an identifier that does not describe its
+    test.
+    """
+    where = "%s: sweep.at %s" % (scenario.source, moment.text())
+    window = _resolve_axis_spec(pattern.sweep.at_lead_spec, params, moment.ms,
+                                "%s: at_lead_by" % where)
+    if not isinstance(window, Duration):
+        raise ExpandError(
+            "%s: at_lead_by resolved to %s, which is not a duration"
+            % (where, _text_of(window)))
+    lead = moment.ms.us - window.us
+    if lead <= 0:
+        raise ExpandError(
+            "%s: witnessing the device's condition takes %s and this moment is "
+            "only %s in, so there is no room to observe it before the stimulus "
+            "lands. Move the moment later, or shorten the window the pattern "
+            "watches for it." % (where, window.text(), moment.ms.text()))
+    return Duration(lead)
+
+
 def _pattern_test(scenario, pattern, params, sweep, value, at,
                   net: _Topology) -> GeneratedTest:
     bindings = dict(params)
@@ -1862,13 +2016,18 @@ def _pattern_test(scenario, pattern, params, sweep, value, at,
         side_name = sweep.sides[side]
         if pattern.sweep.expectation == EXPECTATION_FLIPS:
             bindings["expected"] = side_name
+    at_ms = None
     if at is not None:
-        bindings["at"] = at
+        at_ms = at.ms
+        bindings["at"] = at_ms
+        if at.state is not None:
+            bindings["at_state"] = at.state
+            bindings["at_lead"] = _lead_before(pattern, params, at, scenario)
     for reserved in RESERVED_BINDINGS:
         if reserved in pattern.types and reserved in params:
             bindings[_alias_of(reserved)] = params[reserved]
 
-    test_id = _test_id(scenario, value, at)
+    test_id = _test_id(scenario, value, at_ms)
     where = "%s -> %s" % (scenario.source, test_id)
 
     if "boot_text" in _placeholders_in(pattern.steps):
@@ -1892,13 +2051,13 @@ def _pattern_test(scenario, pattern, params, sweep, value, at,
 
     document = {
         "id": test_id,
-        "title": _variant_title(scenario, sweep, value, at, side_name),
-        "description": _variant_description(scenario, pattern, sweep, value, at,
-                                            side_name),
+        "title": _variant_title(scenario, sweep, value, at_ms, side_name),
+        "description": _variant_description(scenario, pattern, sweep, value,
+                                            at_ms, side_name, at),
         "steps": steps,
     }
-    header = _pattern_header(scenario, pattern, sweep, value, at, side_name,
-                             test_id)
+    header = _pattern_header(scenario, pattern, sweep, value, at_ms, side_name,
+                             test_id, at)
     provenance = {
         "id": test_id,
         "file": "%s.yml" % test_id,
@@ -1910,7 +2069,8 @@ def _pattern_test(scenario, pattern, params, sweep, value, at,
         "boundary": _boundary_role(sweep, value) if sweep else None,
         "expected": side_name if (sweep and pattern.sweep.expectation
                                   == EXPECTATION_FLIPS) else None,
-        "at": _text_of(at) if at is not None else None,
+        "at": _text_of(at_ms) if at is not None else None,
+        "at_state": at.state if at is not None else None,
         "default_values_used": bool(sweep and sweep.defaults_used),
         "verbatim_copy": False,
     }
@@ -1954,7 +2114,8 @@ def _variant_title(scenario, sweep, value, at, side_name) -> str:
     return "%s -- %s" % (scenario.title, bits)
 
 
-def _variant_description(scenario, pattern, sweep, value, at, side_name) -> str:
+def _variant_description(scenario, pattern, sweep, value, at, side_name,
+                         moment=None) -> str:
     lines = []
     if scenario.description:
         lines.append(str(scenario.description).strip())
@@ -1968,7 +2129,17 @@ def _variant_description(scenario, pattern, sweep, value, at, side_name) -> str:
         if side_name is not None:
             lines.append("The expected outcome for this variant is %s." % side_name)
     if at is not None:
-        lines.append("The stimulus is applied %s in." % _text_of(at))
+        if moment is not None and moment.state is not None:
+            # What separates this variant from its siblings is the condition
+            # the device is in, so that is what the description leads with.
+            lines.append(
+                "The stimulus is applied %s in, and the test first requires the "
+                "device to report %s at that instant -- which is what makes this "
+                "moment a different test from the others in the sweep rather "
+                "than the same one after a longer wait."
+                % (_text_of(at), moment.state))
+        else:
+            lines.append("The stimulus is applied %s in." % _text_of(at))
     return "\n".join(lines)
 
 
@@ -1982,7 +2153,7 @@ def _boundary_phrase(sweep: BoundarySweep, value) -> str:
 
 
 def _pattern_header(scenario, pattern, sweep, value, at, side_name,
-                    test_id) -> list:
+                    test_id, moment=None) -> list:
     lines = [
         "# GENERATED -- do not edit. Regenerated by harness/expand.py.",
         "# " + _BANNER,
@@ -2002,6 +2173,9 @@ def _pattern_header(scenario, pattern, sweep, value, at, side_name,
             lines.append("# expected    %s" % side_name)
     if at is not None:
         lines.append("# applied at  %s" % _text_of(at))
+    if moment is not None and moment.state is not None:
+        lines.append("# witnessed   the device reports %s at that instant"
+                     % moment.state)
     if sweep is not None and sweep.defaults_used:
         lines += [
             "#",
@@ -2211,7 +2385,10 @@ def report(plan: Plan, out, wrote: bool) -> None:
                  _text_of(sweep.far), sweep.sides[SIDE_FAR]), file=out)
         if expansion.at_values:
             print(pad + "at: %s"
-                  % " ".join(_text_of(a) for a in expansion.at_values), file=out)
+                  % "  ".join(
+                      a.text() if a.state is None
+                      else "%s (%s)" % (a.text(), a.state)
+                      for a in expansion.at_values), file=out)
         if sweep.defaults_used:
             print(pad + "DEFAULT VALUES USED -- the scenario declared none, so "
                         "the boundary pair", file=out)

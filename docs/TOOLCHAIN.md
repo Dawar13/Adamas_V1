@@ -79,3 +79,28 @@ It now compares each level with the one below it, which removes the baseline
 entirely: while there is spare capacity, adding workers shortens the wall clock
 markedly; once the machine is saturated the curve flattens and reverses. The last
 level that still bought a real improvement is the ceiling.
+
+### The ceiling depends on the workload, not only the host
+
+The 4-worker figure above was measured on the nine Phase 1 scenarios, which are
+short. It does not transfer unchanged to the full suite.
+
+Measured afterwards, on the same machine:
+
+| | alone, 1 worker | inside an 89-test suite at 4 workers |
+|---|---|---|
+| `heartbeat-loss` | **46 s**, pass | **>300 s**, timeout |
+
+A 6.5× slowdown, well past the ~2× four workers on twelve cores would suggest.
+The `node-silent` scenarios hold three emulated machines through several seconds
+of virtual time and are much hungrier than the threshold sweeps; four at once
+oversubscribe the host. Twelve tests failed on wall clock alone, none of them for
+anything the firmware did.
+
+Two consequences worth keeping:
+
+- **A per-test timeout is a safety net, not a schedule.** Sized near what a test
+  is expected to take, it turns contention into failure. The default is now 30
+  minutes: far above any real test, still finite.
+- **Re-measure the ceiling against the workload you actually run.** A number
+  derived from cheap tests will overstate what expensive ones can share.

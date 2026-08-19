@@ -1,0 +1,80 @@
+# charge-loss-sweep — the charging timeout, and a failsafe that must CLEAR.
+# =============================================================================
+# THIS FILE IS PROJECT DATA. The timeout comes from the firmware
+# (firmware/bms/src/bms.h: BMS_CHARGE_TIMEOUT_MS 300), the recovery line from
+# what it actually prints (firmware/bms/src/safety.c: "bms charge restored"),
+# the identifiers from catalog.yml, the nodes from network.yml.
+#
+# WHY THIS SHAPE EARNS ITS PLACE BESIDE heartbeat-sweep
+# -----------------------------------------------------------------------------
+# Same pattern, same non-strict boundary, one qualifier different: this failsafe
+# is NON-LATCHING. Power coming back clears it and the contactor closes again,
+# where a lost heartbeat latches until the vehicle is cycled.
+#
+# That single word is the whole difference, and it is invisible to any test that
+# only ever checks that the fault APPEARS. A firmware that latched this one
+# would strand a vehicle on a charger for the sake of a dropped frame, and every
+# scenario asserting "CHARGE_LOST was announced" would still pass.
+#
+# Recovery is asserted from the device's own console line rather than from the
+# absence of a fault frame, because an absence is also what a device that has
+# stopped talking altogether looks like.
+# =============================================================================
+
+id: charge-loss-sweep
+title: Charging power loss across the timeout, and recovery afterwards
+description: >
+  Silence the charger for a range of durations either side of the declared
+  window. Short of it the session must continue; once elapsed the pack must
+  announce CHARGE_LOST and open the contactor, and then close it again when the
+  charger returns, because this rule does not latch.
+
+pattern: node-silent
+
+params:
+  node: bms
+  peer: charger
+  peer_message: 0x300
+  peer_signal: charge_state
+  peer_active: CONSTANT_CURRENT
+  peer_period: 200
+
+  timeout: 300
+  tick: 10
+
+  # The vehicle controller held parked, so "charging" is unambiguous rather than
+  # an accident of a drive request arriving mid-session.
+  context_node: vcu
+  context_message: 0x200
+  context_signal: drive_state
+  context_value: PARKED
+
+  state_text: "CHARGING"
+  state_timeout: 900
+  boot_timeout: 100
+  control_window: 300
+
+  message: 0x604
+  signal: fault_code
+  value: CHARGE_LOST
+
+  consequence_message: 0x602
+  consequence_signal: contactor_state
+  tripped_value: OPEN
+  restored_value: CLOSED
+  consequence_deadline: 200
+
+  # The qualifier that distinguishes this rule from the heartbeat one.
+  latching: false
+  rebroadcast: 500
+  return_window: 600
+
+  # Recovery is evidence, not an absence: this is the line the firmware prints
+  # only on its own recovery branch.
+  recovery_text: "charge restored"
+  recovery_timeout: 900
+
+sweep:
+  # Stepping by the charger's cadence, because that is what the bus can resolve.
+  # 300 is the window and one full beat short of it is the last legal silence.
+  values: [100, 300, 500, 700, 900, 1100]

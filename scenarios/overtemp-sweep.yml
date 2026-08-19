@@ -41,15 +41,39 @@ params:
   latch_ms: 600
   boot_timeout: 100
 
+  # Where the pack says what it is doing. 0x602 carries the main contactor,
+  # broadcast every 100 ms, and its three values are exactly the three
+  # conditions the pack passes through on this bus with nothing requested of
+  # it: open while idle, precharging, closed once HV is live. The window is
+  # 150 ms so one broadcast is certain to fall inside it.
+  state_message: 0x602
+  state_signal: contactor_state
+  state_window: 150
+
 sweep:
   # 550 is the limit and 551 the first faulting value: the mandatory pair.
   # The rest confirm the behaviour is monotonic rather than a coincidence at
   # one point.
   values: [500, 530, 545, 549, 550, 551, 555, 570, 600, 650]
 
-  # WHEN the reading arrives, in milliseconds after boot. Each moment meets the
-  # firmware in a different state, so these are not repeats of one another:
-  #   200   standby, before any drive request
-  #   800   running, contactor closed and under load
-  #   1500  well into the drive, after the periodic reports have settled
-  at: [200, 800, 1500]
+  # WHEN the reading arrives, measured from the end of the boot wait, and WHAT
+  # the pack reports at that instant. The witness is asserted before the value
+  # is injected, so each variant makes a claim its siblings do not, and the
+  # generator refuses two moments that witness the same condition.
+  #
+  # OBSERVED, NOT ASSUMED. Read off a real run of this scenario
+  # (harness/out/audit-state/overtemp-sweep-550-at-1500ms): with nothing asked
+  # of the pack, the charge port opens a session on its own, so the pack goes
+  # STANDBY -> PRECHARGE at 600 ms -> CHARGING at 800 ms and stays there. Its
+  # 0x602 broadcasts carry contactor_state 0 up to 500 ms, 1 at 600 and 700 ms,
+  # and 2 from 800 ms on.
+  #
+  # The previous list said "800 running, contactor closed and under load" and
+  # "1500 well into the drive". The pack never reaches RUNNING in this scenario
+  # -- nothing ever requests drive -- and 800 and 1500 are the same condition,
+  # so a third of these tests asserted nothing the second third did not. The
+  # three below are the three conditions that genuinely exist here.
+  at:
+    - { ms: 200,  state: OPEN }        # idle: HV down, contactor open
+    - { ms: 600,  state: PRECHARGE }   # the precharge dwell, HV coming up
+    - { ms: 900,  state: CLOSED }      # session live, contactor closed

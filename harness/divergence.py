@@ -117,6 +117,7 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import fnmatch
 import hashlib
 import json
 import os
@@ -147,6 +148,16 @@ MARKER_NAME = "EXPECTED-DIVERGENCE.yml"
 #: a misspelled key that is skipped is a documented expectation that silently
 #: stopped being asserted.
 MARKER_REQUIRED_KEYS = ("defect", "diverging_tests", "rationale")
+
+#: The characters that turn an entry of diverging_tests from one test's name
+#: into a family of them. Taken from the shell-glob vocabulary the rest of this
+#: repository's filters already use, so there is one spelling to learn.
+PATTERN_CHARACTERS = "*?["
+
+
+def _is_pattern(entry: str) -> bool:
+    return any(character in entry for character in PATTERN_CHARACTERS)
+
 
 #: Result documents this module knows how to read. A document announcing any
 #: other schema is refused rather than probed field by field.
@@ -254,6 +265,23 @@ class Expectation:
     beside it is what a reader needs in order to judge the list growing: a list
     that grows means either the binary changed or the run is not deterministic,
     and the gate fails rather than absorbing it.
+
+    AN ENTRY MAY NAME A TEST OR A FAMILY OF THEM.
+    -----------------------------------------------------------------------
+    Tests are generated. A sweep over one limit produces a test per value and
+    per moment, and a defect visible at one value is visible in every variant
+    at that value -- so what is being documented is a CLASS of tests, and
+    writing it out as file names makes the file stale the moment a moment or a
+    value is added, while looking correct.
+
+    An entry containing a wildcard is matched against the suite's identifiers.
+    This cannot absorb a surprise, which is the property that matters: the
+    observed set must still equal the matched set EXACTLY. A pattern that
+    matches more than diverged reports the extra as missing; one that matches
+    less reports the rest as unexpected; one that matches nothing at all is
+    refused, exactly like a name that is not in the suite. Widening a pattern
+    to swallow an unexpected divergence therefore fails a different way rather
+    than passing quietly.
     """
 
     __slots__ = ("path", "defect", "diverging_tests", "rationale")
@@ -352,6 +380,24 @@ class Expectation:
                 % (where, ", ".join(repr(d) for d in duplicates))
             )
         return cls(path, defect.strip(), names, rationale)
+
+    def resolve(self, test_ids) -> tuple:
+        """(the tests this build is expected to diverge on, entries matching none).
+
+        Order is the suite's, so a report reads in the order the tests ran.
+        """
+        ids = list(test_ids)
+        matched = set()
+        barren = []
+        for entry in self.diverging_tests:
+            if _is_pattern(entry):
+                hits = [t for t in ids if fnmatch.fnmatchcase(t, entry)]
+            else:
+                hits = [t for t in ids if t == entry]
+            if not hits:
+                barren.append(entry)
+            matched.update(hits)
+        return [t for t in ids if t in matched], barren
 
 
 # ---------------------------------------------------------------------------
@@ -652,6 +698,28 @@ class Suite:
             seen.add(test_id)
             tests.append((test_id, path))
 
+        # The manifest is the suite, so a test file the manifest does not
+        # declare is refused rather than ignored. Ignoring it is safe here and
+        # unsafe everywhere else: a caller that lists the directory instead
+        # would run it, and the two entry points would then disagree about how
+        # many tests the suite has while both looked complete.
+        declared_files = {str(entry["file"]) for entry in entries
+                          if isinstance(entry, dict) and "file" in entry}
+        stray = sorted(p.name for p in directory.glob("*.yml")
+                       if p.name not in declared_files)
+        if stray:
+            raise DivergenceError(
+                "%s holds %d %s the manifest does not declare: %s.\n\n"
+                "That file was not produced by this expansion -- it is left over\n"
+                "from an earlier one, or was written by hand into a directory of\n"
+                "derived files. Either way the suite would be one size to the\n"
+                "generator and another to whatever listed the directory.\n"
+                "Re-expand, which prunes what it no longer emits."
+                % (_relative(directory), len(stray),
+                   _plural(len(stray), "test file", "test files"),
+                   ", ".join(stray[:8]) + (", ..." if len(stray) > 8 else ""))
+            )
+
         return cls(directory, manifest_path, _sha256(manifest_path), tests)
 
 
@@ -860,19 +928,25 @@ class Runner:
             raise DivergenceError(
                 "no interpreter to run the engine with. Pass one explicitly.")
 
-    def command(self, test_path: Path, out_dir: Path, topology_path: Path) -> list:
+    def command(self, test_path: Path, out_dir: Path, topology_path: Path,
+                coverage=False) -> list:
         argv = list(self.interpreter) + [
             str(self.engine), str(test_path),
             "--quiet",
             "--out", str(out_dir),
             "--topology", str(topology_path),
         ]
+        if coverage:
+            # Only ever the baseline arm. Coverage is a statement about the
+            # binary under test, and tracing every arm would pay the host cost
+            # three more times to measure builds nobody ships.
+            argv += ["--coverage"]
         if self.timeout:
             argv += ["--timeout", str(int(self.timeout))]
         return argv
 
     def _one(self, test_id, test_path, out_dir, topology_path, dut_node_id,
-             binary_sha, test_sha):
+             binary_sha, test_sha, coverage=False):
         results_path = out_dir / "results.json"
         if self.reuse and _answers_this_question(results_path, dut_node_id,
                                                  binary_sha, test_sha):
@@ -880,7 +954,7 @@ class Runner:
                                  binary_sha, test_sha, reused=True)
         out_dir.mkdir(parents=True, exist_ok=True)
         done = subprocess.run(
-            self.command(test_path, out_dir, topology_path),
+            self.command(test_path, out_dir, topology_path, coverage),
             cwd=str(self.repo_root),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -898,7 +972,8 @@ class Runner:
                              binary_sha, test_sha)
 
     def run(self, label, suite: Suite, topology_path: Path, out_root: Path,
-            dut_node_id: str, binary: Path, binary_sha: str) -> Arm:
+            dut_node_id: str, binary: Path, binary_sha: str,
+            coverage=False) -> Arm:
         out_root = Path(out_root)
         started = time.time()
         outcomes = {}
@@ -909,7 +984,7 @@ class Runner:
             test_id, test_path = entry
             return test_id, self._one(
                 test_id, test_path, out_root / test_id, topology_path,
-                dut_node_id, binary_sha, _sha256(test_path))
+                dut_node_id, binary_sha, _sha256(test_path), coverage)
 
         with concurrent.futures.ThreadPoolExecutor(
                 max_workers=self.workers) as pool:
@@ -961,10 +1036,10 @@ class Comparison:
 
     __slots__ = ("variant", "arm", "diverging", "caught", "reversed_",
                  "unexpected", "missing", "unknown", "measurement_only",
-                 "evidence")
+                 "evidence", "expected")
 
     def __init__(self, variant, arm, diverging, caught, reversed_, unexpected,
-                 missing, unknown, measurement_only, evidence):
+                 missing, unknown, measurement_only, evidence, expected=()):
         self.variant = variant
         self.arm = arm
         self.diverging = tuple(diverging)
@@ -975,6 +1050,10 @@ class Comparison:
         self.unknown = tuple(unknown)
         self.measurement_only = tuple(measurement_only)
         self.evidence = tuple(evidence)
+        # What the marker's entries resolved to against this suite, so the
+        # record shows the tests that were required to diverge and not only the
+        # patterns that named them.
+        self.expected = tuple(expected)
 
     @property
     def status(self) -> str:
@@ -1013,8 +1092,11 @@ def compare(baseline: Arm, variant: Variant, arm: Arm, suite: Suite) -> Comparis
             % (variant.name, only_baseline or "-", only_variant or "-")
         )
 
-    unknown = [t for t in variant.expectation.diverging_tests
-               if t not in baseline.outcomes]
+    # What the marker file claims, resolved against the suite that actually
+    # ran. An entry naming nothing in the suite is `unknown` whether it is a
+    # name or a family: in both cases the file documents an expectation that
+    # nothing checks.
+    expected_ids, unknown = variant.expectation.resolve(suite.ids)
 
     diverging, caught, reversed_, measurement_only, evidence = [], [], [], [], []
     for test_id in suite.ids:
@@ -1039,7 +1121,7 @@ def compare(baseline: Arm, variant: Variant, arm: Arm, suite: Suite) -> Comparis
                 "variant_us": now.latency_us,
             })
 
-    expected = set(variant.expectation.diverging_tests)
+    expected = set(expected_ids)
     observed = set(diverging)
     unexpected = sorted(observed - expected)
     missing = sorted(t for t in expected - observed if t in baseline.outcomes)
@@ -1054,7 +1136,7 @@ def compare(baseline: Arm, variant: Variant, arm: Arm, suite: Suite) -> Comparis
         )
 
     return Comparison(variant, arm, diverging, caught, reversed_, unexpected,
-                      missing, unknown, measurement_only, evidence)
+                      missing, unknown, measurement_only, evidence, expected_ids)
 
 
 # ---------------------------------------------------------------------------
@@ -1160,7 +1242,7 @@ def _failure_lines(comparisons) -> list:
         marker = _relative(comparison.variant.expectation.path)
         if comparison.unknown:
             lines.append(
-                "%s: %s names %s, which the suite does not contain.\n"
+                "%s: %s names %s, which matches nothing in the suite.\n"
                 "  Either the test was renamed or removed, or the file was written\n"
                 "  from a prediction rather than from an observed run. A documented\n"
                 "  expectation that cannot be checked is not an expectation."
@@ -1200,7 +1282,8 @@ def _failure_lines(comparisons) -> list:
 
 
 def as_document(baseline: Arm, comparisons, suite: Suite, dut_node_id: str,
-                workers: int, held: bool, failures, warnings) -> dict:
+                workers: int, held: bool, failures, warnings,
+                baseline_runs=None, baseline_traced=False) -> dict:
     return {
         "schema": DIVERGENCE_SCHEMA,
         "verdict": "PASS" if held else "FAIL",
@@ -1223,6 +1306,11 @@ def as_document(baseline: Arm, comparisons, suite: Suite, dut_node_id: str,
         "baseline": {
             "label": baseline.label,
             "topology": _relative(baseline.topology_path),
+            # Where this arm's runs are, so whatever reports coverage beside
+            # this record can be pointed at the runs it is about rather than
+            # at a directory somebody remembered.
+            "runs": _relative(baseline_runs) if baseline_runs else None,
+            "traced": bool(baseline_traced),
             "wall_seconds": round(baseline.wall_seconds, 1),
             "verdicts": baseline.verdicts(),
             "all_passed": not baseline.failed(),
@@ -1240,6 +1328,7 @@ def as_document(baseline: Arm, comparisons, suite: Suite, dut_node_id: str,
                 "wall_seconds": round(c.arm.wall_seconds, 1),
                 "verdicts": c.arm.verdicts(),
                 "expected_diverging": list(c.variant.expectation.diverging_tests),
+                "expected_resolved": list(c.expected),
                 "observed_diverging": list(c.diverging),
                 "caught_by": len(c.diverging),
                 "of": len(suite),
@@ -1289,6 +1378,10 @@ def build_parser() -> argparse.ArgumentParser:
                         help="take a result already in the output directory only "
                              "when its recorded binary and test hashes match this "
                              "run exactly; anything else is executed again")
+    parser.add_argument("--coverage", action="store_true",
+                        help="trace the baseline arm, so coverage can be "
+                             "measured from the same run this gate's "
+                             "discrimination comes from")
     parser.add_argument("--list", action="store_true",
                         help="print the plan and execute nothing")
     parser.add_argument("--quiet", action="store_true",
@@ -1392,7 +1485,7 @@ def main(argv=None) -> int:
         out("    baseline  %s" % _relative(baseline_binary))
         baseline = runner.run("baseline", suite, topology_path,
                               out_root / "baseline", dut.id, baseline_binary,
-                              baseline_sha)
+                              baseline_sha, coverage=args.coverage)
         if baseline.failed():
             raise DivergenceError(
                 "the baseline is not green: %s failed against the good binary.\n\n"
@@ -1441,7 +1534,8 @@ def main(argv=None) -> int:
     record = out_root / "divergence.json"
     record.write_text(
         json.dumps(as_document(baseline, comparisons, suite, dut.id, workers,
-                               held, failures, warnings),
+                               held, failures, warnings,
+                               out_root / "baseline", args.coverage),
                    indent=2, sort_keys=False) + "\n",
         encoding="utf-8", newline="\n")
 

@@ -1,0 +1,80 @@
+# heartbeat-sweep — the failsafe timeout, walked across its boundary.
+# =============================================================================
+# THIS FILE IS PROJECT DATA. The timeout and the tick come from the firmware
+# (firmware/bms/src/bms.h: BMS_VCU_TIMEOUT_MS 300, BMS_TICK_MS 10), the
+# identifiers and enum spellings from catalog.yml, the nodes from network.yml.
+#
+# WHY THIS SWEEP IS NON-STRICT, AND WHY THAT IS NOT A DETAIL
+# -----------------------------------------------------------------------------
+# A value threshold and a timeout are boundary-opposite, and the firmware is
+# right both times:
+#
+#   a value threshold   > limit    the boundary READING is legal
+#   a timeout           >= window  the window having ELAPSED is the condition
+#
+# 300 ms without a beat does not mean "later than 300 ms"; it means the 300 ms
+# window is over. So the limit itself belongs on the FAULT side here, which is
+# the exact reverse of the over-temperature sweep. Getting it backwards would
+# invert every expectation in this file, so the pattern declares the comparison
+# and a test asserts both directions.
+#
+# The peer's own cadence sets a floor on what can be resolved: with a beat every
+# 100 ms, a claim about 250 ms of silence cannot be distinguished from ordinary
+# jitter between beats. The pattern declares that floor rather than letting the
+# sweep pretend to a precision the bus does not have.
+# =============================================================================
+
+id: heartbeat-sweep
+title: Failsafe on heartbeat loss, across the timeout boundary
+description: >
+  Silence the vehicle controller for a range of durations either side of the
+  declared timeout. Short of the window the pack must keep driving; once the
+  window has elapsed it must announce HEARTBEAT_LOST and open the contactor.
+
+pattern: node-silent
+
+params:
+  node: bms
+  peer: vcu
+  peer_message: 0x200
+  peer_signal: drive_state
+  peer_active: DRIVE
+  peer_period: 100
+
+  timeout: 300
+  tick: 10
+
+  # A third node held out of the way, so "driving" is unambiguous rather than an
+  # accident of what the charger happened to be doing.
+  context_node: charger
+  context_message: 0x300
+  context_signal: charge_state
+  context_value: IDLE
+
+  state_text: "RUNNING"
+  state_timeout: 800
+  boot_timeout: 100
+  control_window: 200
+
+  message: 0x604
+  signal: fault_code
+  value: HEARTBEAT_LOST
+
+  # What the failsafe operates, so the legal half is not merely an absence.
+  consequence_message: 0x602
+  consequence_signal: contactor_state
+  tripped_value: OPEN
+  restored_value: CLOSED
+  consequence_deadline: 200
+
+  latching: true
+  rebroadcast: 500
+  return_window: 600
+
+sweep:
+  # 300 is the window and 290 the last silence short of it: the mandatory pair
+  # for a non-strict rule, where the limit itself faults.
+  # Stepping by the beat, because that is what the bus can resolve. 300 is the
+  # window and 200 is one full beat short of it: the mandatory pair for a
+  # non-strict rule, where the limit itself faults.
+  values: [100, 200, 300, 400, 500, 600, 800, 1000]

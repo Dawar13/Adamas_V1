@@ -168,11 +168,23 @@ sweep:
   # variant is the one that must see the failsafe. See the header — the reference
   # pattern is strict, and this is where the two shapes genuinely differ.
   comparison: non-strict
-  # The smallest representable step of a duration is the device's own evaluation
-  # tick, which is project data and so cannot be a literal in a universal file.
-  # A finer step emits variants the firmware cannot distinguish, and a boundary
-  # pair the firmware cannot distinguish is not a boundary pair.
-  step: "{{tick}}"
+  # The step is the PEER'S CADENCE, not the device's evaluation tick.
+  #
+  # Both are project data, and for this shape the peer's cadence is the coarser
+  # of the two and therefore the binding one. A claim about "the peer was quiet
+  # for N milliseconds" cannot be resolved more finely than the interval between
+  # its beats: with a beat every 100 ms, a 10 ms difference in the silence is
+  # indistinguishable from ordinary spacing between two beats. The device's tick
+  # decides when it NOTICES the silence; it does not decide what a test can
+  # resolve about the silence.
+  #
+  # Stepping by the tick also contradicted this pattern's own indeterminate
+  # band. With a 300 ms window, a 100 ms beat and a 10 ms step, the mandatory
+  # near-side variant landed at 290 ms -- inside the band the pattern refuses to
+  # place a variant in. Two of its own rules disagreed, and the refusal is what
+  # exposed it. Stepping by the cadence makes them consistent: the boundary pair
+  # becomes the window itself and one full beat short of it, both resolvable.
+  step: "{{peer_period}}"
   # The required behaviour flips at the boundary: below it silence, at and past
   # it the announcement.
   expectation: flips

@@ -285,8 +285,172 @@ Promoting a scripted node to real means adding those lines and editing no scenar
 
 ## Phase 2 — Scale and storage
 
-- [ ] 118 tests in under 10 minutes
-- [ ] Results stored and reloadable; Open vs Replay
+### What was built
+
+```
+patterns/                     six shapes, as data, universal to the tool
+harness/expand.py             the sweep generator
+harness/run_suite.py          the parallel runner
+harness/store.py              run storage, provenance enforced
+harness/coverage.py           coverage, measured from the emulator
+harness/divergence.py         the structural divergence gate
+harness/perturbation.py       did switching a measurement on change what it measured
+scripts/bench-parallelism.sh          measure the ceiling, do not assume it
+scripts/check-parallel-determinism.sh
+scripts/check-divergence.sh
+```
+
+### Observed
+
+**The divergence gate holds.** Three defective binaries, three distinct defects, each
+caught, and the tests that diverge are exactly the documented ones:
+
+```
+gate held · 3 of 3 documented divergences observed exactly · 2 warnings
+  bms-broken        →  overtemp-boundary
+  bms-broken-latch  →  overtemp-boundary, overtemp-fault
+  bms-broken-state  →  undervolt-running-only
+```
+
+Every expected-divergence list was written from the gate's own first, **failing** run —
+the only moment where the difference between belief and evidence is still visible. Two
+binaries rest on a single test each, reported as a WARNING rather than a pass, because one
+file carrying a whole proof is fragility worth seeing.
+
+A detail worth keeping: `overtemp-fault` does **not** diverge on `bms-broken`, because it
+injects a value comfortably past the limit where `>` and `>=` agree. That non-divergence is
+the confirmation, not a gap — it is exactly why all eight original Phase 1 scenarios passed
+against that binary before a boundary test existed.
+
+**Parallelism, measured rather than assumed.** 1 / 2 / 4 / 8 workers on 12 cores: wall
+clock 327.8 / 179.5 / 145.6 / 148.7 s. Ceiling **4** — past it the clock stops improving
+and slightly regresses.
+
+**Sweeps.** Five safety rules, five boundary sweeps, both comparison semantics exercised:
+a value threshold where the limit is legal, and a timeout where the limit itself faults.
+
+```
+overtemp-sweep     strict                    550 legal / 551 fault        30 tests
+overvolt-sweep     strict                  84000 legal / 84001 fault      27 tests
+undervolt-sweep    strict, downward        60000 legal / 59999 fault       9 tests
+heartbeat-sweep    non-strict                200ms legal / 300ms fault     8 tests
+charge-loss-sweep  non-strict, non-latching  100ms legal / 300ms fault     6 tests
+```
+
+**Coverage, measured.** From Renode's execution tracer — one record per retired
+instruction, with the container format read out of Renode's own reader rather than guessed.
+Reported beside discrimination, which produced a category worth having:
+
+```
+EXECUTED, NEVER PROBED
+  reached by tests, but no test that reaches them catches any defective
+  build: their tests confirm rather than probe.
+```
+
+The zero-coverage list is credible on its face: unused clock helpers, and the float maths
+helpers. This firmware uses no floating point at all, deliberately, because it would
+compromise determinism — so the tool is confirming a real design property rather than
+inventing a finding.
+
+### Not 118
+
+The phase document asks for 118 tests. There are **89**, and padding to 118 was declined.
+Only one pattern carries the timing dimension, so the remainder would have had to be extra
+values asserting nothing new — inflating a number that is supposed to mean something. 89
+real verdicts across five rules and both comparison semantics is the honest ceiling of the
+current patterns. Adding the timing dimension to a second pattern is the way to raise it.
+
+### Findings
+
+**A swept parameter was accepted and then ignored.** The under-voltage sweep was exactly
+backwards: a 50 V pack asserted legal while driving, a healthy 72 V pack asserted to fault.
+The pattern declared a `direction` parameter, documented it as *"which side of the limit
+the fault lies on"*, let the scenario bind it — and never wired it to the sweep, so the
+generator used its default of `above`. A parameter that is accepted and then ignored is
+worse than one that is missing: the scenario reads correctly and the sweep is inverted. Now
+wired, and tested in both directions.
+
+**A pattern's own two rules contradicted each other.** The heartbeat sweep refused to
+expand: its mandatory near-boundary variant landed inside the band the pattern declares
+indeterminate, because it stepped by the device's 10 ms tick while the peer beats every
+100 ms. Resolved by a principle rather than an exception — the step is the peer's cadence,
+since the tick decides when the device *notices* silence, not what a test can *resolve*
+about it.
+
+**A timeout sized like a schedule.** Twelve tests failed on wall clock alone:
+
+```
+heartbeat-loss, alone, one worker         46 s   pass
+heartbeat-loss, in an 89-test suite     >300 s   TIMEOUT
+```
+
+None of them for anything the firmware did. A per-test timeout is a safety net, not a
+deadline; sized near what a test is expected to take, ordinary contention becomes failure.
+Raised to 30 minutes. The measured 4-worker ceiling also came from the cheap Phase 1
+scenarios and does not transfer to the expensive ones — recorded in TOOLCHAIN.md rather
+than left as a number that looks universal.
+
+**Coverage reported dead code that was not dead.** The first implementation named inlined
+functions as never executed. Under `-Os` a safety handler compiled to a six-byte stub with
+zero call sites, and the check it belonged to had no symbol at all; their logic runs, and no
+sample can be attributed to them. A confident false finding, in the metric whose whole job
+is to expose untested code. Three states now — executed, never executed, and **not
+attributable** — biased towards under-claiming, because for this tool an honest "cannot
+tell" beats a wrong accusation.
+
+**The engine's two statements were not cross-checked.** The runner read both the exit code
+and the stored verdict, then classified from the exit code alone, so a test whose results
+said FAIL counted as a pass whenever the engine exited 0. Reading both and reporting one is
+not a cross-check; it is a silent choice of which to believe. A disagreement is now
+`inconsistent` and fails the suite, with neither statement preferred, because from there it
+is impossible to tell which is wrong.
+
+**A generated count was quoted as a verified one.** 75 tests were generated and 9 had ever
+produced a verdict; nothing compared the two numbers. The suite is now read from the
+expansion manifest through the same loader the divergence gate uses, and every tally carries
+`declared` and `selected` and says outright when it covers less than the whole suite.
+
+**The purity guard caught prose eight times.** `soc_pct`, `0x604`, `fault_code`, `OVERTEMP`,
+`declared`, `ready`, `OPEN`, `RUN`, `OFF` — every one in a comment or docstring, never in
+logic. Several are ordinary English words that happen to be enum spellings in this project's
+CAN contract. That is the argument for enforcing the rule in a test rather than by
+inspection: a grep goes stale the moment the file is edited.
+
+### Corrections to earlier claims in this file
+
+**Determinism under parallelism was verified too narrowly.** The N=1 versus N=8 check
+compared verdicts and headline latencies, and those matched. Comparing the whole event log
+finds peer-node transmit instants differing by 8 to 100 microseconds — an instant that moves
+changes no verdict and no headline, and is still host timing reaching virtual time. The
+claim was broader than the check that supported it. `harness/perturbation.py` now compares
+every event log byte for byte; the property is under investigation and is **not currently
+claimed**.
+
+Determinism of repeated runs at a *fixed* configuration remains verified: eight consecutive
+runs of one scenario produced byte-identical event logs and traces.
+
+### Phase 2 exit criteria
+
+- [x] Pattern library exists as data; every Phase 1 scenario is an instance of one
+- [x] Scenario / test / run separated in the data model; generated tests gitignored
+- [x] The generator refuses to emit a sweep omitting the boundary pair
+- [x] Comparison semantics declared per pattern, with its own test, both directions
+- [ ] 118 or more tests — **89**, padding declined, reason recorded above
+- [x] Parallel execution measured on the target machine; worker default derived from it
+- [ ] Identical verdicts and latencies at N=1 and N=8 — **narrowly verified only; the
+      whole-log comparison reports drift and is being investigated**
+- [x] Divergence runs on every full suite, against three defective binaries
+- [x] Expected-divergence sets recorded; unexpected divergence fails the run
+- [x] Discrimination report produced; every `1 of N` flagged as a warning
+- [x] Runs stored with full provenance; a run missing provenance is schema-rejected
+- [x] Open loads instantly; open and replay cannot be confused
+- [x] Coverage extracted, reported beside discrimination
+- [x] Retention policy declared in code
+- [x] `grep -r` over `harness/` finds no project data
+- [x] This file records what was **observed**
+
+Two criteria are open, and are recorded as open rather than rounded up. Phase 3 has not been
+started.
 
 ## Phase 3 — The UI
 

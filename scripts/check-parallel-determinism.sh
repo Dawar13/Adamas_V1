@@ -3,8 +3,22 @@
 #
 #   ./scripts/check-parallel-determinism.sh [N_HIGH]
 #
-# Runs the same tests at N=1 and at N=<high>, and requires IDENTICAL verdicts
-# and IDENTICAL latencies, per test, to the microsecond.
+# Runs the same tests at N=1 and at N=<high>, and requires the two runs to be
+# the SAME RUN: identical verdicts, identical latencies to the microsecond, and
+# an identical event log, byte for byte.
+#
+# WHY THE EVENT LOG AND NOT ONLY THE HEADLINE NUMBERS
+# -----------------------------------------------------------------------------
+# Comparing verdicts and headline latencies is comparing the two numbers a test
+# happens to publish. Everything else the emulator recorded -- every frame, from
+# every node, with its instant in virtual time -- went uncompared, and that is
+# where a leak shows up first: an instant that moves by 8 microseconds changes
+# no verdict and no headline, and it is still host timing reaching virtual time.
+#
+# Earned. A pair of runs of one test disagreed by 8 to 100 microseconds in the
+# transmit instants of the peer nodes; verdicts and latencies matched exactly,
+# so every check this project had was green while the logs differed. The
+# comparison is now the whole log.
 #
 # WHY THIS IS NOT OPTIONAL, AND WHY THERE IS NO TOLERANCE
 # -----------------------------------------------------------------------------
@@ -90,6 +104,25 @@ if differ:
     print("  all of them until it is found. Do not add a tolerance.")
     sys.exit(1)
 
-print("  RESULT: IDENTICAL at N=1 and N=%s -- verdicts and latencies, exactly." % n_high)
+print("  verdicts and latencies: identical at N=1 and N=%s." % n_high)
 PYEOF
-exit $?
+tally_rc=$?
+
+# And now the whole of what the emulator recorded, not only what the tally
+# quotes: every frame, every instant, byte for byte.
+"$PY" harness/perturbation.py \
+	--a "$OUT/n1-runs" --label-a "N=1" \
+	--b "$OUT/nhigh-runs" --label-b "N=$HIGH" \
+	--out "$OUT/perturbation.json"
+logs_rc=$?
+
+if [ "$tally_rc" -ne 0 ] || [ "$logs_rc" -ne 0 ]; then
+	echo ""
+	echo "  RESULT: NOT DETERMINISTIC UNDER PARALLELISM"
+	echo ""
+	exit 1
+fi
+
+echo "  RESULT: IDENTICAL at N=1 and N=$HIGH -- verdicts, latencies and every"
+echo "          event log, exactly."
+exit 0

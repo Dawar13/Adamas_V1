@@ -52,6 +52,9 @@ parameters:
   - { name: latching, type: boolean,           doc: "whether cooling back down clears it" }
   - { name: healthy,  type: number,            doc: "a value comfortably inside the limit" }
   - { name: observe_ms, type: duration,        doc: "how long the legal side watches the announcement identifier for silence. Should exceed rebroadcast, so a device that HAD faulted cannot hide between two restatements" }
+  - { name: state_message, type: message_id,   doc: "the frame on which the device reports what it is currently doing. Read once per moment, immediately before the stimulus, so a moment's variant asserts something its siblings do not" }
+  - { name: state_signal,  type: signal,       doc: "the field on it carrying that condition" }
+  - { name: state_window,  type: duration,     doc: "how long to watch for that frame. Must exceed its period, or the witness fails for a reason that has nothing to do with the firmware. Taken OUT of the wait before the stimulus, so the stimulus still lands at the declared moment" }
   - { name: latch_ms,   type: duration,        doc: "how long the announcement is watched after the value returns to healthy. Latching only" }
   - { name: boot_timeout, type: duration,      doc: "how long the device may take to reach its application entry point" }
 
@@ -63,6 +66,11 @@ sweep:
   # the generator tests it separately.
   comparison: strict
   step: 1
+  # The moment sweep witnesses the device's condition before injecting, and
+  # that observation takes bus time. It comes out of the wait in front of the
+  # stimulus rather than being added on the end, so a variant named for a
+  # moment applies its stimulus at that moment and not one window later.
+  at_lead_by: "{{state_window}}"
 
 # The shape, in the eleven verbs. {{param}} is substituted per test; {{value}}
 # is the swept value for this instance and {{expected}} is legal|fault, decided
@@ -74,15 +82,28 @@ steps:
   #
   # A threshold rule is evaluated on the control loop's tick, so the same
   # reading landing at different points in a drive meets the firmware in
-  # different states -- and a rule that is correct in one state is not
-  # automatically correct in another. Sweeping the moment costs one extra
-  # dimension and buys tests that no amount of extra values would produce,
-  # because they all differ in something other than the number.
+  # different conditions -- and a rule that is correct in one is not
+  # automatically correct in another. That is the ONLY thing that makes the
+  # moment worth a dimension, so the condition is asserted rather than assumed:
+  # each moment is witnessed on the bus, immediately before the stimulus, and
+  # the scenario declares a different witness per moment.
   #
-  # {{at}} is bound by the generator per test. A scenario that declares no
-  # `at` list gets one test per value, exactly as before.
-  - run_for:       { ms: "{{at}}" }
-  - mark:          "{{symbol}} driven to {{value}} {{unit}} at {{at}} ms — expected {{expected}}"
+  # Earned. Without the witness every variant of a moment sweep carried a
+  # byte-identical assertion list, three moments tripled a suite's test count
+  # while adding no claim, and the scenario's prose justification named a
+  # condition the firmware never reaches -- unchecked, because nothing checked
+  # it. The generator now refuses a moment that declares no witness, and two
+  # moments that witness the same condition.
+  #
+  # {{at}} and {{at_state}} are bound by the generator per test, and {{at_lead}}
+  # is {{at}} minus the window below, so the stimulus still lands at {{at}}.
+  # A scenario that declares no `at` list gets one test per value, as before.
+  - run_for:       { ms: "{{at_lead}}" }
+  - expect_can:    { id: "{{state_message}}",
+                     signals: { "{{state_signal}}": "{{at_state}}" },
+                     within_ms: "{{state_window}}",
+                     label: "at {{at}} the device reports {{at_state}}, which is the condition this variant injects into" }
+  - mark:          "{{symbol}} driven to {{value}} {{unit}} at {{at}}, with the device reporting {{at_state}} — expected {{expected}}"
   - write_symbol:  { node: "{{node}}", symbol: "{{symbol}}", value: "{{value}}" }
 
   # The rule's own input, read back from the running machine. This is what makes

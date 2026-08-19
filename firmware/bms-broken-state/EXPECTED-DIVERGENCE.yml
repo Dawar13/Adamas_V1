@@ -4,32 +4,52 @@
 # never predicted.
 #
 # The gate fails if the observed set differs from this list in EITHER direction.
+#
+# An entry may name one test or a family of them; see
+# firmware/bms-broken/EXPECTED-DIVERGENCE.yml for why.
 # =============================================================================
 
 defect: under-voltage rule lost its state qualifier and fires in every state
 
 diverging_tests:
+  # The hand-written scenario...
   - undervolt-running-only
+  # ...and every swept variant whose value is BELOW the limit. Those are the
+  # readings the rule would act on, and the sweep injects each of them first in
+  # the state the rule must not apply in -- which is exactly where this binary
+  # faults. At or above the limit nothing happens under either binary, so the
+  # legal side does not diverge and must not.
+  - undervolt-sweep-59999
+  - undervolt-sweep-58000
+  - undervolt-sweep-55000
+  - undervolt-sweep-50000
 
 rationale: |
   The rule is meant to apply only while the vehicle is driving: a flat pack
   sitting in standby is a discharged battery, not a safety event. With the
-  qualifier removed it faults immediately in standby, and undervolt-running-only
-  catches it directly -- "a flat pack that is not driving is not a safety event"
-  fails with a matching fault frame at 250400 us.
+  qualifier removed it faults immediately in standby, and every test that injects
+  a below-limit reading while parked catches it directly -- the prohibition on a
+  fault frame in that state fails with a matching frame a few hundred
+  milliseconds in.
 
-  That one test reports FOUR failing assertions, and they share a single root
-  cause rather than being four findings. Faulting in standby latches the pack
-  into FAULT, so it never reaches the running state the rest of the scenario was
-  written to exercise; those later assertions then fail because the state they
-  needed never arrived. One defect, one diverging test, a cascade of
+  Each of those tests reports several failing assertions, and they share a single
+  root cause rather than being several findings. Faulting in standby latches the
+  pack into FAULT, so it never reaches the running state the rest of the scenario
+  was written to exercise; those later assertions then fail because the state they
+  needed never arrived. One defect, one diverging test each, a cascade of
   consequences inside it.
 
-  IF THIS LIST GROWS, the extra entry is the thing to investigate, not to add.
-  A state qualifier that has been removed from one rule cannot change the
-  behaviour of a scenario that never drives the pack below the limit, so any
-  further divergence would be evidence of a different change altogether.
+  This build used to rest on ONE test, which the gate reported as a warning
+  rather than a pass. It was strengthened the way the warning asked for -- by
+  making the sweep that probes the standby case actually run -- and not by
+  widening this file. Those nine generated tests existed but had never been
+  executed, and every one of them failed against the CORRECT binary because the
+  scenario bound the wrong value to the pattern's "nothing is tripped yet"
+  parameter; a test that is red against good firmware can never contribute
+  discrimination, and the gate cannot even measure it, because a red baseline
+  aborts the run before the defective arms.
 
-  This binary rests on ONE test, which the gate reports as a warning rather than
-  a pass. Strengthening it means adding a scenario that probes the standby case
-  honestly, not widening this file.
+  IF THE OBSERVED SET GROWS, the extra entry is the thing to investigate, not to
+  add. A state qualifier removed from one rule cannot change the behaviour of a
+  scenario that never drives the pack below the limit, so any further divergence
+  would be evidence of a different change altogether.

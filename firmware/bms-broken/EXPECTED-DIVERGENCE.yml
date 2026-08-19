@@ -9,30 +9,56 @@
 # than it admits, or a verdict moved for a reason unrelated to the defect --
 # which would mean something non-deterministic is leaking into a run. Both are
 # worse than a red gate.
+#
+# AN ENTRY MAY NAME A TEST OR A FAMILY OF THEM
+# -----------------------------------------------------------------------------
+# Tests are generated. A sweep over one limit produces a test per value and per
+# moment, so what is being documented is a CLASS of tests -- "every variant that
+# injects exactly the limit" -- and spelling that as file names makes this file
+# wrong the moment a moment or a value is added, while looking correct. That is
+# not hypothetical: this file listed one hand-written test id, the scenarios
+# grew sweeps around the same boundary, and the gate then refused because three
+# undocumented tests caught the defect.
+#
+# A wildcard cannot absorb a surprise, which is the property the gate rests on:
+# the observed set must still equal the matched set EXACTLY. A pattern matching
+# more than diverged reports the rest as missing; one matching less reports the
+# rest as unexpected; one matching nothing at all is refused. Widening a pattern
+# to swallow something unexpected therefore fails a different way rather than
+# passing quietly.
 # =============================================================================
 
 defect: over-temperature comparison inverted, so the limit itself faults
 
 diverging_tests:
+  # The hand-written boundary test, and every swept variant that injects the
+  # limit itself -- one per moment the sweep visits.
   - overtemp-boundary
+  - overtemp-sweep-550-at-*
 
 rationale: |
-  Only the exact boundary value separates `>` from `>=`. overtemp-boundary
-  injects the limit itself and requires it to be legal, so it is the single
-  test in the suite that can see this defect.
+  Only the exact boundary value separates `>` from `>=`. Every test here injects
+  the limit itself and requires it to be legal; against this binary the limit
+  faults, so the legal-side assertion fails and the verdict moves.
 
-  overtemp-fault does NOT diverge, and that is the confirmation rather than a
-  gap: it injects a value comfortably above the limit, where both
-  implementations fault identically. Every scenario in the original Phase 1
-  suite did exactly that, which is why all eight of them passed against this
-  binary before a boundary test existed.
+  Nothing that injects a value ABOVE the limit diverges, and that is the
+  confirmation rather than a gap: both implementations fault identically there.
+  Every scenario in the original Phase 1 suite did exactly that, which is why
+  all eight of them passed against this binary before a boundary test existed.
 
-  IF THIS LIST GROWS, do not add the new entry. A change here means either the
-  binary acquired a second defect or a verdict moved for a reason that is not
-  about temperature at all. Find out which before touching this file: the value
-  of the gate is precisely that it refuses to absorb a surprise.
+  The moment sweep is why there is more than one variant per value. The limit is
+  injected once with the pack idle, once mid-precharge and once with the
+  contactor closed, and each variant witnesses that condition on the bus before
+  injecting. This defect is not state-dependent, so all three move together --
+  if one of them stopped moving while the others did, that would be the finding.
 
-  This binary rests on ONE test. That is reported as a warning by the gate, not
-  as a pass. Delete overtemp-boundary, or let its injected value drift one tenth
-  of a degree off the limit, and the suite stays green while the proof that the
-  engine reads the binary disappears silently.
+  IF THE OBSERVED SET GROWS BEYOND WHAT THESE ENTRIES MATCH, do not widen an
+  entry. A change means either the binary acquired a second defect or a verdict
+  moved for a reason that is not about temperature at all. Find out which before
+  touching this file: the value of the gate is precisely that it refuses to
+  absorb a surprise.
+
+  Weakening the boundary is still the way to lose this proof silently. Let the
+  swept values drift a tenth of a degree off the limit, or delete the moment
+  dimension and then the boundary value with it, and the suite stays green while
+  the evidence that the engine reads the binary disappears.

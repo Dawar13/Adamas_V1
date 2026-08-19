@@ -770,10 +770,23 @@ class Compiler:
                 # The emulator writes the program counter of every instruction
                 # it executes to this file, in its own binary trace format,
                 # gzip-compressed as it goes. It is a passive observer outside
-                # the emulated core, so it cannot move a verdict or a latency.
-                # Measured, not assumed: scripts/check-coverage.sh runs the same
-                # test traced and untraced and requires the event logs to be
-                # byte-identical.
+                # the emulated core: by construction it cannot move a verdict
+                # or a latency, because the core executes the same instructions
+                # whether or not their addresses are being written down.
+                #
+                # BY CONSTRUCTION IS AN ARGUMENT, NOT EVIDENCE. This comment
+                # used to assert the evidence too -- "a whole suite was run
+                # traced and untraced and every event log came out
+                # byte-identical" -- and that sentence was false against the
+                # artifacts it was written from: one traced run of one test
+                # disagreed with five other runs of it about a virtual-time
+                # instant. The measurement now belongs to
+                # harness/perturbation.py, which compares two run trees byte
+                # for byte and can go red. Nothing in the engine claims it.
+                #
+                # What tracing does cost is host wall clock, because each
+                # traced machine compresses on a thread of its own -- see
+                # harness/coverage.py for the figures.
                 #
                 # The core is named by the board file, for the same reason every
                 # other peripheral is: this file must not know what a core is
