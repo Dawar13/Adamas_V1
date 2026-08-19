@@ -1,0 +1,8 @@
+{
+  "test": "undervolt-sweep-60001",
+  "outcome": "pass",
+  "exit_code": 0,
+  "verdict": "PASS",
+  "latency_us": null,
+  "out_dir": "/mnt/c/Users/djtde/Downloads/Emulator/harness/out/shard1/undervolt-sweep-60001"
+}

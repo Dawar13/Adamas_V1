@@ -87,6 +87,7 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import fnmatch
+import hashlib
 import json
 import os
 import subprocess
@@ -225,6 +226,41 @@ def select(found: list, pattern) -> list:
     return found
 
 
+def suite_fingerprint(every) -> str:
+    """A short digest of the suite this run was drawn from.
+
+    Every shard records it, and `merge` refuses to combine shards whose
+    fingerprints differ. Without it, two shards expanded from different
+    scenarios -- or from the same scenarios either side of an edit -- would
+    merge into a run record that never existed, and its tally would look
+    exactly as trustworthy as a real one.
+    """
+    names = chr(10).join(sorted(path.stem for path in every))
+    return hashlib.sha256(names.encode("utf-8")).hexdigest()[:16]
+
+
+def shard_of(tests, shard: int, of: int):
+    """Take one shard of the tests, round-robin over the sorted order.
+
+    ROUND-ROBIN, NOT CONTIGUOUS BLOCKS. Test names group by scenario, and the
+    slow scenarios cluster under one prefix -- every peer-silencing test begins
+    the same way. Contiguous blocks would drop all of them into one shard, which
+    would then take several times longer than its neighbours and set the wall
+    clock for the whole run. Dealing them out in turn mixes long with short.
+
+    Deterministic: the same test lands in the same shard for a given `of`, so a
+    failure can be reproduced by running that shard alone.
+    """
+    if of < 1:
+        raise SuiteError("--of must be at least 1")
+    if not 1 <= shard <= of:
+        raise SuiteError(
+            "--shard %d is outside 1..%d. Shards are numbered from one, because "
+            "'shard 0 of 20' reads like a total rather than an index."
+            % (shard, of))
+    return [test for index, test in enumerate(tests) if index % of == shard - 1]
+
+
 def run_one(python, test: Path, out_root: Path, timeout_s: int,
             topology) -> dict:
     """Run one test in its own directory, and never lose it from the tally."""
@@ -233,9 +269,21 @@ def run_one(python, test: Path, out_root: Path, timeout_s: int,
     if topology:
         command += ["--topology", topology]
 
+    # Repo-relative, not absolute.
+    #
+    # This runner is invoked from either side of a filesystem bridge -- the
+    # emulator lives under Linux, the tooling is often driven from Windows -- and
+    # an absolute path written on one side does not resolve on the other. A
+    # merge step reading these records then finds no provenance and refuses a
+    # run that was perfectly good, which is a real failure caused purely by
+    # writing down a path in a form that only meant something locally.
+    try:
+        recorded_dir = out_dir.resolve().relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        recorded_dir = out_dir.as_posix()
     record = {
         "test": test.stem, "outcome": None, "exit_code": None,
-        "verdict": None, "latency_us": None, "out_dir": str(out_dir),
+        "verdict": None, "latency_us": None, "out_dir": recorded_dir,
     }
     try:
         finished = subprocess.run(
@@ -308,6 +356,10 @@ def main(argv=None) -> int:
                         help="override the topology file, for a divergence run")
     parser.add_argument("--no-expand", action="store_true",
                         help="run what is already generated")
+    parser.add_argument("--shard", type=int, default=None,
+                        help="run only this shard, numbered from 1")
+    parser.add_argument("--of", type=int, default=None,
+                        help="how many shards the suite is split into")
     parser.add_argument("--json", default=None, help="write the tally here")
     parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args(argv)
@@ -326,12 +378,23 @@ def main(argv=None) -> int:
             expand(python, tests_dir, say)
         every = declared(tests_dir)
         tests = select(every, args.filter)
+        if (args.shard is None) != (args.of is None):
+            raise SuiteError(
+                "--shard and --of go together. One without the other would run "
+                "a slice while reporting it as a whole suite.")
+        if args.shard is not None:
+            tests = shard_of(tests, args.shard, args.of)
+            if not tests:
+                raise SuiteError(
+                    "shard %d of %d is empty: there are only %d tests to "
+                    "divide. An empty shard exiting 0 would read as a shard "
+                    "that passed." % (args.shard, args.of, len(every)))
     except SuiteError as exc:
         print("\nERROR: %s\n" % exc, file=sys.stderr)
         return 2
 
     out_root.mkdir(parents=True, exist_ok=True)
-    complete = len(tests) == len(every)
+    complete = len(tests) == len(every) and args.shard is None
     say("\n  running %d of the %d declared tests on %d workers ...\n"
         % (len(tests), len(every), workers))
 
@@ -384,6 +447,9 @@ def main(argv=None) -> int:
         "selected": len(tests),
         "complete": complete,
         "filter": args.filter,
+        "shard": args.shard,
+        "of": args.of,
+        "suite_fingerprint": suite_fingerprint(every),
         "counts": counts,
         "workers": workers,
         "duration_s": round(elapsed, 3),

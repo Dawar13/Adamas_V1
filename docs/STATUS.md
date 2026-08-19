@@ -453,8 +453,24 @@ runs of one scenario produced byte-identical event logs and traces.
 - [x] `grep -r` over `harness/` finds no project data
 - [x] This file records what was **observed**
 
-Two criteria are open, and are recorded as open rather than rounded up. Phase 3 has not been
-started.
+Both open criteria were closed in Phase 3 §1–§2:
+
+- **Determinism at N=1 vs N=4** — two shards, 18 tests, identical verdicts, latencies and
+  event logs byte-for-byte.
+- **The full suite completes** — as four shards, merged into one run record:
+
+```
+shard 1  23 of 23  6m 55s        merged:  89 of 89 passed across 4 shards
+shard 2  22 of 22  8m 02s        firmware bms 927fe278 · vcu 0270a64b · charger be522fd0
+shard 3  22 of 22  6m 38s        stored as project/runs/2026-08-19-1500
+shard 4  22 of 22  5m 55s
+```
+
+Three attempts at the suite as one job were killed by an environment limit on long
+processes. Sharding removes that entirely and is the architecture Phase 4 needs for CI
+anyway, so it was not a workaround.
+
+**89 tests, not 118, remains the honest count.**
 
 ## Phase 3 — The UI
 

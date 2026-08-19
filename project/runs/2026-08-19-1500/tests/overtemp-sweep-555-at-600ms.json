@@ -1,0 +1,8 @@
+{
+  "test": "overtemp-sweep-555-at-600ms",
+  "outcome": "pass",
+  "exit_code": 0,
+  "verdict": "PASS",
+  "latency_us": 400,
+  "out_dir": "/mnt/c/Users/djtde/Downloads/Emulator/harness/out/shard4/overtemp-sweep-555-at-600ms"
+}

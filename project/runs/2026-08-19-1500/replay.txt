@@ -1,0 +1,2 @@
+py -3 harness/run_suite.py --no-expand --workers 4 --shard N --of 4  (N=1..4)
+py -3 harness/merge.py --shards harness/out/shard-*.json --id 2026-08-19-1500

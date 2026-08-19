@@ -1,0 +1,8 @@
+{
+  "test": "overvolt-sweep-84001-at-200ms",
+  "outcome": "pass",
+  "exit_code": 0,
+  "verdict": "PASS",
+  "latency_us": 400,
+  "out_dir": "/mnt/c/Users/djtde/Downloads/Emulator/harness/out/shard3/overvolt-sweep-84001-at-200ms"
+}

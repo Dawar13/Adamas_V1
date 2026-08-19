@@ -1,0 +1,8 @@
+{
+  "test": "heartbeat-sweep-400ms",
+  "outcome": "pass",
+  "exit_code": 0,
+  "verdict": "PASS",
+  "latency_us": 200400,
+  "out_dir": "/mnt/c/Users/djtde/Downloads/Emulator/harness/out/shard2/heartbeat-sweep-400ms"
+}
