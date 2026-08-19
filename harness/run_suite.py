@@ -112,6 +112,10 @@ ENGINE_FAIL = 1
 ENGINE_UNUSABLE = 2
 ENGINE_REFUSED = 3
 ENGINE_DRY_RUN = 4
+#: The engine raised an exception. It says nothing about the firmware, and must
+#: never be countable as a verdict -- see EXIT_CRASHED in run_scenarios.py for
+#: what it cost to learn that Python gives an unhandled exception FAIL's code.
+ENGINE_CRASHED = 5
 
 OUTCOME_FOR_CODE = {
     ENGINE_PASS: "pass",
@@ -119,6 +123,7 @@ OUTCOME_FOR_CODE = {
     ENGINE_UNUSABLE: "unusable",
     ENGINE_REFUSED: "refused",
     ENGINE_DRY_RUN: "dry-run",
+    ENGINE_CRASHED: "crashed",
 }
 
 #: The stored verdict that must accompany each exit code that means "a run
@@ -291,6 +296,31 @@ def run_one(python, test: Path, out_root: Path, timeout_s: int,
         "test": test.stem, "outcome": None, "exit_code": None,
         "verdict": None, "latency_us": None, "out_dir": recorded_dir,
     }
+    # CLEAR THE PREVIOUS ANSWER BEFORE LAUNCHING ANYTHING.
+    #
+    # The engine clears these too, but it can only do so once it is running --
+    # and an engine that dies before that point leaves the last run's verdict
+    # sitting in a directory keyed on the test name. This runner is the only
+    # party that knows the directory before the process starts, so it is the
+    # only place the guarantee can actually be made.
+    #
+    # OBSERVED. A crash exiting 1 left a previous run's results.json in place;
+    # the cross-check below read it and reported "inconsistent", and its stale
+    # provenance named a DIFFERENT FIRMWARE, which made the merge refuse an
+    # entire sharded run of 89 tests. Two guards caught it, from two unrelated
+    # directions, and neither of them was this one.
+    for previous in (out_dir / "results.json", out_dir / "replay.txt"):
+        try:
+            previous.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            record["outcome"] = "unusable"
+            record["detail"] = (
+                "%s could not be removed before the run, so a previous "
+                "answer could have been read as this one: %s" % (previous, exc))
+            return record
+
     try:
         finished = subprocess.run(
             command, cwd=str(REPO_ROOT), capture_output=True, text=True,
@@ -309,8 +339,17 @@ def run_one(python, test: Path, out_root: Path, timeout_s: int,
 
     record["exit_code"] = finished.returncode
     record["outcome"] = OUTCOME_FOR_CODE.get(finished.returncode, "crashed")
-    if finished.returncode not in OUTCOME_FOR_CODE:
-        record["detail"] = (finished.stderr or finished.stdout or "").strip()[-400:]
+
+    # KEEP THE ENGINE'S OWN WORDS FOR ANYTHING THAT IS NOT A CLEAN PASS.
+    #
+    # This used to keep stderr only for exit codes the map did not know. Exit 1
+    # IS in the map, so when a crash borrowed FAIL's code the traceback that
+    # would have explained it was thrown away -- and the investigation had to
+    # start from file timestamps instead.
+    if finished.returncode != ENGINE_PASS:
+        said = (finished.stderr or "").strip() or (finished.stdout or "").strip()
+        if said:
+            record["engine_said"] = said[-1200:]
 
     # The verdict is read from the engine's own file and then CHECKED against
     # the exit code. Reading both and reporting one is not a cross-check.

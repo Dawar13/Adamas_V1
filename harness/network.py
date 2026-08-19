@@ -855,10 +855,11 @@ def as_document(net) -> dict:
 
     A drawing tool that parsed the topology itself would be a second reader of
     the same file, free to disagree with the first. This project has already
-    paid for exactly that: YAML 1.1 turns OFF and ON into booleans, which is
-    why the engine reads through a strict loader. A canvas that quietly
-    disagreed about one field would draw a system that is not the one under
-    test, and every element on it would still look right.
+    paid for exactly that: YAML 1.1 turns two of this contract's enum
+    spellings into booleans, which is why the engine reads through a strict
+    loader of its own. A canvas that quietly disagreed about one field would
+    draw a system that is not the one under test, and every element on it would
+    still look right.
 
     So there is one parser, and this is its output.
     """

@@ -136,6 +136,18 @@ EXIT_REFUSED = 3
 #: -- the contract scripts/run.sh advertises -- could not otherwise distinguish
 #: "the firmware passed" from "nothing ran".
 EXIT_DRY_RUN = 4
+#: An unexpected exception. It must not share FAIL's code.
+#:
+#: OBSERVED, AND IT COST AN ENTIRE 89-TEST SUITE. An unhandled exception makes Python
+#: exit 1, which is exactly EXIT_FAIL -- so a crash and "the firmware did not do
+#: what the test asserted" arrived at the caller as the same answer. Worse, the
+#: crash happened before this module clears the run directory, so a PREVIOUS
+#: run's results.json was still sitting there, and the runner read that stale
+#: file as this run's verdict. It was caught only because the stale answer said
+#: PASS while the exit code said FAIL; a stale FAIL would have been counted as a
+#: legitimate test failure, and the stale provenance made a merge refuse a whole
+#: sharded run as "different firmware".
+EXIT_CRASHED = 5
 
 
 class CompileError(Exception):
@@ -2284,5 +2296,30 @@ def main(argv=None):
     return EXIT_PASS if verdict == "PASS" else EXIT_FAIL
 
 
+def _guarded_main() -> int:
+    """main(), with no path out of this module that looks like a verdict.
+
+    Every exit code this engine returns is a STATEMENT ABOUT THE FIRMWARE or an
+    explicit refusal. An unhandled exception is neither, and must not be able to
+    borrow one -- least of all FAIL's, which Python hands out for free.
+    """
+    try:
+        return main()
+    except SystemExit:
+        raise
+    except KeyboardInterrupt:
+        print("\ninterrupted; no verdict was produced\n", file=sys.stderr)
+        return EXIT_CRASHED
+    except BaseException:
+        import traceback
+        # The traceback goes to stderr, always, because it is the only thing
+        # that explains an exit like this and it has been thrown away before.
+        traceback.print_exc()
+        print("\nCRASHED: the engine raised an exception, so it produced no "
+              "verdict.\nThis is not a test failure. Nothing about the "
+              "firmware was determined.\n", file=sys.stderr)
+        return EXIT_CRASHED
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(_guarded_main())
