@@ -1,0 +1,176 @@
+/*
+ * Bench design language -- Phase 3 section 15.
+ *
+ * A bench instrument, not a dashboard.
+ *
+ * ---------------------------------------------------------------------------
+ * GREEN, AMBER AND RED ARE RESERVED
+ * ---------------------------------------------------------------------------
+ * They mean pass, injection/preview/draft, and fault. Nothing else may use
+ * those hues -- not a heading, not a link, not a hover state. On a screen whose
+ * entire job is to report a verdict, a green used for decoration is a false
+ * verdict in the corner of the eye.
+ *
+ * That is why --ink-action exists as a separate token: interaction needs a
+ * colour and must not borrow one that already means something.
+ *
+ * ---------------------------------------------------------------------------
+ * NO WEBFONTS
+ * ---------------------------------------------------------------------------
+ * The studio must work air-gapped with no login (PROJECT.md section 4). A font
+ * fetched from a CDN is a network dependency in the one product whose promise
+ * is that it runs on your own machine with nothing phoning home -- and when it
+ * fails to load, every number silently loses its tabular alignment.
+ *
+ * System stacks only, with tabular figures asserted explicitly.
+ */
+
+:root {
+  /* Surface: hairline borders, no shadows, no gradients. */
+  --bg: #fbfbfa;
+  --bg-raised: #ffffff;
+  --bg-sunken: #f4f4f2;
+  --rule: #e0e0dc;
+  --rule-strong: #c8c8c2;
+
+  --ink: #17171a;
+  --ink-muted: #5f5f66;
+  --ink-faint: #8b8b93;
+
+  /* Interaction. Deliberately not green, amber or red. */
+  --ink-action: #2b4acb;
+  --bg-action-soft: #eef1fd;
+
+  /* RESERVED. Verdict semantics only. */
+  --pass: #1c7a4a;
+  --pass-soft: #e8f4ed;
+  --inject: #9a6400;
+  --inject-soft: #fdf3e0;
+  --fault: #b4261f;
+  --fault-soft: #fbeceb;
+
+  /* Type */
+  --font-ui: ui-sans-serif, "Segoe UI Variable Text", "Segoe UI", Inter,
+    system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", "Cascadia Code", Consolas,
+    "SF Mono", "Liberation Mono", Menlo, monospace;
+
+  --step--1: 0.8125rem;
+  --step-0: 0.9375rem;
+  --step-1: 1.125rem;
+  --step-2: 1.5rem;
+  --step-3: 2.25rem;
+  --step-4: 3.5rem;
+
+  /* Density follows altitude: the hero is spacious, the tables are dense. */
+  --gap-hero: 2.5rem;
+  --gap: 1rem;
+  --gap-tight: 0.5rem;
+
+  --radius: 3px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #131315;
+    --bg-raised: #1a1a1d;
+    --bg-sunken: #0e0e10;
+    --rule: #2c2c31;
+    --rule-strong: #43434a;
+
+    --ink: #ececee;
+    --ink-muted: #a2a2ab;
+    --ink-faint: #74747d;
+
+    --ink-action: #8ea3ff;
+    --bg-action-soft: #1b2038;
+
+    --pass: #4bbd83;
+    --pass-soft: #12251b;
+    --inject: #d7a13f;
+    --inject-soft: #2a2010;
+    --fault: #f2695f;
+    --fault-soft: #2b1413;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  color-scheme: light dark;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--step-0);
+  line-height: 1.5;
+  /*
+   * TABULAR FIGURES WITHOUT EXCEPTION (section 15). Set on the body so a
+   * number can never lose alignment by being written in a component that
+   * forgot -- latencies that do not align down a column cannot be scanned,
+   * and scanning them is the entire job of this screen.
+   */
+  font-variant-numeric: tabular-nums;
+  -webkit-font-feature-settings: "tnum" 1;
+  font-feature-settings: "tnum" 1;
+}
+
+/* Every number, identifier, address and frame. */
+.mono,
+code,
+kbd,
+samp,
+pre {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+h1,
+h2,
+h3 {
+  font-weight: 600;
+  letter-spacing: -0.011em;
+  margin: 0;
+}
+
+a {
+  color: var(--ink-action);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+button {
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+hr {
+  border: 0;
+  border-top: 1px solid var(--rule);
+  margin: 0;
+}
+
+/* No looping animation anywhere. Transitions on interaction only. */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

@@ -1,0 +1,49 @@
+---
+import Base from "../layouts/Base.astro";
+import { listRuns } from "../../server/store/loaders/runs.mjs";
+
+// Section 3.2 proper -- open versus replay, download report -- is the next
+// step. This is the list needed to reach a run at all, and it obeys the one
+// rule that matters here: a run missing provenance does not appear as a run.
+const runs = await listRuns();
+---
+<Base title="Runs — Bench">
+  <h1 class="page-head">Stored runs</h1>
+  {runs.length === 0 && (
+    <section class="empty">
+      <h3>No runs are stored yet.</h3>
+      <p>
+        A run appears here once the suite has been executed and merged. Nothing
+        on this screen is sample data.
+      </p>
+      <p class="empty-how">
+        <code>bash scripts/run-suite-sharded.sh</code>
+      </p>
+    </section>
+  )}
+  <ul class="runlist">
+    {runs.map((run) => (
+      <li class={run.readable ? "" : "is-refused"}>
+        {run.readable ? (
+          <>
+            <a class="runlist-id mono" href={`/runs/${run.id}`}>{run.id}</a>
+            <span class="runlist-tally mono">
+              {run.passed} / {run.tests}
+            </span>
+            <span class={run.passed === run.tests ? "outcome is-pass" : "outcome is-fail"}>
+              {run.passed === run.tests ? "pass" : "fail"}
+            </span>
+            <span class="runlist-fw mono">
+              {Object.entries(run.firmware).map(([n, d]) => `${n} ${d.slice(0, 8)}`).join("  ")}
+            </span>
+          </>
+        ) : (
+          <>
+            <span class="runlist-id mono">{run.id}</span>
+            <span class="runlist-refused">not shown as a run — {run.reason}</span>
+          </>
+        )}
+      </li>
+    ))}
+  </ul>
+</Base>

@@ -1,0 +1,47 @@
+---
+import Base from "../../layouts/Base.astro";
+import ResultsView from "../../app/views/ResultsView.jsx";
+import { chooseFocus } from "../../app/lib/focus.mjs";
+import { openRun, openTest, RunUnreadable } from "../../../server/store/loaders/runs.mjs";
+
+// Loaded here rather than fetched after hydration. "Open loads the stored
+// result. Instant." is a promise about this screen, and a client-side waterfall
+// -- fetch the run, then fetch a test, then paint -- is two round trips of
+// nothing before the verdict appears.
+const { id } = Astro.params;
+
+let run = null;
+let focus = null;
+let focusRecord = null;
+let refused = null;
+
+try {
+  run = await openRun(id);
+  focus = chooseFocus(run.tests);
+  if (focus) focusRecord = await openTest(id, focus.test);
+} catch (err) {
+  if (err instanceof RunUnreadable) refused = err.message;
+  else throw err;
+}
+---
+<Base title={`Run ${id} — Bench`}>
+  {refused ? (
+    <section class="empty is-refused">
+      <h3>This run is stored but is not shown as a result.</h3>
+      <p>{refused}</p>
+      <p class="empty-how">
+        A result that cannot be traced to the binaries and tools that produced
+        it is not evidence, so it is refused here rather than rendered with the
+        missing parts left blank.
+      </p>
+    </section>
+  ) : (
+    <ResultsView
+      runId={id}
+      run={run}
+      initialFocus={focus}
+      initialRecord={focusRecord}
+      client:load
+    />
+  )}
+</Base>

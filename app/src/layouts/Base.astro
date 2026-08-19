@@ -1,0 +1,22 @@
+---
+import "../app/styles/tokens.css";
+import "../app/styles/results.css";
+const { title } = Astro.props;
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/">Bench</a>
+      <span class="brand-note">software-in-the-loop firmware validation</span>
+    </header>
+    <main class="page">
+      <slot />
+    </main>
+  </body>
+</html>

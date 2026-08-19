@@ -1,0 +1,609 @@
+/*
+ * The Results view.
+ *
+ * Density follows altitude (Phase 3 section 15): the verdict hero is spacious
+ * and confident, the tables underneath are instrument-panel dense. Hairline
+ * borders, no shadows, no gradients, no looping animation.
+ */
+
+.topbar {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding: 0.75rem 1.5rem;
+  border-bottom: 1px solid var(--rule);
+  background: var(--bg-raised);
+}
+.brand {
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  text-decoration: none;
+}
+.brand-note {
+  color: var(--ink-faint);
+  font-size: var(--step--1);
+}
+
+.page {
+  max-width: 68rem;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
+.page-head {
+  font-size: var(--step-2);
+  margin-bottom: var(--gap);
+}
+.muted {
+  color: var(--ink-muted);
+}
+.section-head {
+  font-size: var(--step--1);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-faint);
+  margin: var(--gap-hero) 0 var(--gap-tight);
+}
+
+/* ------------------------------------------------------------------ hero */
+
+.hero {
+  padding: var(--gap-hero) 0 2rem;
+  text-align: center;
+}
+.hero-verdict {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  line-height: 1;
+}
+.hero-verdict.is-pass {
+  color: var(--pass);
+}
+.hero-verdict.is-fault {
+  color: var(--fault);
+}
+.hero-glyph {
+  font-size: var(--step-3);
+}
+.hero-count {
+  font-size: var(--step-4);
+  font-weight: 600;
+  letter-spacing: -0.03em;
+}
+.hero-word {
+  font-size: var(--step-2);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+.hero-other {
+  margin: 0.75rem 0 0;
+  color: var(--ink-muted);
+  font-size: var(--step--1);
+}
+.hero-other-item + .hero-other-item::before {
+  content: "·";
+  margin: 0 0.5rem;
+  color: var(--ink-faint);
+}
+.hero-chips {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 1.25rem;
+}
+.hero-tier-note {
+  max-width: 44rem;
+  margin: 0.75rem auto 0;
+  color: var(--ink-muted);
+  font-size: var(--step--1);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.15rem 0.5rem;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  font-size: var(--step--1);
+  color: var(--ink-muted);
+  background: var(--bg-raised);
+}
+/*
+ * The tier chip carries a claim, so its colour carries one too. `verified` is
+ * the only tier that may wear the pass colour; `modelled` is shown and is not
+ * authoritative, which is amber's job -- the same hue as an injection, because
+ * both mean "this is provisional".
+ */
+.chip-tier.is-verified {
+  color: var(--pass);
+  border-color: var(--pass);
+  background: var(--pass-soft);
+}
+.chip-tier.is-modelled {
+  color: var(--inject);
+  border-color: var(--inject);
+  background: var(--inject-soft);
+}
+.chip-tier.is-declared,
+.chip-tier.is-unknown {
+  color: var(--ink-muted);
+  border-style: dashed;
+}
+.chip-warn {
+  color: var(--inject);
+  border-color: var(--inject);
+  background: var(--inject-soft);
+}
+
+/* -------------------------------------------------------------- timeline */
+
+.focus {
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  padding: 1.5rem;
+}
+.focus-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--gap);
+  margin-bottom: 1.5rem;
+}
+.focus-head h2 {
+  font-size: var(--step-1);
+}
+.focus-why {
+  color: var(--ink-faint);
+  font-size: var(--step--1);
+}
+.focus-desc {
+  margin: 1.25rem 0 0;
+  color: var(--ink-muted);
+  font-size: var(--step--1);
+  max-width: 52rem;
+}
+
+.tl {
+  padding: 0 0 0.5rem;
+}
+.tl-track {
+  position: relative;
+  height: 7.5rem;
+  margin: 0 3.5rem;
+}
+.tl-rule {
+  position: absolute;
+  top: 0.5rem;
+  left: 0;
+  right: 0;
+  border-top: 1px solid var(--rule-strong);
+}
+.tl-mark {
+  position: absolute;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  transform: translateX(-1px);
+  white-space: nowrap;
+}
+.tl-tick {
+  width: 1px;
+  height: 1rem;
+  background: currentColor;
+}
+.tl-time {
+  font-size: var(--step--1);
+  font-weight: 600;
+  margin-top: 0.25rem;
+}
+.tl-label {
+  font-size: 0.6875rem;
+  letter-spacing: 0.09em;
+  color: var(--ink-faint);
+}
+.tl-detail {
+  font-size: var(--step--1);
+  color: var(--ink-muted);
+  margin-top: 0.15rem;
+}
+.tl-absent {
+  font-style: italic;
+}
+/* Amber is injection. Green is the reaction that met its deadline. */
+.tl-inject {
+  color: var(--inject);
+}
+.tl-react {
+  color: var(--pass);
+}
+.tl-react.is-late {
+  color: var(--fault);
+}
+.tl-deadline {
+  color: var(--ink-muted);
+}
+/* The last two markers would run off the right edge, so they hang leftwards. */
+.tl-deadline,
+.tl-mark[style*="100.000%"] {
+  align-items: flex-end;
+  transform: translateX(1px);
+  text-align: right;
+}
+
+.tl-verdict {
+  margin: 0.5rem 0 0;
+  text-align: center;
+  font-size: var(--step-1);
+}
+.tl-verdict.is-pass {
+  color: var(--pass);
+}
+.tl-verdict.is-fault,
+.is-fault {
+  color: var(--fault);
+}
+.tl-verdict.is-absent {
+  color: var(--ink-muted);
+}
+.tl-note,
+.caveat {
+  margin: 0.75rem 0 0;
+  color: var(--ink-muted);
+  font-size: var(--step--1);
+}
+.tl-empty {
+  color: var(--ink-muted);
+  padding: 1rem 0;
+}
+.tl-why {
+  font-size: var(--step--1);
+  color: var(--ink-faint);
+}
+
+/* ---------------------------------------------------------------- limits */
+
+.limits {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 2.5rem;
+  margin: var(--gap-hero) 0 0;
+  padding: 1.25rem 1.5rem;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+}
+.limits-head {
+  font-size: var(--step--1);
+  letter-spacing: 0.07em;
+  color: var(--ink-faint);
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--rule);
+}
+.limits ul {
+  margin: 0.75rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+.limits li {
+  padding: 0.15rem 0;
+  font-size: var(--step--1);
+}
+.limits-col.is-not li {
+  color: var(--ink-muted);
+}
+.limits-foot {
+  grid-column: 1 / -1;
+  margin: 1rem 0 0;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--rule);
+  font-size: var(--step--1);
+  color: var(--ink-muted);
+}
+
+/* ------------------------------------------------------------------ tabs */
+
+.tabs {
+  display: flex;
+  gap: 0.25rem;
+  margin: var(--gap-hero) 0 0;
+  border-bottom: 1px solid var(--rule);
+}
+.tab {
+  appearance: none;
+  background: none;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: var(--radius) var(--radius) 0 0;
+  padding: 0.45rem 0.9rem;
+  color: var(--ink-muted);
+  cursor: pointer;
+  margin-bottom: -1px;
+}
+.tab:hover {
+  color: var(--ink);
+}
+.tab.is-active {
+  color: var(--ink);
+  background: var(--bg-raised);
+  border-color: var(--rule);
+  font-weight: 600;
+}
+.tab-body {
+  padding-top: var(--gap);
+}
+
+/* --------------------------------------------------------------- tables */
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--step--1);
+}
+th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--ink-faint);
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+th,
+td {
+  padding: 0.3rem 0.6rem;
+  border-bottom: 1px solid var(--rule);
+}
+.num {
+  text-align: right;
+}
+tr.is-active td {
+  background: var(--bg-action-soft);
+}
+tr.is-fault td {
+  background: var(--fault-soft);
+}
+.frames tr.is-dut td {
+  font-weight: 600;
+}
+.link {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--ink-action);
+  cursor: pointer;
+  text-align: left;
+}
+.link:hover {
+  text-decoration: underline;
+}
+.outcome {
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.outcome.is-pass {
+  color: var(--pass);
+}
+.outcome.is-fail,
+.outcome.is-crashed,
+.outcome.is-inconsistent {
+  color: var(--fault);
+}
+.outcome.is-refused,
+.outcome.is-unusable,
+.outcome.is-timeout {
+  color: var(--ink-muted);
+}
+.digest {
+  word-break: break-all;
+  font-size: 0.75rem;
+}
+.kv th {
+  width: 10rem;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: var(--step--1);
+  color: var(--ink-muted);
+  vertical-align: top;
+}
+.replay {
+  margin: 0;
+  padding: 0.75rem 1rem;
+  background: var(--bg-sunken);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  overflow-x: auto;
+  font-size: 0.75rem;
+  white-space: pre-wrap;
+}
+
+/* -------------------------------------------------------------- failures */
+
+.failures {
+  margin-bottom: var(--gap-hero);
+}
+.failure {
+  border: 1px solid var(--fault);
+  border-left-width: 3px;
+  border-radius: var(--radius);
+  background: var(--fault-soft);
+  padding: 1rem 1.25rem;
+  margin-bottom: var(--gap);
+}
+.failure-title {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: var(--step-1);
+  color: var(--fault);
+}
+.failure-sub {
+  margin: 0.25rem 0 0.75rem;
+  color: var(--ink-muted);
+  font-size: var(--step--1);
+}
+.failure-body {
+  display: grid;
+  grid-template-columns: 6rem 1fr;
+  gap: 0.15rem 1rem;
+  margin: 0 0 0.75rem;
+  font-size: var(--step--1);
+}
+.failure-body dt {
+  color: var(--ink-faint);
+  text-transform: uppercase;
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  padding-top: 0.15rem;
+}
+.failure-body dd {
+  margin: 0;
+}
+.failure-line {
+  font-size: var(--step--1);
+}
+.failure-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0.75rem 0 0;
+  flex-wrap: wrap;
+}
+
+.btn {
+  display: inline-block;
+  padding: 0.25rem 0.7rem;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--ink-action);
+  text-decoration: none;
+  font-size: var(--step--1);
+}
+.btn:hover {
+  border-color: var(--ink-action);
+}
+/*
+ * A control for something this phase has not built yet reads as unavailable
+ * and says so. A button that looks live and does nothing is the placeholder
+ * rule broken in the most expensive place -- in front of someone evaluating
+ * whether the tool tells the truth.
+ */
+.btn.is-declared {
+  color: var(--ink-faint);
+  border-style: dashed;
+  cursor: not-allowed;
+}
+
+/* ---------------------------------------------------------------- frames */
+
+.frames-lead {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  color: var(--ink-muted);
+  font-size: var(--step--1);
+}
+
+/* -------------------------------------------------------------- coverage */
+
+.cov-node {
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 1rem 1.25rem;
+  margin-bottom: var(--gap);
+  background: var(--bg-raised);
+}
+.cov-node h3 {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: var(--step-0);
+}
+.cov-figures {
+  display: flex;
+  gap: 2.5rem;
+  margin: 0.75rem 0 0;
+}
+.cov-figures dt {
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.cov-figures dd {
+  margin: 0.1rem 0 0;
+  font-size: var(--step-1);
+}
+.cov-list {
+  margin: 0.75rem 0 0;
+  font-size: 0.75rem;
+  color: var(--ink-muted);
+  word-break: break-word;
+}
+
+/* ----------------------------------------------------------- empty state */
+
+.empty {
+  border: 1px dashed var(--rule-strong);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+  max-width: 46rem;
+  color: var(--ink-muted);
+}
+.empty h3 {
+  color: var(--ink);
+  font-size: var(--step-0);
+  margin-bottom: 0.5rem;
+}
+.empty.is-refused {
+  border-color: var(--fault);
+  border-style: solid;
+}
+.empty-how {
+  font-size: var(--step--1);
+}
+.empty-how code {
+  background: var(--bg-sunken);
+  padding: 0.15rem 0.4rem;
+  border-radius: var(--radius);
+}
+
+/* -------------------------------------------------------------- run list */
+
+.runlist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--rule);
+}
+.runlist li {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  padding: 0.6rem 0.25rem;
+  border-bottom: 1px solid var(--rule);
+}
+.runlist-id {
+  font-weight: 600;
+}
+.runlist-tally {
+  color: var(--ink-muted);
+}
+.runlist-fw {
+  margin-left: auto;
+  color: var(--ink-faint);
+  font-size: 0.75rem;
+}
+.runlist li.is-refused {
+  color: var(--ink-faint);
+}
+.runlist-refused {
+  font-size: var(--step--1);
+}
