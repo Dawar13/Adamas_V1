@@ -607,3 +607,76 @@ tr.is-fault td {
 .runlist-refused {
   font-size: var(--step--1);
 }
+
+/* -------------------------------------------------------- run history */
+
+.run {
+  display: block;
+  padding: 0.9rem 0.25rem;
+}
+.run-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.run-id {
+  font-weight: 600;
+  font-size: var(--step-0);
+}
+.run-tally,
+.run-other {
+  color: var(--ink-muted);
+  font-size: var(--step--1);
+}
+.run-meta {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-top: 0.2rem;
+  color: var(--ink-faint);
+  font-size: 0.75rem;
+}
+.run-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+  flex-wrap: wrap;
+}
+.replay-detail summary {
+  cursor: pointer;
+  list-style: none;
+}
+.replay-detail summary::-webkit-details-marker {
+  display: none;
+}
+.replay-body {
+  margin-top: 0.5rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+  max-width: 44rem;
+  font-size: var(--step--1);
+  color: var(--ink-muted);
+}
+.replay-body p {
+  margin: 0 0 0.6rem;
+}
+.run.is-refused {
+  display: flex;
+  gap: 0.75rem;
+  align-items: baseline;
+  color: var(--ink-faint);
+}
+.run-reason {
+  font-size: var(--step--1);
+}
+.refused-block {
+  margin-top: var(--gap-hero);
+}
+.refused-block .muted {
+  max-width: 46rem;
+  font-size: var(--step--1);
+}

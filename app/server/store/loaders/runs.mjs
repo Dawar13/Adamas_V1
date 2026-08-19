@@ -118,6 +118,14 @@ export async function listRuns() {
       const summary = await readJson(path.join(dir, "summary.json"));
       const provenance = requireProvenance(await readJson(path.join(dir, "provenance.json")));
       const info = await stat(dir);
+      // The reproduction note, so history can show what a replay actually is
+      // rather than offering a button whose meaning is left to the reader.
+      let replay = null;
+      try {
+        replay = await readFile(path.join(dir, "replay.txt"), "utf8");
+      } catch {
+        replay = null;
+      }
       runs.push({
         id,
         readable: true,
@@ -131,6 +139,7 @@ export async function listRuns() {
         firmware: provenance.firmware,
         tool_versions: provenance.tool_versions,
         stored_at: info.mtime.toISOString(),
+        replay,
       });
     } catch (err) {
       if (err instanceof RunUnreadable) {

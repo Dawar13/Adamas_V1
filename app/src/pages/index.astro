@@ -2,48 +2,128 @@
 import Base from "../layouts/Base.astro";
 import { listRuns } from "../../server/store/loaders/runs.mjs";
 
-// Section 3.2 proper -- open versus replay, download report -- is the next
-// step. This is the list needed to reach a run at all, and it obeys the one
-// rule that matters here: a run missing provenance does not appear as a run.
+/*
+ * Run history -- Phase 3 section 6.
+ *
+ * TWO OPERATIONS, NEVER CONFLATED.
+ *
+ *   Open    loads what was stored. Instant. Nothing executes.
+ *   Replay  re-runs it from scratch. Full duration. Byte-identical results.
+ *
+ * Replay is the demo weapon -- "watch, I'll run it from scratch", same
+ * microseconds, impossible on hardware. Which is exactly why a button labelled
+ * replay must never quietly show a stored result instead. If those two were
+ * ever confused, the strongest claim this product makes would be the one it
+ * could not back up.
+ *
+ * Running from the interface is section 3.7 and is not built. So replay here
+ * hands over the command that reproduces the run, rather than a button that
+ * appears to execute and does not.
+ *
+ * A run missing provenance does not appear as a run. The engine enforces this
+ * at the schema and the loader enforces it again on read; this screen must not
+ * work around either.
+ */
 const runs = await listRuns();
+
+const readable = runs.filter((run) => run.readable);
+const refused = runs.filter((run) => !run.readable);
+
+function tally(run) {
+  const other = Object.entries(run.counts || {})
+    .filter(([outcome]) => outcome !== "pass")
+    .sort();
+  return other;
+}
 ---
+
 <Base title="Runs — Bench">
   <h1 class="page-head">Stored runs</h1>
+
   {runs.length === 0 && (
     <section class="empty">
       <h3>No runs are stored yet.</h3>
       <p>
         A run appears here once the suite has been executed and merged. Nothing
-        on this screen is sample data.
+        on this screen is sample data — an empty history means nothing has run.
       </p>
       <p class="empty-how">
         <code>bash scripts/run-suite-sharded.sh</code>
       </p>
     </section>
   )}
+
   <ul class="runlist">
-    {runs.map((run) => (
-      <li class={run.readable ? "" : "is-refused"}>
-        {run.readable ? (
-          <>
-            <a class="runlist-id mono" href={`/runs/${run.id}`}>{run.id}</a>
-            <span class="runlist-tally mono">
-              {run.passed} / {run.tests}
+    {readable.map((run) => (
+      <li class="run">
+        <div class="run-head">
+          <a class="run-id mono" href={`/runs/${run.id}`}>{run.id}</a>
+          <span class={run.passed === run.tests ? "outcome is-pass" : "outcome is-fail"}>
+            {run.passed === run.tests ? "pass" : "fail"}
+          </span>
+          <span class="run-tally mono">
+            {run.passed} / {run.tests}
+          </span>
+          {tally(run).map(([outcome, n]) => (
+            <span class="run-other">
+              <span class="mono">{n}</span> {outcome}
             </span>
-            <span class={run.passed === run.tests ? "outcome is-pass" : "outcome is-fail"}>
-              {run.passed === run.tests ? "pass" : "fail"}
-            </span>
-            <span class="runlist-fw mono">
-              {Object.entries(run.firmware).map(([n, d]) => `${n} ${d.slice(0, 8)}`).join("  ")}
-            </span>
-          </>
-        ) : (
-          <>
-            <span class="runlist-id mono">{run.id}</span>
-            <span class="runlist-refused">not shown as a run — {run.reason}</span>
-          </>
-        )}
+          ))}
+          {run.complete === false && (
+            <span class="chip chip-warn">PARTIAL — not a suite result</span>
+          )}
+        </div>
+
+        <div class="run-meta mono">
+          {run.shards ? <span>{run.shards} shards</span> : null}
+          {Object.entries(run.firmware).map(([node, digest]) => (
+            <span>{node} {digest.slice(0, 8)}</span>
+          ))}
+        </div>
+
+        <div class="run-actions">
+          <a class="btn" href={`/runs/${run.id}`}>open</a>
+          <details class="replay-detail">
+            <summary class="btn">replay</summary>
+            <div class="replay-body">
+              <p>
+                Replay <strong>re-executes</strong> the run and must produce
+                byte-identical results. It takes as long as the run did — it is
+                not a faster way to see what is already stored.
+              </p>
+              <p>
+                Triggering it from here is section 3.7 and is not built, so this
+                is the command rather than a button that only looks live:
+              </p>
+              <pre class="replay">{(run.replay || "").trim() || "This run stored no reproduction note."}</pre>
+            </div>
+          </details>
+          <a class="btn" href={`/api/runs/${run.id}`} download={`${run.id}.json`}>
+            download record
+          </a>
+        </div>
       </li>
     ))}
   </ul>
+
+  {refused.length > 0 && (
+    <section class="refused-block">
+      <h2 class="section-head">Not shown as runs</h2>
+      <p class="muted">
+        These directories are present and are not results. A result that cannot
+        be traced to the binaries and tools that produced it still looks like
+        evidence, which is worse than an absent one. They are listed rather than
+        hidden, because a run that silently vanishes is indistinguishable from
+        one that was never made.
+      </p>
+      <ul class="runlist">
+        {refused.map((run) => (
+          <li class="run is-refused">
+            <span class="run-id mono">{run.id}</span>
+            <span class="run-reason">{run.reason}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )}
 </Base>
