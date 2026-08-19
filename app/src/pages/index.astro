@@ -35,6 +35,33 @@ function tally(run) {
     .sort();
   return other;
 }
+
+/*
+ * THREE STATES, NOT TWO.
+ *
+ * This was `run.passed === run.tests`. The loader supplies null for both when
+ * summary.json does not record them, so `null === null` painted the reserved
+ * green and the word "pass" on a run whose verdict was never measured -- and the
+ * inverse painted an unmeasured "fail" in red. A two-branch comparison over
+ * three states manufactures a verdict out of two absences, which is the single
+ * worst thing a screen in this product can do.
+ *
+ * harness/store.py refuses to WRITE a summary missing these counts. Nothing
+ * checked them on read, and the loader's own header explains why that matters:
+ * a run directory can be copied in, restored from a backup, or half-written by
+ * a job that was killed.
+ */
+function verdictOf(run) {
+  if (typeof run.passed !== "number" || typeof run.tests !== "number") {
+    return { state: "unmeasured", label: "no result recorded" };
+  }
+  if (run.tests === 0) {
+    return { state: "unmeasured", label: "no tests" };
+  }
+  return run.passed === run.tests
+    ? { state: "pass", label: "pass" }
+    : { state: "fail", label: "fail" };
+}
 ---
 
 <Base title="Runs — Bench">
@@ -58,11 +85,13 @@ function tally(run) {
       <li class="run">
         <div class="run-head">
           <a class="run-id mono" href={`/runs/${run.id}`}>{run.id}</a>
-          <span class={run.passed === run.tests ? "outcome is-pass" : "outcome is-fail"}>
-            {run.passed === run.tests ? "pass" : "fail"}
+          <span class={`outcome is-${verdictOf(run).state}`}>
+            {verdictOf(run).label}
           </span>
           <span class="run-tally mono">
-            {run.passed} / {run.tests}
+            {typeof run.passed === "number" && typeof run.tests === "number"
+              ? `${run.passed} / ${run.tests}`
+              : "—"}
           </span>
           {tally(run).map(([outcome, n]) => (
             <span class="run-other">

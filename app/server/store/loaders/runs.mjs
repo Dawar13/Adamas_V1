@@ -157,11 +157,47 @@ export async function listRuns() {
 }
 
 /**
+ * The weakest tier among a run's machines.
+ *
+ * THE TIER OF A RUN IS NOT THE TIER OF ONE TEST.
+ *
+ * It was computed from a single test record, so the screen reported whichever
+ * test the timeline happened to be showing -- and reported no tier at all
+ * whenever that record had not loaded yet. A badge that can silently strengthen
+ * or vanish is worse than no badge, because this one carries the claim that
+ * decides whether a result is authoritative.
+ *
+ * The weakest wins across every machine in every test: a verified board talking
+ * to a modelled peer produced a result that depended on the modelled one.
+ */
+const TIER_RANK = { verified: 3, modelled: 2, declared: 1 };
+
+function weakest(current, tier, note) {
+  if (!tier) return current;
+  const rank = TIER_RANK[tier];
+  if (rank === undefined) {
+    // A tier this reader does not know is not silently ranked. Ranking it
+    // would guess, and guessing upward is the direction that misleads.
+    return { tier, note, unknown: true };
+  }
+  if (current === null || current.unknown) return { tier, note, unknown: false };
+  if ((TIER_RANK[current.tier] ?? 0) <= rank) return current;
+  return { tier, note, unknown: false };
+}
+
+/**
  * A run's header and an index of its tests -- deliberately NOT the timelines.
  *
  * The stored suite is 5.7 MB of per-test records. Sending all of it so the
  * screen can draw one timeline would make "open is instant" false for the sake
  * of data nothing has asked for yet.
+ *
+ * What it DOES carry, per test, is every failing assertion's expected-and-
+ * observed. The failures screen used to receive `null` for every test except
+ * the one in focus, and then printed "no assertion recorded a failure -- that
+ * disagreement is itself the finding" about data it had simply not loaded. It
+ * fabricated a disagreement. Failing assertions are few and small, so they
+ * travel with the index and the screen never has to speak about absent data.
  */
 export async function openRun(id) {
   const dir = safeRunDir(id);
@@ -175,6 +211,21 @@ export async function openRun(id) {
     replay = null;
   }
 
+  // Optional reports, written beside the run by the merge. Read here because
+  // the screen must be able to tell "this run has no coverage" from "this
+  // reader never looked" -- it could not, and so it asserted the first while
+  // doing the second.
+  const extras = {};
+  for (const key of ["coverage", "divergence"]) {
+    try {
+      extras[key] = JSON.parse(await readFile(path.join(dir, `${key}.json`), "utf8"));
+    } catch (err) {
+      if (err.code === "ENOENT") extras[key] = null;
+      // Present but unreadable is NOT absent, and must not be shown as absent.
+      else extras[key] = { unreadable: err.message };
+    }
+  }
+
   let names = [];
   try {
     names = (await readdir(path.join(dir, "tests")))
@@ -186,9 +237,16 @@ export async function openRun(id) {
   }
 
   const tests = [];
+  let tier = null;
   for (const name of names) {
     const record = await readJson(path.join(dir, "tests", `${name}.json`));
     const latency = record.latency || {};
+    for (const machine of record.run?.machines || []) {
+      tier = weakest(tier, machine.tier, record.run?.tier_note ?? null);
+    }
+    if (!(record.run?.machines || []).length) {
+      tier = weakest(tier, record.run?.tier, record.run?.tier_note ?? null);
+    }
     tests.push({
       test: record.test ?? name,
       outcome: record.outcome ?? null,
@@ -201,11 +259,61 @@ export async function openRun(id) {
       assertions_failed: (record.assertions || []).filter(
         (a) => a.verdict && a.verdict !== "PASS"
       ).length,
+      // Every failing assertion, so a failure can be shown as
+      // expected-versus-observed without loading the whole record.
+      failures: (record.assertions || [])
+        .filter((a) => a.verdict && a.verdict !== "PASS")
+        .map((a) => ({
+          token: a.token ?? null,
+          verb: a.verb ?? null,
+          label: a.label ?? null,
+          window_ms: a.window_ms ?? null,
+          reason: a.reason ?? null,
+          verdict: a.verdict,
+        })),
       has_timeline: Array.isArray(record.timeline) && record.timeline.length > 0,
     });
   }
 
-  return { id, summary, provenance, replay, tests };
+  /*
+   * THE TALLY MUST AGREE WITH THE EVIDENCE BESIDE IT.
+   *
+   * harness/store.py refuses to WRITE a record whose summary count disagrees
+   * with the number of results it carries. Nothing checked it on READ, so a
+   * directory that arrived any other way -- copied, restored, hand-trimmed --
+   * could state a total the stored evidence does not support, in the largest
+   * type on the screen.
+   */
+  const disagreements = [];
+  if (typeof summary.tests === "number" && summary.tests !== tests.length) {
+    disagreements.push(
+      `the summary says ${summary.tests} tests and ${tests.length} test ` +
+        `record(s) are stored`
+    );
+  }
+  if (typeof summary.passed === "number") {
+    const passed = tests.filter((t) => t.outcome === "pass").length;
+    if (summary.passed !== passed) {
+      disagreements.push(
+        `the summary says ${summary.passed} passed and ${passed} stored ` +
+          `record(s) say pass`
+      );
+    }
+  }
+
+  return {
+    id,
+    summary,
+    provenance,
+    replay,
+    tests,
+    tier,
+    coverage: extras.coverage,
+    divergence: extras.divergence,
+    // Surfaced rather than thrown: the run is real and its parts disagree, and
+    // which part is wrong cannot be decided from here.
+    disagreements,
+  };
 }
 
 /** One test in full: timeline, assertions, stimuli, the lot. */

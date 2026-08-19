@@ -47,15 +47,36 @@ export default function Timeline({ record }) {
   const tl = useMemo(() => readTimeline(record), [record]);
 
   if (!tl) {
+    /*
+     * Say which of the several reasons applies, and do not promise anything.
+     *
+     * This used to assert "records no headline reaction" for every absence --
+     * including records that HAVE a reaction whose assertion could not be
+     * matched -- and to promise "its assertions are listed below", which they
+     * are not: they are in the Tests tab. Two false statements in the fallback
+     * whose entire job is to be honest about what is missing. It also discarded
+     * headline_note, the engine's own explanation of why there is no headline.
+     */
+    const latency = record?.latency || {};
+    const token = latency.headline_token;
+    const assertions = record?.assertions || [];
+    const why = !record
+      ? "No record was loaded for this test."
+      : !assertions.length
+        ? "This record carries no assertions, so nothing was timed."
+        : !token
+          ? "The engine recorded no headline reaction for this test."
+          : `The engine's headline assertion (${token}) is not in this record.`;
     return (
       <div className="tl tl-empty">
-        <p>
-          This test records no headline reaction, so there is no
-          injected-to-reacted interval to draw.
-        </p>
-        <p className="tl-why">
-          Its assertions are listed below with the instants the engine measured.
-        </p>
+        <p>{why} There is no injected-to-reacted interval to draw.</p>
+        {latency.headline_note && <p className="tl-note">{latency.headline_note}</p>}
+        {latency.excluded_no_reaction?.length > 0 && (
+          <p className="tl-why">
+            Excluded for having no reaction:{" "}
+            <span className="mono">{latency.excluded_no_reaction.join(" ")}</span>
+          </p>
+        )}
       </div>
     );
   }

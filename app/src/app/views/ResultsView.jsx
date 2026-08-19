@@ -14,7 +14,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Timeline from "../components/Timeline.jsx";
-import VerdictHero, { runTier } from "../components/VerdictHero.jsx";
+import VerdictHero from "../components/VerdictHero.jsx";
 import HonestLimits from "../components/HonestLimits.jsx";
 import { chooseFocus, margin } from "../lib/focus.mjs";
 
@@ -60,8 +60,18 @@ function useJson(url, seed) {
 
 /* ------------------------------------------------------------------ tests */
 
-function Failure({ entry, record, runId }) {
-  const failed = (record?.assertions || []).filter((a) => a.verdict && a.verdict !== "PASS");
+/*
+ * A failure card says only what its entry carries.
+ *
+ * It used to receive `record={null}` for every test except the one in focus and
+ * then print "no assertion recorded a failure -- that disagreement is itself the
+ * finding" about assertions it had simply not been given. It fabricated a
+ * disagreement, in red, on the screen whose entire purpose is expected-versus-
+ * observed. The failing assertions now travel with the run index, so there is
+ * nothing absent left for it to describe.
+ */
+function Failure({ entry, runId }) {
+  const failed = entry.failures || [];
   return (
     <article className="failure">
       <h3 className="failure-title">
@@ -72,9 +82,13 @@ function Failure({ entry, record, runId }) {
 
       {failed.length === 0 ? (
         <p className="failure-line">
-          This test did not pass and no assertion recorded a failure. That
-          disagreement is itself the finding — the outcome was{" "}
-          <span className="mono">{entry.outcome}</span>.
+          The outcome was <span className="mono">{entry.outcome}</span>, and no
+          assertion in the stored record failed.{" "}
+          {entry.outcome === "crashed" || entry.outcome === "unusable"
+            ? "Nothing about the firmware was determined by this test."
+            : entry.outcome === "inconsistent"
+              ? "The engine's exit code and its stored verdict disagreed, so neither is taken."
+              : "That disagreement is itself the finding."}
         </p>
       ) : (
         failed.map((a) => (
@@ -107,8 +121,20 @@ function Failure({ entry, record, runId }) {
   );
 }
 
-function TestsTab({ run, tests, focus, setFocus, record, runId }) {
-  const failures = tests.filter((t) => t.outcome !== "pass");
+/*
+ * A test that did not pass did not necessarily FAIL.
+ *
+ * refused, unusable, timeout, inconsistent and crashed each mean no verdict was
+ * reached -- the engine could not run the test, or contradicted itself. Counting
+ * them under an "N failures" heading in fault red reports them as things the
+ * firmware did wrong, which is this product's own overstatement, pointed at its
+ * own engine.
+ */
+const NO_VERDICT = new Set(["refused", "unusable", "timeout", "inconsistent", "crashed"]);
+
+function TestsTab({ run, tests, focus, setFocus, runId }) {
+  const failures = tests.filter((t) => t.outcome === "fail");
+  const unresolved = tests.filter((t) => t.outcome && NO_VERDICT.has(t.outcome));
   return (
     <>
       {failures.length > 0 && (
@@ -117,12 +143,23 @@ function TestsTab({ run, tests, focus, setFocus, record, runId }) {
             {failures.length} {failures.length === 1 ? "failure" : "failures"}
           </h2>
           {failures.map((entry) => (
-            <Failure
-              key={entry.test}
-              entry={entry}
-              record={record && record.test === entry.test ? record : null}
-              runId={runId}
-            />
+            <Failure key={entry.test} entry={entry} runId={runId} />
+          ))}
+        </section>
+      )}
+
+      {unresolved.length > 0 && (
+        <section className="unresolved">
+          <h2 className="section-head">
+            {unresolved.length} test{unresolved.length === 1 ? "" : "s"} reached no verdict
+          </h2>
+          <p className="muted">
+            These did not fail. The engine could not produce a verdict for them,
+            so they say nothing about the firmware either way — and a suite that
+            counted them as passes or as failures would be reporting one.
+          </p>
+          {unresolved.map((entry) => (
+            <Failure key={entry.test} entry={entry} runId={runId} />
           ))}
         </section>
       )}
@@ -213,13 +250,29 @@ function FramesTab({ record, runId, focus }) {
           })}
         </tbody>
       </table>
-      {bus.length > 500 && (
-        <p className="muted">
-          Showing the first <span className="mono">500</span> of{" "}
-          <span className="mono">{bus.length}</span> bus frames. The download holds
-          all of them.
-        </p>
-      )}
+      <p className="muted">
+        {/*
+          The lead line counts every event, injected ones included; this table
+          lists only frames the emulated nodes transmitted. Saying so is the
+          difference between a filtered view and a missing one. The note used to
+          appear only past 500 rows, so a short run showed a count and a shorter
+          table with nothing to explain the gap.
+        */}
+        This table lists the <span className="mono">{bus.length}</span> frame(s)
+        transmitted by emulated nodes.{" "}
+        {(counts.injected ?? 0) > 0 && (
+          <>
+            The <span className="mono">{counts.injected}</span> injected frame(s)
+            counted above are not listed here; the download holds every frame.
+          </>
+        )}
+        {bus.length > 500 && (
+          <>
+            {" "}
+            Only the first <span className="mono">500</span> are shown.
+          </>
+        )}
+      </p>
     </section>
   );
 }
@@ -228,6 +281,15 @@ function FramesTab({ record, runId, focus }) {
 
 function CoverageTab({ run }) {
   const coverage = run.coverage || null;
+  if (coverage && coverage.unreadable) {
+    // Present but unreadable is not absent, and must not be shown as absent.
+    return (
+      <section className="empty is-refused">
+        <h3>This run has a coverage report that could not be read.</h3>
+        <p className="mono">{coverage.unreadable}</p>
+      </section>
+    );
+  }
   if (!coverage) {
     return (
       <section className="empty">
@@ -373,13 +435,27 @@ export default function ResultsView({ runId, run, initialFocus, initialRecord })
     focus ? `/api/runs/${runId}/tests/${focus}` : null,
     focus && focus === initialFocus?.test ? initialRecord : null
   );
-  const tier = useMemo(
-    () => (record.data ? runTier([record.data]) : { tier: null, note: null }),
-    [record.data]
-  );
+  // Computed by the loader across every machine of every test. Deriving it from
+  // the focused test made the badge report that one test's tier as the whole
+  // run's, and report no tier at all until that record arrived.
+  const tier = run?.tier ?? { tier: null, note: null };
 
   return (
     <>
+      {(run.disagreements || []).length > 0 && (
+        <section className="empty is-refused">
+          <h3>This run's summary disagrees with the records stored beside it.</h3>
+          <ul>
+            {run.disagreements.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+          <p>
+            The figures below come from the summary. Which part is wrong cannot
+            be decided from here, so nothing is silently corrected.
+          </p>
+        </section>
+      )}
       <VerdictHero run={run} tier={tier} />
 
       <section className="focus">
@@ -417,7 +493,6 @@ export default function ResultsView({ runId, run, initialFocus, initialRecord })
             tests={tests}
             focus={focus}
             setFocus={chooseTest}
-            record={record.data}
             runId={runId}
           />
         )}

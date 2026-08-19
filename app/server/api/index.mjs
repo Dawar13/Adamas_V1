@@ -68,12 +68,40 @@ const ROUTES = [
 const VIEWABLE = new Set([".repl", ".yml", ".yaml", ".resc", ".dts", ".overlay", ".conf"]);
 const VIEW_LIMIT = 512 * 1024;
 
+/*
+ * A lexical containment check is not enough on Windows.
+ *
+ * DOS device names resolve to devices no matter which directory they appear to
+ * live in, so "platforms/CON.repl" or "NUL" satisfies both "inside the
+ * repository" and the extension allowlist while the OS opens a device. Reading
+ * one returns nothing, and an empty 200 would be presented as the project's
+ * configuration -- an empty file where a real one was asked for, which is a
+ * false statement about the project.
+ */
+const DOS_DEVICES = new Set([
+  "con", "prn", "aux", "nul", "clock$",
+  ...Array.from({ length: 9 }, (_, i) => `com${i + 1}`),
+  ...Array.from({ length: 9 }, (_, i) => `lpt${i + 1}`),
+]);
+
+function namesADevice(full) {
+  return full
+    .split(/[\\/]/)
+    .some((part) => DOS_DEVICES.has(part.split(".")[0].trim().toLowerCase()));
+}
+
 async function serveFile(res, requested) {
   const full = path.resolve(REPO_ROOT, requested);
   const inside = full === REPO_ROOT || full.startsWith(REPO_ROOT + path.sep);
   if (!inside) {
     json(res, 403, {
       error: `'${requested}' is outside the project, so it is not shown here.`,
+    });
+    return;
+  }
+  if (namesADevice(full)) {
+    json(res, 403, {
+      error: `'${requested}' names a system device, not a file in the project.`,
     });
     return;
   }
@@ -139,7 +167,29 @@ export async function handleApi(req, res) {
     }
 
     if (pathname === "/api/design") {
-      json(res, 200, await loadDesign(url.searchParams.get("file") || undefined));
+      /*
+       * THE SAME CHECKS AS /api/file, BECAUSE THIS IS THE SAME KIND OF INPUT.
+       *
+       * This forwarded the caller's `file` straight to the engine with none of
+       * them -- no containment, no allowlist, no device check -- so any path on
+       * the machine was opened by a subprocess and whatever it said about the
+       * contents came back in the error message. The checks were written once
+       * for the viewer and not applied to the route added later, which is how
+       * this kind of hole always appears.
+       */
+      const wanted = url.searchParams.get("file");
+      if (wanted !== null) {
+        const full = path.resolve(REPO_ROOT, wanted);
+        const inside = full === REPO_ROOT || full.startsWith(REPO_ROOT + path.sep);
+        if (!inside || namesADevice(full) ||
+            !VIEWABLE.has(path.extname(full).toLowerCase())) {
+          json(res, 403, {
+            error: `'${wanted}' is not a topology file inside this project.`,
+          });
+          return true;
+        }
+      }
+      json(res, 200, await loadDesign(wanted || undefined));
       return true;
     }
 
@@ -189,7 +239,20 @@ export async function handleApi(req, res) {
   }
 }
 
-/** The Astro integration. */
+/**
+ * The Astro integration.
+ *
+ * `astro:server:setup` runs in `astro dev` and NOT in a build, so a built
+ * server had no /api routes at all -- every screen would have rendered its
+ * server-side half and then failed on the first fetch. The studio is a local
+ * instrument and dev is how it is run today, but a build that silently drops
+ * the entire API is a trap laid for whoever runs it next.
+ *
+ * Astro has no build-time equivalent of this hook for arbitrary middleware, so
+ * the build is REFUSED rather than allowed to produce a server that looks
+ * complete and answers nothing. Serving the built output is Phase 4's problem,
+ * and it will need the routes to be real Astro endpoints.
+ */
 export default function benchApi() {
   return {
     name: "bench-api",
@@ -202,6 +265,14 @@ export default function benchApi() {
             next(err);
           }
         });
+      },
+      "astro:build:start": () => {
+        throw new Error(
+          "This studio cannot be built yet: the API is Vite dev middleware, " +
+            "so a built server would serve every page and answer no /api " +
+            "request. Run it with `npm run dev`. Making the routes real " +
+            "endpoints is part of Phase 4, where hosting is built."
+        );
       },
     },
   };
