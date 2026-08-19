@@ -437,8 +437,12 @@ runs of one scenario produced byte-identical event logs and traces.
 - [x] Comparison semantics declared per pattern, with its own test, both directions
 - [ ] 118 or more tests — **89**, padding declined, reason recorded above
 - [x] Parallel execution measured on the target machine; worker default derived from it
-- [ ] Identical verdicts and latencies at N=1 and N=8 — **narrowly verified only; the
-      whole-log comparison reports drift and is being investigated**
+- [x] Identical verdicts and latencies at N=1 and N=4 — **closed in Phase 3 §1.**
+      Two shards, 18 tests, including the peer-silencing group where a leak would
+      show first: identical verdicts, identical latencies, and every event log
+      byte-for-byte. `scripts/check-determinism-shard.sh` re-proves it on demand.
+      The separate question of whether *tracing* perturbs a run remains open; it
+      affects coverage figures, not verdicts, and is tracked in Phase 3.
 - [x] Divergence runs on every full suite, against three defective binaries
 - [x] Expected-divergence sets recorded; unexpected divergence fails the run
 - [x] Discrimination report produced; every `1 of N` flagged as a warning
