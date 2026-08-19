@@ -680,3 +680,239 @@ tr.is-fault td {
   max-width: 46rem;
   font-size: var(--step--1);
 }
+
+/* ---------------------------------------------------------------- canvas */
+
+.bus-group {
+  margin-bottom: var(--gap-hero);
+}
+.canvas {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  align-items: stretch;
+}
+.node {
+  flex: 1 1 12rem;
+  min-width: 11rem;
+  display: block;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: inherit;
+  text-decoration: none;
+}
+.node:hover {
+  border-color: var(--ink-action);
+}
+.node.is-dut {
+  border-width: 2px;
+}
+.node-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.node-id {
+  font-weight: 650;
+}
+.node-star {
+  color: var(--ink-muted);
+  margin-left: auto;
+}
+/* Filled = real firmware executing. Hollow = a frame player. */
+.node-dot {
+  display: inline-block;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  border: 1px solid var(--ink-muted);
+  flex: none;
+}
+.node-dot.is-real {
+  background: var(--ink);
+  border-color: var(--ink);
+}
+.node-dot.is-scripted {
+  background: transparent;
+}
+.node-kind {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.3rem;
+  font-size: 0.6875rem;
+  letter-spacing: 0.07em;
+  color: var(--ink-faint);
+}
+.node-ports {
+  list-style: none;
+  margin: 0.6rem 0 0;
+  padding: 0.5rem 0 0;
+  border-top: 1px solid var(--rule);
+  font-size: 0.75rem;
+  color: var(--ink-muted);
+}
+.node-ports li {
+  padding: 0.05rem 0;
+}
+.node-emits {
+  color: var(--ink-faint);
+}
+.node-missing {
+  margin: 0.4rem 0 0;
+  font-size: 0.75rem;
+  color: var(--fault);
+}
+.bus-line {
+  position: relative;
+  margin-top: 0.9rem;
+  border-top: 2px solid var(--rule-strong);
+  padding-top: 0.4rem;
+  text-align: center;
+}
+.bus-label {
+  font-size: var(--step--1);
+  color: var(--ink-muted);
+}
+.legend {
+  display: flex;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+  padding: 0.75rem 0;
+  border-top: 1px solid var(--rule);
+  font-size: var(--step--1);
+  color: var(--ink-muted);
+}
+.legend .node-dot,
+.legend .node-star {
+  margin-right: 0.35rem;
+}
+.legend-note {
+  flex-basis: 100%;
+  color: var(--ink-faint);
+}
+.source-note {
+  font-size: var(--step--1);
+  max-width: 46rem;
+}
+
+/* ----------------------------------------------------------- node detail */
+
+.crumb {
+  margin: 0 0 var(--gap);
+  font-size: var(--step--1);
+}
+.detail-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-bottom: var(--gap);
+}
+.detail-head h1 {
+  font-size: var(--step-2);
+}
+.detail-kind {
+  font-size: 0.6875rem;
+  letter-spacing: 0.07em;
+  color: var(--ink-faint);
+}
+.detail-block {
+  margin-bottom: var(--gap);
+}
+/*
+ * One grid, on purpose. Section 8: the "not emulated" list beside the emulated
+ * one is the most credible thing on the screen, and must not drift into a
+ * separate panel or a tooltip. Splitting these columns would visibly break the
+ * layout, which is the intent.
+ */
+.detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 2.5rem;
+  padding: 1.25rem 1.5rem;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+  margin: var(--gap) 0;
+}
+.periph {
+  list-style: none;
+  margin: 0.75rem 0 0;
+  padding: 0;
+}
+.periph li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.2rem 0;
+  font-size: var(--step--1);
+  flex-wrap: wrap;
+}
+.periph-kind {
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  color: var(--ink-faint);
+  text-transform: uppercase;
+}
+.periph-src {
+  margin-left: auto;
+  font-size: 0.6875rem;
+  color: var(--ink-faint);
+}
+.detail-col.is-not .periph li {
+  color: var(--ink-muted);
+}
+.periph-note {
+  margin: 0.9rem 0 0;
+  font-size: 0.75rem;
+  color: var(--ink-faint);
+}
+.kvlist {
+  margin: 0;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.15rem 1rem;
+  font-size: var(--step--1);
+}
+.kvlist > div {
+  display: contents;
+}
+.kvlist dt {
+  color: var(--ink-faint);
+}
+.kvlist dd {
+  margin: 0;
+}
+.filelist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: var(--step--1);
+}
+.filelist li {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.3rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.topnav {
+  display: flex;
+  gap: 0.9rem;
+  font-size: var(--step--1);
+}
+.topnav a {
+  color: var(--ink-muted);
+  text-decoration: none;
+}
+.topnav a:hover {
+  color: var(--ink-action);
+}
+.brand-note {
+  margin-left: auto;
+}

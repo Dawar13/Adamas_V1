@@ -12,12 +12,17 @@
  *      GET  /api/runs/:id                      a run header + test index
  *      GET  /api/runs/:id/tests/:test          one test in full
  *      GET  /api/runs/:id/tests/:test/frames   the candump log, as a download
+ *      GET  /api/design                        the topology, as the engine reads it
+ *      GET  /api/file?path=...                 one configuration file, as text
  *
  * Errors say what went wrong and how to fix it. They never apologise and are
  * never vague (Phase 3 section 15).
  */
 
-import { listRuns, openRun, openTest, traceStream, RunUnreadable } from "../store/loaders/runs.mjs";
+import { listRuns, openRun, openTest, traceStream, RunUnreadable, REPO_ROOT } from "../store/loaders/runs.mjs";
+import { loadDesign, DesignUnreadable } from "../store/loaders/design.mjs";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 
 function json(res, status, body) {
   const text = JSON.stringify(body, null, 2);
@@ -49,6 +54,55 @@ const ROUTES = [
     },
   },
 ];
+
+/*
+ * Showing the engineer the actual .repl instead of describing it is the point
+ * of the node detail panel -- "nothing builds trust with an embedded engineer
+ * like showing the config".
+ *
+ * But the path arrives in a query string. Three checks, and all three are
+ * needed: inside the repository after resolution (which defeats ../ and
+ * absolute paths), a declared configuration extension (so this is not a general
+ * file server for the machine it runs on), and a size cap.
+ */
+const VIEWABLE = new Set([".repl", ".yml", ".yaml", ".resc", ".dts", ".overlay", ".conf"]);
+const VIEW_LIMIT = 512 * 1024;
+
+async function serveFile(res, requested) {
+  const full = path.resolve(REPO_ROOT, requested);
+  const inside = full === REPO_ROOT || full.startsWith(REPO_ROOT + path.sep);
+  if (!inside) {
+    json(res, 403, {
+      error: `'${requested}' is outside the project, so it is not shown here.`,
+    });
+    return;
+  }
+  if (!VIEWABLE.has(path.extname(full).toLowerCase())) {
+    json(res, 403, {
+      error: `'${requested}' is not a configuration file. This shows platform ` +
+        `and project files as text; it is not a way to read the machine.`,
+    });
+    return;
+  }
+  let text;
+  try {
+    text = await readFile(full, "utf8");
+  } catch (err) {
+    json(res, 404, {
+      error: `'${requested}' is named by the project and is not on disk` +
+        (err.code === "ENOENT" ? "." : `: ${err.message}`),
+    });
+    return;
+  }
+  if (text.length > VIEW_LIMIT) {
+    text = text.slice(0, VIEW_LIMIT) +
+      "\n\n... truncated at 512 KB. This viewer shows configuration, not data.\n";
+  }
+  res.statusCode = 200;
+  res.setHeader("content-type", "text/plain; charset=utf-8");
+  res.setHeader("cache-control", "no-store");
+  res.end(text);
+}
 
 async function serveFrames(res, id, test) {
   const stream = await traceStream(id, test);
@@ -84,6 +138,21 @@ export async function handleApi(req, res) {
       return true;
     }
 
+    if (pathname === "/api/design") {
+      json(res, 200, await loadDesign(url.searchParams.get("file") || undefined));
+      return true;
+    }
+
+    if (pathname === "/api/file") {
+      const wanted = url.searchParams.get("path");
+      if (!wanted) {
+        json(res, 400, { error: "no path was given" });
+        return true;
+      }
+      await serveFile(res, wanted);
+      return true;
+    }
+
     for (const route of ROUTES) {
       const match = pathname.match(route.pattern);
       if (match) {
@@ -99,10 +168,16 @@ export async function handleApi(req, res) {
         "/api/runs/:id",
         "/api/runs/:id/tests/:test",
         "/api/runs/:id/tests/:test/frames",
+        "/api/design",
+        "/api/file?path=...",
       ],
     });
     return true;
   } catch (err) {
+    if (err instanceof DesignUnreadable) {
+      json(res, 422, { error: err.message, refused: true });
+      return true;
+    }
     if (err instanceof RunUnreadable) {
       // 422, not 404: the run is there and is being refused. A 404 would say
       // "no such run", which sends whoever reads it looking for a typo.

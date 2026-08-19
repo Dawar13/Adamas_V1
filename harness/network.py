@@ -44,6 +44,9 @@ Public API
 
 from __future__ import annotations
 
+import json
+import sys
+
 import os
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -843,3 +846,82 @@ def load(path=DEFAULT_NETWORK_PATH) -> Network:
         raise NetworkError("%s is empty" % path)
 
     return Network(data, source=str(path))
+
+
+def as_document(net) -> dict:
+    """The loaded topology as plain data, for anything that draws it.
+
+    THE CANVAS MUST SEE WHAT THE COMPILER SEES.
+
+    A drawing tool that parsed the topology itself would be a second reader of
+    the same file, free to disagree with the first. This project has already
+    paid for exactly that: YAML 1.1 turns OFF and ON into booleans, which is
+    why the engine reads through a strict loader. A canvas that quietly
+    disagreed about one field would draw a system that is not the one under
+    test, and every element on it would still look right.
+
+    So there is one parser, and this is its output.
+    """
+    return {
+        "source": str(getattr(net, "source", "") or ""),
+        "buses": [
+            {
+                "id": bus.id,
+                "type": bus.type,
+                "bitrate": bus.bitrate,
+                "members": [node.id for node in net.bus_members(bus.id)],
+            }
+            for bus in net.buses()
+        ],
+        "nodes": [
+            {
+                "id": node.id,
+                "type": node.type,
+                "is_real": bool(node.is_real()),
+                "is_scripted": bool(node.is_scripted()),
+                "dut": bool(node.dut),
+                "board": node.board,
+                "elf": str(node.elf) if node.elf else None,
+                "boot_text": node.boot_text,
+                "buses": list(node.buses),
+                "emits": list(node.emits),
+                "period_ms": node.period_ms,
+                "position": dict(node.position) if node.position else None,
+                "default_signals": dict(node.default_signals or {}),
+                # Symbols the topology declares for the engine to drive. They
+                # are how a scenario silences a node or sets a signal without
+                # naming whether that node runs real firmware -- which is the
+                # rule that keeps scenarios portable between the two kinds.
+                "tx_enable_symbol": node.raw.get("tx_enable_symbol"),
+                "signal_symbols": dict(node.raw.get("signal_symbols") or {}),
+            }
+            for node in net.nodes()
+        ],
+    }
+
+
+def main(argv=None) -> int:
+    """Print the loaded topology as JSON, or say why it cannot be loaded."""
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Load a topology and print it as JSON.")
+    parser.add_argument("path", nargs="?", default=str(DEFAULT_NETWORK_PATH))
+    parser.add_argument("--json", action="store_true",
+                        help="print the topology as JSON (the default)")
+    args = parser.parse_args(argv if argv is not None else sys.argv[1:])
+
+    try:
+        net = load(args.path)
+    except NetworkError as exc:
+        # Structured, because the caller is a program. A drawing tool that got
+        # a stack trace would have nothing to show its reader but a blank page.
+        print(json.dumps({"error": str(exc), "path": args.path}, indent=2))
+        return 2
+
+    print(json.dumps(as_document(net), indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

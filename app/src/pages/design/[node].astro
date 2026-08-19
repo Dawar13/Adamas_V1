@@ -1,0 +1,205 @@
+---
+import Base from "../../layouts/Base.astro";
+import { loadDesign, DesignUnreadable } from "../../../server/store/loaders/design.mjs";
+import { injectionPoints } from "../../../server/store/loaders/injection.mjs";
+
+/*
+ * Node detail -- Phase 3 section 8.
+ *
+ * "The 'not emulated' list sitting beside the emulated one is the most credible
+ * thing on the screen. Do not move it to a separate panel or a tooltip."
+ *
+ * So the two columns are one grid and cannot be separated by a later edit
+ * without visibly breaking the layout. Everything in the right-hand column is
+ * something a customer keeps testing on their own bench; a tool that let that
+ * column fall out of view would be selling a replacement for hardware, which
+ * this product is not.
+ *
+ * Both columns are derived, never written by hand. The emulated side comes from
+ * the board table -- the one place a peripheral name may appear -- and the
+ * injected side from the topology and the scenarios that actually write those
+ * symbols. A hand-kept list would drift, and the drift would always be in the
+ * flattering direction.
+ */
+
+const { node: nodeId } = Astro.params;
+
+let design = null;
+let node = null;
+let injected = [];
+let refused = null;
+
+try {
+  design = await loadDesign();
+  node = design.nodes.find((candidate) => candidate.id === nodeId) ?? null;
+  if (node) injected = await injectionPoints(node);
+} catch (err) {
+  if (err instanceof DesignUnreadable) refused = err.message;
+  else throw err;
+}
+
+const board = node?.board_detail ?? null;
+---
+
+<Base title={`${nodeId} — Bench`}>
+  <p class="crumb"><a href="/design">← system</a></p>
+
+  {refused && (
+    <section class="empty is-refused">
+      <h3>The topology could not be read.</h3>
+      <p>{refused}</p>
+    </section>
+  )}
+
+  {design && !node && (
+    <section class="empty">
+      <h3>No node called <span class="mono">{nodeId}</span> is on this bus.</h3>
+      <p>
+        The system is drawn from <code>network.yml</code>. Nodes are named there;
+        this page will not invent one.
+      </p>
+    </section>
+  )}
+
+  {node && (
+    <>
+      <header class="detail-head">
+        <h1 class="mono">{node.id}</h1>
+        <span class={`node-dot ${node.is_real ? "is-real" : "is-scripted"}`}></span>
+        <span class="detail-kind">{node.is_real ? "REAL" : "SCRIPTED"}</span>
+        {node.dut && <span class="chip">device under test</span>}
+        {board?.tier && (
+          <span class={`chip chip-tier is-${board.tier}`}>{board.tier}</span>
+        )}
+      </header>
+
+      {node.is_scripted && (
+        <section class="detail-block">
+          <h2 class="section-head">What this node is</h2>
+          <p class="muted">
+            A frame player. It emits
+            {" "}
+            <span class="mono">
+              {node.emits.map((id) => `0x${id.toString(16).toUpperCase()}`).join(" ")}
+            </span>
+            {node.period_ms ? <> every <span class="mono">{node.period_ms} ms</span></> : null}
+            {" "}and executes no code. It has no chip, no peripherals and no
+            binary, because there is nothing to run — scenarios cannot tell the
+            difference, and must never name which kind a node is.
+          </p>
+        </section>
+      )}
+
+      {node.is_real && (
+        <>
+          <section class="detail-block">
+            <h2 class="section-head">Chip</h2>
+            {board ? (
+              <dl class="kvlist">
+                <div><dt>board</dt><dd class="mono">{board.id}</dd></div>
+                <div><dt>build target</dt><dd class="mono">{board.zephyr_board ?? "—"}</dd></div>
+                <div><dt>bit rate</dt><dd class="mono">{board.can_bitrate ? `${board.can_bitrate / 1000} kbit/s` : "—"}</dd></div>
+                <div><dt>tier</dt><dd class="mono">{board.tier ?? "—"}</dd></div>
+                {board.blocked_by && (
+                  <div><dt>blocked by</dt><dd class="mono">{board.blocked_by}</dd></div>
+                )}
+              </dl>
+            ) : (
+              <p class="is-fault">
+                This node names board <span class="mono">{node.board}</span>, which
+                the board table does not define. The engine would refuse to run it.
+              </p>
+            )}
+            {/*
+              No chip name, core, flash or RAM figures. They are not in the board
+              table, and printing plausible ones for a part number would be
+              inventing a specification on the screen whose whole job is to be
+              checkable by the engineer reading it.
+            */}
+          </section>
+
+          <section class="detail-grid">
+            <div class="detail-col">
+              <h2 class="limits-head">EMULATED</h2>
+              {board ? (
+                <ul class="periph">
+                  {board.can_peripheral && (
+                    <li>
+                      <span class="mono">{board.can_peripheral}</span>
+                      <span class="periph-kind">CAN</span>
+                      <span class={`chip chip-tier is-${board.tier}`}>{board.tier}</span>
+                    </li>
+                  )}
+                  {board.uart_peripheral && (
+                    <li>
+                      <span class="mono">{board.uart_peripheral}</span>
+                      <span class="periph-kind">UART</span>
+                      <span class={`chip chip-tier is-${board.tier}`}>{board.tier}</span>
+                    </li>
+                  )}
+                  {board.cpu_peripheral && (
+                    <li>
+                      <span class="mono">{board.cpu_peripheral}</span>
+                      <span class="periph-kind">CPU</span>
+                      <span class={`chip chip-tier is-${board.tier}`}>{board.tier}</span>
+                    </li>
+                  )}
+                </ul>
+              ) : (
+                <p class="muted">No board, so no declared peripherals.</p>
+              )}
+              <p class="periph-note">
+                The tier is the board's, not a per-peripheral verdict. Claiming
+                each peripheral as separately verified would be a stronger
+                statement than anything measured.
+              </p>
+            </div>
+
+            <div class="detail-col is-not">
+              <h2 class="limits-head">NOT EMULATED — injected instead</h2>
+              {injected.length === 0 ? (
+                <p class="muted">
+                  Nothing is injected into this node by the current scenarios.
+                </p>
+              ) : (
+                <ul class="periph">
+                  {injected.map((point) => (
+                    <li>
+                      <span class="mono">{point.symbol}</span>
+                      <span class="periph-kind">{point.role}</span>
+                      <span class="periph-src">{point.source}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <p class="periph-note">
+                These are values a real sensor or driver would produce. The
+                emulator does not model the parts that produce them, so the tests
+                write the symbol the firmware reads. Everything in this column
+                stays on your bench.
+              </p>
+            </div>
+          </section>
+
+          <section class="detail-block">
+            <h2 class="section-head">Files</h2>
+            <ul class="filelist">
+              {board?.repl && (
+                <li>
+                  <span class="mono">{board.repl}</span>
+                  <a class="btn" href={`/api/file?path=${encodeURIComponent(board.repl)}`}>view</a>
+                </li>
+              )}
+              {node.elf && (
+                <li>
+                  <span class="mono">{node.elf}</span>
+                  <span class="muted">compiled binary — not shown as text</span>
+                </li>
+              )}
+            </ul>
+          </section>
+        </>
+      )}
+    </>
+  )}
+</Base>
