@@ -34,6 +34,7 @@ RUN_ID=""
 WORKERS=4
 OUT="harness/out"
 FILTER=""
+COVERAGE=0
 
 while [ $# -gt 0 ]; do
 	case "$1" in
@@ -43,6 +44,10 @@ while [ $# -gt 0 ]; do
 	--workers)  WORKERS="${2:-}"; shift 2 ;;
 	--out)      OUT="${2:-}"; shift 2 ;;
 	--filter)   FILTER="${2:-}"; shift 2 ;;
+	# Tracing has to be on WHILE the tests run; it cannot be added to a
+	# finished run. One traced test costs about 224 KB, so a whole suite is
+	# roughly 20 MB -- measured, not assumed.
+	--coverage) COVERAGE=1; shift ;;
 	-h|--help)  sed -n '2,32p' "$0"; exit 0 ;;
 	*) echo "FATAL: unknown argument '$1'"; exit 2 ;;
 	esac
@@ -75,6 +80,9 @@ shown_filter="$FILTER"
 [ -z "$shown_filter" ] && shown_filter="none: the whole declared suite"
 echo "    topology   $shown_topology"
 echo "    filter     $shown_filter"
+if [ "$COVERAGE" -eq 1 ]; then
+	echo "    coverage   tracing every machine, which costs host wall clock"
+fi
 echo ""
 
 echo "--- expanding scenarios into tests ---"
@@ -94,6 +102,7 @@ for shard in $(seq 1 "$SHARDS"); do
 		--out "$OUT/shard$shard" --json "$OUT/shard-$shard.json"
 	[ -n "$TOPOLOGY" ] && set -- "$@" --topology "$TOPOLOGY"
 	[ -n "$FILTER" ] && set -- "$@" --filter "$FILTER"
+	[ "$COVERAGE" -eq 1 ] && set -- "$@" --coverage
 
 	# No pipe. The exit status below is the runner's own.
 	"$PYTHON" harness/run_suite.py "$@"

@@ -690,11 +690,76 @@ and a comment that named the two enum spellings YAML 1.1 turns into booleans. Th
 slipped into a commit because only the app tests were run after editing an engine file;
 the guard caught it one commit late, which is one commit later than it should have been.
 
+**A second, unrelated example system runs on the engine unchanged.** The portability proof,
+and the exit criterion most likely to expose something structural. It did.
+
+```
+examples/sensor-node/     three nodes, one real, two frame players
+                          22 of 22 passed in 372 s on 4 workers
+```
+
+An industrial pressure transducer on a process bus, not a scooter powertrain, and every
+detail that could catch something hardcoded made deliberately different:
+
+```
+identifiers    0x0A0-0x0C0     not 0x200-0x610
+CAN instance   fdcan2          not fdcan1
+console UART   usart2          not usart3
+bit rate       250 kbit/s      not 500
+board table    its own         not harness/boards.yml
+enums          alarm_code / OVERPRESSURE, sharing no spelling with the other system
+```
+
+`grep -ri` over `harness/*.py` finds no `press`, `plc`, `panel`, `pressure`, `kpa`,
+`fdcan2`, `usart2`, `OVERPRESSURE`, `sensor_node`, `alarm_code` or `transducer`. The only
+matches for "press" are `compressed` and `expressed`.
+
+**Four genericity leaks, all the same shape**: a parameter that existed on one side of a
+pair and not the other. `run_suite.py` took `--topology` but not `--contract` or `--boards`,
+though the engine accepted all three — so a project whose contract lived elsewhere could be
+run one scenario at a time and never as a suite. `build-firmware.sh` read `network.yml` and
+`harness/boards.yml` by name, so this system's one real node could not be built at all. The
+studio's `loadBoards()` was fixed at `harness/boards.yml`, so pointing the canvas at this
+topology looked every board up in the *other* system's table and drew all three as "not in
+the board table" — a correct message about the wrong question. And `run_one`'s test doubles
+needed updating twice as its signature grew.
+
+None of the four was project data inside the engine. All four were the tooling around it
+assuming there was only one project.
+
+**Three refusals from the engine that were right where I was wrong.** The pattern refused
+nine misspelled parameters and listed what it declares. It refused a sweep with no timing
+dimension: *"the instant a stimulus lands decides which firmware state sees it, so there is
+no default worth guessing."* And it refused two instants that both witnessed `MEASURING`:
+*"two moments that meet the device in the same condition are one test run twice."*
+
+That last refusal changed the **firmware**, not the test. Settling ended at 50 ms, before
+the first measurement frame went out at 100 ms, so no observer could ever see the node
+report `SETTLING` — a state that existed and was permanently unobservable. 400 ms is both
+observable and what a real transducer chain takes to stabilise.
+
+**`wait_uart` spends its whole timeout of virtual time**, however early the banner appears,
+and a pattern's timed instants are measured from after the boot wait — so `boot_timeout`
+shifts every one of them. At 500 ms the instant declared "200 ms in" landed at 700 ms
+absolute, past this node's settling, and all nine `at-200ms` variants failed while all nine
+`at-650ms` variants passed. A legal value failing beside a faulting one is what said this
+was not a threshold problem. `boot_timeout: 100` here is not a safety margin; it is what
+keeps the instants under the firmware they describe.
+
+Only a second system could have taught that. It is the cheapest place this could have been
+found, and the argument for §13 in one paragraph.
+
 ### Not yet built
 
-Sections 3.5 through 3.9 — firmware upload, Render, running tests from the interface,
-canvas editing, and the second example system. The canvas is read-only, which section
-3.8 permits explicitly.
+Sections 3.5, 3.6 and 3.7 — firmware upload with symbol verification, Render, and
+running tests from the interface. The canvas is read-only, which section 3.8 permits
+explicitly, and section 3.9 is done.
+
+One exit criterion remains open: **coverage joined to discrimination on the results
+screen**. It is now possible rather than done — the runner can trace a whole suite and the
+merge will attach a report and refuses one that does not name exactly this run's tests —
+but no traced run exists yet, so the Coverage tab still states its absence rather than a
+figure. Stated as open rather than rounded up.
 
 Two controls on screen are drawn as unavailable and say so: "replay this test" names
 section 3.7, and the Coverage tab names the command that would produce a report instead
