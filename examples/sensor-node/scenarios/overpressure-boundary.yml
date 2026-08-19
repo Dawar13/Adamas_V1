@@ -1,0 +1,67 @@
+# The pair of values a > / >= slip cannot survive.
+#
+# 4000 kPa is the limit and is legal; 4001 kPa is one unit past it and must
+# alarm. Every other scenario in this system passes against firmware that
+# compares the wrong way round -- the first system learned that when all eight
+# of its original scenarios passed against a build differing by exactly this
+# character.
+#
+# Written out rather than generated, because it also reads the rule's own input
+# back out of the running machine. A quiet bus proves nothing unless the value
+# the rule compares really is the value the test believes it injected.
+id: overpressure-boundary
+title: 4000 kPa is a legal process pressure, 4001 kPa alarms
+description: >
+  Walk the over-pressure limit across its exclusive boundary. At exactly 4000 kPa
+  the node must stay quiet on the alarm identifier, with the reading confirmed by
+  a read-back of the rule's own input. One kilopascal higher the alarm must carry
+  OVERPRESSURE within 50 ms. The alarm must then survive the pressure returning
+  to 1000 kPa, because the rule latches.
+steps:
+  - wait_uart:
+      node: press
+      text: "PRESS ready"
+      timeout_ms: 500
+  - mark: "pressure driven to exactly 4000 kPa, the limit itself"
+  - write_symbol:
+      node: press
+      symbol: g_pressure_kpa
+      value: 4000
+  - expect_no_can:
+      id: 0x0A2
+      for_ms: 300
+      label: "4000 kPa is legal: no alarm frame for 300 ms"
+  - expect_symbol:
+      node: press
+      symbol: g_pressure_kpa
+      equals: 4000
+      label: "the value the rule compares really is 4000 kPa"
+  - expect_can:
+      id: 0x0A0
+      signals:
+        pressure_kpa: 4000
+      within_ms: 300
+      label: "the node publishes the 4000 kPa it judged legal"
+  - mark: "one kilopascal above the limit"
+  - write_symbol:
+      node: press
+      symbol: g_pressure_kpa
+      value: 4001
+  - expect_can:
+      id: 0x0A2
+      signals:
+        alarm_code: OVERPRESSURE
+        latched: 1
+      within_ms: 50
+      label: "4001 kPa alarms with OVERPRESSURE within 50 ms"
+  - mark: "pressure back to 1000 kPa, the alarm must not clear"
+  - write_symbol:
+      node: press
+      symbol: g_pressure_kpa
+      value: 1000
+  - expect_can:
+      id: 0x0A2
+      signals:
+        alarm_code: OVERPRESSURE
+      within_ms: 600
+      label: "OVERPRESSURE stays latched after the pressure returns to normal"

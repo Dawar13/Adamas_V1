@@ -267,12 +267,20 @@ def shard_of(tests, shard: int, of: int):
 
 
 def run_one(python, test: Path, out_root: Path, timeout_s: int,
-            topology, coverage=False) -> dict:
+            topology, coverage=False, contract=None, boards=None) -> dict:
     """Run one test in its own directory, and never lose it from the tally."""
     out_dir = out_root / test.stem
     command = python + [str(ENGINE), str(test), "--quiet", "--out", str(out_dir)]
     if topology:
         command += ["--topology", topology]
+    # The engine has always accepted these; this runner did not pass them on, so
+    # a project whose contract and board table live outside the defaults could be
+    # run one scenario at a time and never as a suite. Nothing about that was
+    # visible until a second system existed to need it.
+    if contract:
+        command += ["--contract", contract]
+    if boards:
+        command += ["--boards", boards]
     if coverage:
         # Coverage has to be measured while the tests run; it cannot be added
         # to a finished run. Without this the whole suite could never be
@@ -405,6 +413,11 @@ def main(argv=None) -> int:
                         help="run only this shard, numbered from 1")
     parser.add_argument("--of", type=int, default=None,
                         help="how many shards the suite is split into")
+    parser.add_argument("--contract", default=None,
+                        help="override the contract file, for a project whose "
+                             "data does not live at the default paths")
+    parser.add_argument("--boards", default=None,
+                        help="override the board table")
     parser.add_argument("--coverage", action="store_true",
                         help="record which instructions each machine executed, "
                              "so harness/coverage.py can attribute them. Costs "
@@ -454,7 +467,8 @@ def main(argv=None) -> int:
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {
             pool.submit(run_one, python, test, out_root, args.timeout,
-                        args.topology, args.coverage): test
+                        args.topology, args.coverage,
+                        args.contract, args.boards): test
             for test in tests
         }
         for future in concurrent.futures.as_completed(futures):

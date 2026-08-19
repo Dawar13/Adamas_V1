@@ -213,6 +213,18 @@ export async function handleApi(req, res) {
        * this kind of hole always appears.
        */
       const wanted = url.searchParams.get("file");
+      const wantedBoards = url.searchParams.get("boards");
+      for (const candidate of [wanted, wantedBoards]) {
+        if (candidate === null) continue;
+        const resolved = path.resolve(REPO_ROOT, candidate);
+        if (!contained(candidate) || namesADevice(resolved) ||
+            !VIEWABLE.has(path.extname(resolved).toLowerCase())) {
+          json(res, 403, {
+            error: `'${candidate}' is not a project file inside this repository.`,
+          });
+          return true;
+        }
+      }
       if (wanted !== null) {
         const full = path.resolve(REPO_ROOT, wanted);
         if (!contained(wanted) || namesADevice(full) ||
@@ -223,7 +235,7 @@ export async function handleApi(req, res) {
           return true;
         }
       }
-      json(res, 200, await loadDesign(wanted || undefined));
+      json(res, 200, await loadDesign(wanted || undefined, wantedBoards || undefined));
       return true;
     }
 

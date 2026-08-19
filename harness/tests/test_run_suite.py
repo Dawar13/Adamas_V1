@@ -205,7 +205,7 @@ class TestTheTallyCannotOverstateItself(unittest.TestCase):
 
     def main(self, *extra):
         def fake_run_one(python, test, out_root, timeout, topology,
-                         coverage=False):
+                         coverage=False, contract=None, boards=None):
             return {"test": test.stem, "outcome": "pass", "exit_code": 0,
                     "verdict": "PASS", "latency_us": 1,
                     "out_dir": str(out_root / test.stem)}
@@ -250,7 +250,7 @@ class TestTheTallyCannotOverstateItself(unittest.TestCase):
 
     def main_loud(self, *extra):
         def fake_run_one(python, test, out_root, timeout, topology,
-                         coverage=False):
+                         coverage=False, contract=None, boards=None):
             return {"test": test.stem, "outcome": "pass", "exit_code": 0,
                     "verdict": "PASS", "latency_us": 1,
                     "out_dir": str(out_root / test.stem)}

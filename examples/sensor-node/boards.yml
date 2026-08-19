@@ -1,0 +1,39 @@
+# Board targets for the industrial sensor-node example.
+#
+# A PROJECT'S OWN BOARD TABLE, OUTSIDE harness/.
+#
+# The scooter's table lives at harness/boards.yml because that is where the
+# first system put it. This one does not, and that is the point of the exercise:
+# a second system must be expressible entirely as its own data, reached through
+# the engine's --boards override, with nothing added to the engine.
+#
+# This file is the ONE place in this example where a peripheral name may appear.
+# Nothing in harness/ names fdcan2 or usart2; if anything did, this board could
+# not exist.
+
+sensor_node:
+  repl: platforms/boards/sensor_node.repl
+  zephyr_board: nucleo_h743zi
+
+  # DELIBERATELY NOT fdcan1 AND usart3.
+  #
+  # The scooter's three boards all use fdcan1 and usart3, so nothing so far has
+  # ever proved the engine reads these names rather than assuming them. These do.
+  can_peripheral: sysbus.fdcan2
+  uart_peripheral: sysbus.usart2
+
+  cpu_peripheral: sysbus.cpu
+  vector_table_symbol: null
+
+  # And a different bit rate, for the same reason. network.yml declares the
+  # process bus at 250 kbit/s and the firmware overlay forces the controller to
+  # match; the build gate reads the value back out of the GENERATED devicetree
+  # and fails if the two disagree.
+  can_bitrate: 250000
+
+  tier: modelled
+  notes: |
+    ST Nucleo-H743ZI running the pressure-sensor firmware, on fdcan2 and
+    usart2. Same chip layer as the scooter's boards; a genuinely different
+    silicon vendor is a board-library question and belongs in Phase 5.
+    Stays `modelled` until this example's suite passes end to end on it.

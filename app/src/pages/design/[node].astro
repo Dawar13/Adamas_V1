@@ -29,8 +29,11 @@ let node = null;
 let injected = [];
 let refused = null;
 
+const wantedTopology = Astro.url.searchParams.get("file") || undefined;
+const wantedBoards = Astro.url.searchParams.get("boards") || undefined;
+
 try {
-  design = await loadDesign();
+  design = await loadDesign(wantedTopology, wantedBoards);
   node = design.nodes.find((candidate) => candidate.id === nodeId) ?? null;
   if (node) injected = await injectionPoints(node);
 } catch (err) {
@@ -42,7 +45,7 @@ const board = node?.board_detail ?? null;
 ---
 
 <Base title={`${nodeId} — Bench`}>
-  <p class="crumb"><a href="/design">← system</a></p>
+  <p class="crumb"><a href={`/design${Astro.url.search}`}>← system</a></p>
 
   {refused && (
     <section class="empty is-refused">

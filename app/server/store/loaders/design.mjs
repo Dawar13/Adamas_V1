@@ -86,13 +86,13 @@ export async function loadTopology(file = "network.yml") {
  *
  * Anything it cannot parse is reported as absent, never guessed.
  */
-export async function loadBoards() {
-  const file = path.join(REPO_ROOT, "harness", "boards.yml");
+export async function loadBoards(boardsFile = "harness/boards.yml") {
+  const file = path.join(REPO_ROOT, boardsFile);
   let text;
   try {
     text = await readFile(file, "utf8");
   } catch (err) {
-    throw new DesignUnreadable(`harness/boards.yml could not be read: ${err.message}`);
+    throw new DesignUnreadable(`${boardsFile} could not be read: ${err.message}`);
   }
 
   const boards = {};
@@ -120,9 +120,19 @@ export async function loadBoards() {
   return boards;
 }
 
-/** The topology, its boards, and what each node's box should say. */
-export async function loadDesign(file = "network.yml") {
-  const [topology, boards] = await Promise.all([loadTopology(file), loadBoards()]);
+/**
+ * The topology, its boards, and what each node's box should say.
+ *
+ * BOTH FILES ARE PARAMETERS. The board table used to be fixed at
+ * harness/boards.yml, so pointing the canvas at a second system's topology
+ * looked every board up in the first system's table and drew all of them as
+ * "not in the board table" -- a correct message about the wrong question.
+ */
+export async function loadDesign(file = "network.yml", boardsFile = "harness/boards.yml") {
+  const [topology, boards] = await Promise.all([
+    loadTopology(file),
+    loadBoards(boardsFile),
+  ]);
 
   const nodes = topology.nodes.map((node) => {
     const board = node.board ? boards[node.board] ?? null : null;
@@ -144,5 +154,5 @@ export async function loadDesign(file = "network.yml") {
     };
   });
 
-  return { ...topology, nodes, boards };
+  return { ...topology, nodes, boards, source_topology: file, source_boards: boardsFile };
 }

@@ -1,0 +1,58 @@
+# The industrial pressure-sensor system — three nodes on one process bus.
+#
+# THE PORTABILITY PROOF (Phase 3 §13).
+#
+# Three nodes, not six. One real, two frame players. A different domain, a
+# different board, different identifiers, a different bit rate. It must run with
+# no changes to the engine, and any place it cannot is a place the engine had
+# absorbed something about the first system.
+#
+# The scenarios in this directory never say which nodes are real and which are
+# played. That rule is what makes this system's tests portable at all: `plc`
+# becomes real firmware the day someone has a controller binary, and not one
+# scenario changes.
+
+buses:
+  - { id: process, type: can, bitrate: 250000 }   # 250 kbit/s, not the scooter's 500
+
+nodes:
+
+  # ------------------------------------------------------- the device under test
+  - id: press
+    type: real
+    board: sensor_node                # fdcan2 and usart2, not fdcan1 and usart3
+    elf: firmware/press/build/zephyr/zephyr.elf
+    boot_text: "PRESS ready"
+    buses: [process]
+    dut: true
+    # How a scenario silences this node without knowing it runs real firmware.
+    tx_enable_symbol: g_tx_enable
+    position: { x: 100, y: 100 }
+
+  # ---------------------------------------------------------- the controller
+  #
+  # A frame player. It has no binary and executes nothing, and no scenario in
+  # this directory can tell -- which is the property that lets it become real
+  # firmware later without touching a single test.
+  - id: plc
+    type: scripted
+    buses: [process]
+    emits: [0x0B0]
+    period_ms: 100
+    default_signals:
+      plc_heartbeat: 0
+      setpoint_kpa: 2000            # 2000 kPa commanded, well under the 4000 limit
+      plc_mode: RUN                 # enum plc_mode
+      purge_request: 0
+
+  # ------------------------------------------------------------ the operator panel
+  - id: panel
+    type: scripted
+    buses: [process]
+    emits: [0x0C0]
+    period_ms: 500
+    default_signals:
+      display_page: 1
+      ack_pending: 0
+      backlight_pct: 80
+    position: { x: 420, y: 240 }

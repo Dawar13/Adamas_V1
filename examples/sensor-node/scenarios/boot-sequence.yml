@@ -1,0 +1,24 @@
+id: boot-sequence
+title: The sensor node boots, settles, and publishes its measurement
+description: >
+  The cheapest possible check that this system is wired up at all: the node
+  announces itself on the console the harness taps, then puts its measurement on
+  the identifier the contract assigns it, carrying the pressure that was
+  injected. If the console or the CAN instance were tapped from the wrong
+  peripheral, this is the scenario that fails first and fails plainly.
+steps:
+  - wait_uart:
+      node: press
+      text: "PRESS ready"
+      timeout_ms: 500
+  - mark: "settled; expecting the measurement on the process bus"
+  - expect_can:
+      id: 0x0A0
+      signals:
+        sensor_state: MEASURING
+      within_ms: 600
+      label: "measurement frame reports MEASURING once settled"
+  - expect_no_can:
+      id: 0x0A2
+      for_ms: 200
+      label: "no alarm frame while the process is within limits"

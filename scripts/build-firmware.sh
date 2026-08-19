@@ -35,18 +35,29 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 NODE="${1:-}"
 [ -n "$NODE" ] || die "usage: scripts/build-firmware.sh <node_id> [--boot] [--pristine]
-<node_id> must be a node in network.yml with type: real."
+                              [--network FILE] [--boards FILE]
+<node_id> must be a node in the topology with type: real."
 
 shift
 DO_BOOT=0
 PRISTINE="auto"
-for arg in "$@"; do
-	case "$arg" in
-		--boot) DO_BOOT=1 ;;
-		--pristine) PRISTINE="always" ;;
-		*) die "unknown option: $arg" ;;
+# Which project. Defaulted, never assumed: this script used to name
+# network.yml and harness/boards.yml outright, so a second example system could
+# not be built at all -- a genericity leak in the tooling rather than in the
+# engine, and just as fatal to the claim that the engine is generic.
+NETWORK="network.yml"
+BOARDS="harness/boards.yml"
+while [ $# -gt 0 ]; do
+	case "$1" in
+		--boot) DO_BOOT=1; shift ;;
+		--pristine) PRISTINE="always"; shift ;;
+		--network) NETWORK="${2:-}"; shift 2 ;;
+		--boards) BOARDS="${2:-}"; shift 2 ;;
+		*) die "unknown option: $1" ;;
 	esac
 done
+[ -f "$NETWORK" ] || die "no topology file at $NETWORK"
+[ -f "$BOARDS" ] || die "no board table at $BOARDS"
 
 PY="$BENCH_VENV/bin/python"
 [ -x "$PY" ] || die "toolchain python missing at $PY. Run ./scripts/setup.sh first."
@@ -55,15 +66,16 @@ PY="$BENCH_VENV/bin/python"
 # Resolve this node from project data.
 # ---------------------------------------------------------------------------
 read_node() {
-	"$PY" - "$NODE" <<'PYEOF'
+	"$PY" - "$NODE" "$NETWORK" "$BOARDS" <<'PYEOF'
 import sys, yaml, os, shlex
-node_id = sys.argv[1]
-net = yaml.safe_load(open("network.yml", encoding="utf-8"))
-boards = yaml.safe_load(open("harness/boards.yml", encoding="utf-8"))
+node_id, network_path, boards_path = sys.argv[1], sys.argv[2], sys.argv[3]
+net = yaml.safe_load(open(network_path, encoding="utf-8"))
+boards = yaml.safe_load(open(boards_path, encoding="utf-8"))
 
 nodes = {n["id"]: n for n in net["nodes"]}
 if node_id not in nodes:
-    sys.exit("no node %r in network.yml (have: %s)" % (node_id, ", ".join(sorted(nodes))))
+    sys.exit("no node %r in %s (have: %s)"
+             % (node_id, network_path, ", ".join(sorted(nodes))))
 n = nodes[node_id]
 if n.get("type") != "real":
     sys.exit("node %r is type %r; only real nodes have firmware to build"
@@ -72,7 +84,8 @@ if n.get("type") != "real":
 key = n.get("board")
 b = boards.get(key)
 if b is None:
-    sys.exit("node %r names board %r, which is not in harness/boards.yml" % (node_id, key))
+    sys.exit("node %r names board %r, which is not in %s"
+             % (node_id, key, boards_path))
 if b.get("tier") == "declared":
     sys.exit("board %r is tier 'declared': definable, not runnable.\n"
              "  %s\n"
@@ -83,7 +96,7 @@ if b.get("tier") == "declared":
 buses = {x["id"]: x for x in net["buses"]}
 attached = [buses[bid] for bid in n.get("buses", []) if bid in buses]
 if not attached:
-    sys.exit("node %r is not attached to any bus in network.yml" % node_id)
+    sys.exit("node %r is not attached to any bus in %s" % (node_id, network_path))
 bitrate = attached[0].get("bitrate")
 
 elf = n["elf"]
@@ -123,14 +136,16 @@ echo "--- $NODE ---"
 printf '  %-14s %s\n' "app" "$APP"
 printf '  %-14s %s\n' "zephyr board" "$ZBOARD"
 printf '  %-14s %s\n' "bus bitrate" "$BUS_BITRATE"
+printf '  %-14s %s\n' "topology" "$NETWORK"
+printf '  %-14s %s\n' "board table" "$BOARDS"
 
 # ---------------------------------------------------------------------------
 # Gate 1a: project data must agree with itself before we compile anything.
 # ---------------------------------------------------------------------------
 if [ -n "$BOARD_BITRATE" ] && [ "$BOARD_BITRATE" != "$BUS_BITRATE" ]; then
 	die "CAN bitrate disagreement in project data.
-  network.yml bus         $BUS_BITRATE
-  harness/boards.yml      $BOARD_BITRATE
+  $NETWORK bus            $BUS_BITRATE
+  $BOARDS board           $BOARD_BITRATE
 These must match. A bus whose nodes are configured for different bitrates
 carries no traffic at all, and nothing reports an error."
 fi

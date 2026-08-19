@@ -1,0 +1,30 @@
+// Industrial pressure-sensor node — board layer.
+//
+// The SECOND example system's board (Phase 3 §13). It exists to prove the
+// engine is generic, so it is deliberately different from the scooter's boards
+// in the ways that would catch something hardcoded:
+//
+//     CAN   fdcan2, not fdcan1
+//     UART  usart2, not usart3
+//     bus   250 kbit/s, not 500
+//
+// If any of those names or numbers were baked into the harness rather than read
+// out of the board table and the topology, this board is what fails.
+//
+// Same chip layer as the scooter's boards, because the point being tested is
+// the engine's independence from a board, not Renode's coverage of a second
+// silicon vendor. A different vendor is a board-library question and belongs in
+// Phase 5, where the tier system already says what it would cost.
+using "../nucleo_h743zi_can.repl"
+
+// Nothing else. Sensor values are injected at variable level (PROJECT.md §6),
+// so there is no transducer to model, and a board file that invented one would
+// be a placeholder pretending to be a specification.
+//
+// fdcan2 and usart2 are already present in the chip layer:
+//     fdcan2: CAN.MCAN @ sysbus 0x4000A400, messageRAM: canMessageRAM
+//     usart2: UART.STM32F7_USART @ sysbus 0x40004400
+//
+// fdcan1 and fdcan2 share canMessageRAM in Renode's STM32H743 description, as
+// they do on the real part. This node uses only fdcan2, and each node runs in
+// its own emulated machine, so nothing else is allocating out of that region.

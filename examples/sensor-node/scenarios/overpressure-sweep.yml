@@ -1,0 +1,65 @@
+# The over-pressure limit, walked.
+#
+# The same pattern the first system sweeps its thermal limit with, instantiated
+# against a different node, a different symbol, a different identifier and a
+# different unit. If the generator had absorbed anything about the first system,
+# this file is what fails.
+id: overpressure-sweep
+title: The over-pressure rule across its limit
+
+pattern: threshold-exceeded
+
+params:
+  node: press
+  symbol: g_pressure_kpa
+  limit: 4000
+  unit: kPa
+  message: 0x0A2
+  signal: alarm_code
+  value_name: OVERPRESSURE
+  deadline: 50
+  latching: true
+  healthy: 1000
+  observe_ms: 300
+  latch_ms: 600
+  # 100 ms, not 500, and the difference is not a safety margin.
+  #
+  # wait_uart spends its WHOLE timeout of virtual time however early the banner
+  # appears, and the sweep's timed instants are measured from after it -- so
+  # boot_timeout shifts every one of them. At 500 the "200 ms in" instant landed
+  # at 700 ms absolute, well past this node's settling, and the state the variant
+  # says it injects into was long over. The banner arrives at 373 us; 100 ms is
+  # ten thousand times that and does not move the instants out from under the
+  # firmware.
+  boot_timeout: 100
+  state_message: 0x0A0
+  state_signal: sensor_state
+  state_window: 150
+
+sweep:
+  # 4000 is the limit and 4001 the first alarming value: the mandatory pair,
+  # which the generator refuses to omit. The rest establish that the behaviour
+  # is monotonic rather than a coincidence at one point.
+  values: [3000, 3800, 3990, 3999, 4000, 4001, 4100, 4500, 6000]
+
+  # WHEN the pressure arrives, which decides what the node is doing when it
+  # does. Two instants, both after settling, deliberately at different points
+  # in the 100 ms publish cadence: one shortly after a measurement has gone out
+  # and one shortly before the next is due. A deadline met from one phase and
+  # missed from the other is a real defect, and a single instant cannot see it.
+  #
+  # Two, because this node has two observable conditions and not three. The
+  # generator refuses two instants that witness the same state -- two moments
+  # meeting the device in the same condition are one test run twice -- and it
+  # was right to: the first attempt here put both in MEASURING.
+  #
+  # Injecting during SETTLING is the interesting half. The rule is deliberately
+  # not gated on the state, because an over-pressure is dangerous whether or not
+  # the transducer has stabilised; if someone later gates it, this half goes red.
+  at:
+    # 200 ms, not 150: the state has to be witnessed BEFORE the stimulus lands
+    # and that takes the 150 ms state_window, so a moment only 150 ms in leaves
+    # no room to observe anything. Frames go out at 100 and 200 ms and settling
+    # runs to 250, so both of them report SETTLING.
+    - { ms: 200, state: SETTLING }     # transducer still stabilising
+    - { ms: 650, state: MEASURING }    # settled, reading trusted

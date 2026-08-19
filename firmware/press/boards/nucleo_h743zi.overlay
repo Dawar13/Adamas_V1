@@ -1,0 +1,68 @@
+/*
+ * The pressure node's board wiring: fdcan2 and usart2.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY A DIFFERENT CAN INSTANCE AND A DIFFERENT CONSOLE
+ * ---------------------------------------------------------------------------
+ * This is the second example system's whole job (Phase 3 §13). All three of the
+ * first system's boards use fdcan1 and usart3, so nothing until now has ever
+ * proved the harness READS those names out of the board table rather than
+ * assuming them. This overlay is what makes the proof possible: if any part of
+ * the engine had fdcan1 or usart3 baked in, this firmware boots and the harness
+ * taps nothing.
+ *
+ * Nothing in the C changes. The controller comes from `zephyr,canbus` and the
+ * console from `zephyr,console`, both resolved at build time from here.
+ *
+ * ---------------------------------------------------------------------------
+ * BITRATE
+ * ---------------------------------------------------------------------------
+ * network.yml declares the process bus at 250 kbit/s -- also different from the
+ * scooter's 500. scripts/build-firmware.sh reads the value back out of the
+ * GENERATED devicetree and fails the build if it disagrees with the topology,
+ * because what matters is what the compiler concluded, not what we believe we
+ * asked for. Nodes on mismatched bitrates produce a bus carrying no traffic at
+ * all, and neither the firmware nor the emulator reports an error.
+ *
+ * ---------------------------------------------------------------------------
+ * MESSAGE RAM
+ * ---------------------------------------------------------------------------
+ * Same shape as the first system's, and for the same reason: Zephyr's stock
+ * <0x0 28 0 3 3 0 3 3> allocates more elements than the H743's 2560-word window
+ * holds once the 72-byte TX elements are counted, and the build stops on a
+ * BUILD_ASSERT. Offsets start at 0 because this node uses only fdcan2 -- fdcan1
+ * and fdcan2 share one message-RAM region on this part, and each node runs in
+ * its own emulated machine, so nothing else is allocating out of it.
+ */
+
+&fdcan2 {
+	pinctrl-0 = <&fdcan2_tx_pb13 &fdcan2_rx_pb12>;
+	pinctrl-names = "default";
+	bus-speed = <250000>;
+	/* Required by st,stm32h7-fdcan whether or not the data phase is used.
+	 * The board dts supplies it for fdcan1; fdcan2 is left disabled and
+	 * unconfigured, so enabling it means supplying every mandatory property.
+	 * Classic CAN only here -- no frame on this bus is FD -- but the binding
+	 * demands a data-phase rate regardless, so it is stated rather than
+	 * omitted and left for the generator to reject. */
+	bus-speed-data = <1000000>;
+	bosch,mram-cfg = <0x0 8 0 3 1 0 5 6>;
+	status = "okay";
+};
+
+/* The console moves to usart2. usart3 stays as the board defines it and is
+ * simply not chosen -- the harness taps whatever the board table names. */
+&usart2 {
+	pinctrl-0 = <&usart2_tx_pd5 &usart2_rx_pd6>;
+	pinctrl-names = "default";
+	current-speed = <115200>;
+	status = "okay";
+};
+
+/ {
+	chosen {
+		zephyr,canbus = &fdcan2;
+		zephyr,console = &usart2;
+		zephyr,shell-uart = &usart2;
+	};
+};

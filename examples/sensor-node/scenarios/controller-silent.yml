@@ -1,0 +1,28 @@
+id: controller-silent
+title: The controller going quiet raises CONTROLLER_LOST
+description: >
+  The controller's periodic word is what tells this node the process is still
+  being commanded. Silence it and the node must decide, within its timeout, that
+  the controller is gone — and say so on the bus. The scenario never states
+  whether the controller runs real firmware or is a frame player, because it
+  must work either way.
+steps:
+  - wait_uart:
+      node: press
+      text: "PRESS ready"
+      timeout_ms: 500
+  - mark: "controller commanding normally"
+  - expect_no_can:
+      id: 0x0A2
+      for_ms: 200
+      label: "no alarm while the controller is speaking"
+  - mark: "silencing the controller"
+  - node_silence:
+      node: plc
+      silence: true
+  - expect_can:
+      id: 0x0A2
+      signals:
+        alarm_code: CONTROLLER_LOST
+      within_ms: 900
+      label: "alarm reports CONTROLLER_LOST after the controller stops"

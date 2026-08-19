@@ -1,0 +1,80 @@
+# The CAN contract for the industrial pressure-sensor example.
+#
+# A DIFFERENT DOMAIN, DIFFERENT IDENTIFIERS, DIFFERENT SIGNALS.
+#
+# Nothing here overlaps the scooter's contract. The identifiers sit in the 0x0A0
+# block rather than 0x200-0x610, the signals measure a process rather than a
+# powertrain, and the enum spellings share not one word with the other system's.
+# That is deliberate: if the engine had absorbed any of the scooter's vocabulary,
+# this file is what fails to compile.
+
+messages:
+
+  # ---------------------------------------------------------------- the sensor
+
+  - id: 0x0A0                     # press_measure — 100 ms, the process reading
+    name: press_measure
+    dlc: 6
+    sender: press
+    signals:
+      - { name: pressure_kpa,    start_bit: 0,  length: 16 }                  # 0..65535 kPa
+      - { name: medium_temp_dC,  start_bit: 16, length: 16, signed: true }    # SIGNED: process fluid can be below zero
+      - { name: sensor_state,    start_bit: 32, length: 8  }                  # enum sensor_state
+      - { name: measure_counter, start_bit: 40, length: 8  }                  # rolling 0..255, wraps
+
+  - id: 0x0A2                     # press_alarm — event driven, repeated while active
+    name: press_alarm
+    dlc: 4
+    sender: press
+    signals:
+      - { name: alarm_code, start_bit: 0,  length: 8 }   # enum alarm_code
+      - { name: latched,    start_bit: 8,  length: 8 }   # 1 once raised, and it stays 1
+      - { name: alarm_seq,  start_bit: 16, length: 8 }   # increments per transmission
+
+  # ------------------------------------------------------------- the controller
+
+  - id: 0x0B0                     # plc_command — 100 ms, the controller's word
+    name: plc_command
+    dlc: 6
+    sender: plc
+    signals:
+      - { name: plc_heartbeat, start_bit: 0,  length: 8  }   # rolling, its liveness
+      - { name: setpoint_kpa,  start_bit: 8,  length: 16 }   # commanded process pressure
+      - { name: plc_mode,      start_bit: 24, length: 8  }   # enum plc_mode
+      - { name: purge_request, start_bit: 32, length: 8  }   # 1 = open the purge valve
+
+  # --------------------------------------------------------------- the display
+
+  - id: 0x0C0                     # panel_status — 500 ms, the operator panel
+    name: panel_status
+    dlc: 3
+    sender: panel
+    signals:
+      - { name: display_page,  start_bit: 0,  length: 8 }
+      - { name: ack_pending,   start_bit: 8,  length: 8 }   # operator has not acknowledged
+      - { name: backlight_pct, start_bit: 16, length: 8 }
+
+enums:
+
+  # press_measure.sensor_state — where the transducer chain is in its cycle.
+  sensor_state:
+    0: INIT
+    1: SETTLING                  # powered, reading not yet trusted
+    2: MEASURING
+    3: FAULTED
+
+  # press_alarm.alarm_code — the safety verdict this node publishes.
+  #
+  # Not one spelling is shared with the scooter's fault_code. If the engine had
+  # learned any of those names, this is where it would show.
+  alarm_code:
+    0: CLEAR
+    1: OVERPRESSURE
+    2: CONTROLLER_LOST           # the controller's periodic word stopped arriving
+    3: TRANSDUCER_OPEN           # sensor wiring reads out of range
+
+  # plc_command.plc_mode — what the controller says the process is doing.
+  plc_mode:
+    0: IDLE
+    1: RUN
+    2: PURGE

@@ -20,10 +20,18 @@ import { loadDesign, DesignUnreadable } from "../../server/store/loaders/design.
  * for nothing.
  */
 
+/*
+ * Which project. Defaulted to the repository's own, never assumed: a second
+ * example system exists, and a canvas that could only ever draw one of them
+ * would be a canvas that draws whichever system it was written beside.
+ */
+const wantedTopology = Astro.url.searchParams.get("file") || undefined;
+const wantedBoards = Astro.url.searchParams.get("boards") || undefined;
+
 let design = null;
 let refused = null;
 try {
-  design = await loadDesign();
+  design = await loadDesign(wantedTopology, wantedBoards);
 } catch (err) {
   if (err instanceof DesignUnreadable) refused = err.message;
   else throw err;
@@ -53,7 +61,8 @@ try {
             {design.nodes
               .filter((node) => node.buses.includes(bus.id))
               .map((node) => (
-                <a class={`node ${node.dut ? "is-dut" : ""}`} href={`/design/${node.id}`}>
+                <a class={`node ${node.dut ? "is-dut" : ""}`}
+                   href={`/design/${node.id}${Astro.url.search}`}>
                   <div class="node-head">
                     <span class={`node-dot ${node.is_real ? "is-real" : "is-scripted"}`}
                           title={node.is_real

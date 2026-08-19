@@ -1,0 +1,42 @@
+id: overpressure-fault
+title: Over-pressure raises a latched alarm on the bus
+description: >
+  Inject 4500 kPa into the transducer reading and require the alarm frame,
+  carrying alarm_code OVERPRESSURE, inside 50 ms. The process is first observed
+  quiet on that identifier for 200 ms, so an alarm arriving afterwards can only
+  be the one the injection caused. The pressure is then returned to normal and
+  the alarm must still be there, because it latches.
+steps:
+  - wait_uart:
+      node: press
+      text: "PRESS ready"
+      timeout_ms: 500
+  - mark: "process nominal, watching the alarm identifier"
+  - expect_no_can:
+      id: 0x0A2
+      for_ms: 200
+      label: "no alarm while the process is within limits"
+  - mark: "injecting 4500 kPa, past the 4000 kPa limit"
+  - write_symbol:
+      node: press
+      symbol: g_pressure_kpa
+      value: 4500
+  - expect_can:
+      id: 0x0A2
+      signals:
+        alarm_code: OVERPRESSURE
+        latched: 1
+      within_ms: 50
+      label: "alarm frame reports OVERPRESSURE within 50 ms"
+  - mark: "pressure back to 1000 kPa; the alarm must not clear"
+  - write_symbol:
+      node: press
+      symbol: g_pressure_kpa
+      value: 1000
+  - expect_can:
+      id: 0x0A2
+      signals:
+        alarm_code: OVERPRESSURE
+        latched: 1
+      within_ms: 600
+      label: "alarm stays latched after the pressure returns to normal"
