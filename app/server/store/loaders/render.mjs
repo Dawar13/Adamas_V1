@@ -270,8 +270,28 @@ export async function renderChecks({ topology, boards, contract, scenarios } = {
   }
 
   if (contractError) {
-    checks.push(bad("no two senders claim one identifier", contractError));
-    checks.push(bad("every signal the tests name is in the contract", contractError));
+    /*
+     * A duplicate identifier is refused by the engine's own contract loader,
+     * which is why the comparison below can never fire. That is the right place
+     * for the guarantee -- one reader, and its message names both messages and
+     * the id -- so this reports the engine's refusal rather than pretending to
+     * have found it here.
+     */
+    const duplicate = /is used by both/.test(contractError);
+    checks.push(
+      duplicate
+        ? bad("no two senders claim one identifier", contractError)
+        : refused(
+            "no two senders claim one identifier",
+            `this could not be checked: ${contractError}`
+          )
+    );
+    checks.push(
+      refused(
+        "every signal the tests name is in the contract",
+        `this could not be checked: the contract did not load`
+      )
+    );
   } else {
     // 5 — no duplicate message IDs across senders
     const byId = new Map();
@@ -291,8 +311,12 @@ export async function renderChecks({ topology, boards, contract, scenarios } = {
       clashes.length === 0
         ? ok("no two senders claim one identifier",
              `${contractDoc.messages.length} message(s) across ` +
-             `${new Set(contractDoc.messages.map((m) => m.sender)).size} sender(s)`)
-        : bad("no two senders claim one identifier", clashes.join("; "))
+             `${new Set(contractDoc.messages.map((m) => m.sender)).size} sender(s)` +
+             `, and the engine's contract loader refuses a duplicate before this point`)
+        : // Kept as a backstop rather than deleted: if the loader ever stops
+          // refusing, this is what notices, and a second reading of the same
+          // rule costs nothing next to a contract that silently accepts one.
+          bad("no two senders claim one identifier", clashes.join("; "))
     );
 
     // 6 — every signal in every test exists in the contract

@@ -214,10 +214,38 @@ describe("each check can fail", () => {
     });
     const result = await renderChecks(where);
     const check = named(result, "one identifier");
-    // The engine's own contract loader may refuse a duplicate before this sees
-    // it; either way the system must not be reported as consistent.
-    assert.notEqual(check.state, "ok");
+    /*
+     * The engine's contract loader refuses a duplicate while loading, so this
+     * check never reaches its own comparison -- and the first version of this
+     * test asserted only `notEqual("ok")`, which passed on that branch and told
+     * me nothing about the check itself.
+     *
+     * What matters to a reader is that the duplicate is REPORTED AGAINST THIS
+     * CHECK, naming both messages, rather than appearing as a generic "the
+     * contract could not be read".
+     */
+    assert.equal(check.state, "fault");
+    assert.match(check.detail, /is used by both/);
+    assert.match(check.detail, /thing_status/);
+    assert.match(check.detail, /other_status/);
     assert.equal(result.verdict, "fault");
+  });
+
+  it("says a check could not run, rather than that it failed", async () => {
+    // A contract that will not parse is not a system with a duplicate
+    // identifier and not a system with an unknown signal. Reporting either as
+    // a fault would name a defect that has not been established.
+    const where = await project("badcatalog", {
+      network: NETWORK,
+      boards: BOARDS,
+      catalog: "this: is: not: a: contract\n  - [\n",
+    });
+    const result = await renderChecks(where);
+    for (const fragment of ["one identifier", "in the contract"]) {
+      const check = named(result, fragment);
+      assert.equal(check.state, "refused", `${fragment}: ${check.detail}`);
+      assert.match(check.detail, /could not be checked/);
+    }
   });
 
   it("catches a signal the contract does not define", async () => {
