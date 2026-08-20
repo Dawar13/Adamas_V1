@@ -35,7 +35,7 @@ const wantedBoards = Astro.url.searchParams.get("boards") || undefined;
 try {
   design = await loadDesign(wantedTopology, wantedBoards);
   node = design.nodes.find((candidate) => candidate.id === nodeId) ?? null;
-  if (node) injected = await injectionPoints(node);
+  if (node) injected = await injectionPoints(node, wantedTopology);
 } catch (err) {
   if (err instanceof DesignUnreadable) refused = err.message;
   else throw err;

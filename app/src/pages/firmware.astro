@@ -1,0 +1,51 @@
+---
+import Base from "../layouts/Base.astro";
+import FirmwareIntake from "../app/views/FirmwareIntake.jsx";
+import { loadDesign, DesignUnreadable } from "../../server/store/loaders/design.mjs";
+
+/*
+ * Firmware intake -- Phase 3 section 9.
+ *
+ * The node list comes from the project's own topology, so this screen cannot
+ * offer a node the system does not have, and it works for either example system
+ * from the same query parameters the canvas uses.
+ */
+const topology = Astro.url.searchParams.get("file") || undefined;
+const boards = Astro.url.searchParams.get("boards") || undefined;
+
+let nodes = [];
+let refused = null;
+try {
+  const design = await loadDesign(topology, boards);
+  // Only real nodes have firmware. A frame player has nothing to upload, and
+  // offering it would invite someone to try.
+  nodes = design.nodes.filter((node) => node.is_real).map((node) => ({ id: node.id }));
+} catch (err) {
+  if (err instanceof DesignUnreadable) refused = err.message;
+  else throw err;
+}
+---
+<Base title="Firmware — Bench">
+  <h1 class="page-head">Firmware</h1>
+
+  {refused && (
+    <section class="empty is-refused">
+      <h3>The topology could not be read, so there are no nodes to upload for.</h3>
+      <p>{refused}</p>
+    </section>
+  )}
+
+  {!refused && nodes.length === 0 && (
+    <section class="empty">
+      <h3>This system has no nodes that run firmware.</h3>
+      <p>
+        Every node in it is a frame player. There is nothing to upload, and this
+        screen will not pretend otherwise.
+      </p>
+    </section>
+  )}
+
+  {nodes.length > 0 && (
+    <FirmwareIntake nodes={nodes} topology={topology} boards={boards} client:load />
+  )}
+</Base>

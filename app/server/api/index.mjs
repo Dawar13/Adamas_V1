@@ -14,6 +14,14 @@
  *      GET  /api/runs/:id/tests/:test/frames   the candump log, as a download
  *      GET  /api/design                        the topology, as the engine reads it
  *      GET  /api/file?path=...                 one configuration file, as text
+ *      POST /api/firmware?node=...             take in a binary and read it
+ *
+ * The one write. Everything else here reads. It saves the bytes, reads the ELF
+ * header and symbol table, and cross-checks the symbols this project's scenarios
+ * actually inject into that node -- nothing is compiled, disassembled or
+ * executed, and no verdict is produced. PROJECT.md 1.3: the ship verdict comes
+ * only from a real emulator run, and this layer stays structurally incapable of
+ * producing one.
  *
  * Errors say what went wrong and how to fix it. They never apologise and are
  * never vague (Phase 3 section 15).
@@ -21,6 +29,9 @@
 
 import { listRuns, openRun, openTest, traceStream, RunUnreadable, REPO_ROOT } from "../store/loaders/runs.mjs";
 import { loadDesign, DesignUnreadable } from "../store/loaders/design.mjs";
+import { injectionPoints } from "../store/loaders/injection.mjs";
+import { readElf, checkSymbols, ElfUnreadable } from "../store/loaders/elf.mjs";
+import { saveUpload, WriteRefused } from "../store/writer.mjs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -163,16 +174,142 @@ async function serveFrames(res, id, test) {
   stream.pipe(res);
 }
 
+/*
+ * A binary can be large, so the body is read with a hard ceiling rather than
+ * accumulated until something breaks. 64 MB is far above any Cortex-M image and
+ * far below anything that would trouble this machine.
+ */
+const UPLOAD_LIMIT = 64 * 1024 * 1024;
+
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let total = 0;
+    req.on("data", (chunk) => {
+      total += chunk.length;
+      if (total > UPLOAD_LIMIT) {
+        reject(new WriteRefused(
+          `the upload is larger than ${UPLOAD_LIMIT / (1024 * 1024)} MB, which is ` +
+          `far beyond any firmware image this tests`));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("end", () => resolve(Buffer.concat(chunks)));
+    req.on("error", reject);
+  });
+}
+
+/**
+ * Intake, in the order section 9 sets out:
+ *   save -> read the header -> read the symbol table -> cross-check -> report.
+ *
+ * The cross-check list is DERIVED from the project's own scenarios and topology,
+ * never typed in. A hand-kept list of "symbols this node needs" would drift as
+ * tests changed, and it would drift towards being shorter -- which is the
+ * direction that reports a usable binary that is not.
+ */
+async function takeFirmware(req, res, url) {
+  const node = url.searchParams.get("node");
+  const originalName = url.searchParams.get("name");
+
+  try {
+    const bytes = await readBody(req);
+    const saved = await saveUpload(node, bytes, { originalName });
+
+    // An encrypted image is recorded opaque: digest and size only. Section 9
+    // says so, and there is nothing else that can honestly be said about bytes
+    // this cannot read.
+    const encrypted = /\.enc$/i.test(originalName || "");
+    if (encrypted) {
+      json(res, 200, {
+        ...saved,
+        opaque: true,
+        note: "Recorded as an encrypted image: size and digest only. Its symbols " +
+          "cannot be read here, so no symbol check is possible and none is claimed.",
+      });
+      return;
+    }
+
+    let elf;
+    try {
+      elf = readElf(bytes);
+    } catch (err) {
+      if (err instanceof ElfUnreadable) {
+        json(res, 422, { ...saved, error: err.message, refused: true });
+        return;
+      }
+      throw err;
+    }
+
+    // What this project actually injects into this node.
+    let wanted = [];
+    let wantedFrom = null;
+    try {
+      const topologyFile = url.searchParams.get("file") || undefined;
+      const design = await loadDesign(
+        topologyFile,
+        url.searchParams.get("boards") || undefined
+      );
+      const target = design.nodes.find((candidate) => candidate.id === node);
+      if (target) {
+        const points = await injectionPoints(target, topologyFile);
+        wanted = points.map((point) => point.symbol);
+        wantedFrom = points;
+      }
+    } catch (err) {
+      if (!(err instanceof DesignUnreadable)) throw err;
+      // The binary is still readable and its facts still reportable; only the
+      // cross-check is unavailable, and saying which is the honest split.
+      wantedFrom = null;
+    }
+
+    const symbols = checkSymbols(elf, wanted);
+    json(res, 200, {
+      ...saved,
+      elf: {
+        class: elf.class,
+        endian: elf.endian,
+        machine: elf.machine,
+        symbol_table: elf.symbol_table,
+        symbol_count: elf.symbols.length,
+      },
+      required_symbols: symbols,
+      missing: symbols.filter((entry) => !entry.found).map((entry) => entry.name),
+      checked_against: wantedFrom
+        ? wantedFrom.map((point) => ({ symbol: point.symbol, source: point.source }))
+        : null,
+      usable: wanted.length > 0 && symbols.every((entry) => entry.found),
+      // Said out loud, because a green intake screen is the moment someone is
+      // most likely to believe more than was checked.
+      note: "Nothing was compiled, disassembled or executed. This reads the file " +
+        "and reports what is in it; it is not a verdict about the firmware.",
+    });
+  } catch (err) {
+    if (err instanceof WriteRefused) {
+      json(res, 400, { error: err.message, refused: true });
+      return;
+    }
+    json(res, 500, { error: err.message });
+  }
+}
+
 export async function handleApi(req, res) {
   const url = new URL(req.url, "http://localhost");
   const pathname = url.pathname;
 
   if (!pathname.startsWith("/api/")) return false;
 
+  if (req.method === "POST" && url.pathname === "/api/firmware") {
+    await takeFirmware(req, res, url);
+    return true;
+  }
+
   if (req.method !== "GET") {
     json(res, 405, {
-      error: `${req.method} is not available. This phase reads stored runs; ` +
-        `nothing here writes.`,
+      error: `${req.method} is not available here. The only write this studio ` +
+        `accepts is POST /api/firmware.`,
     });
     return true;
   }

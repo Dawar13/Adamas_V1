@@ -27,9 +27,22 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { REPO_ROOT } from "./runs.mjs";
 
+/**
+ * Where a project's scenarios live.
+ *
+ * Derived from its topology, because a project keeps its data together: the
+ * second example system's scenarios sit beside its network.yml, not at the
+ * repository root. Patterns are shared by every project and stay where they are.
+ */
+export function scenarioRootsFor(topologyFile) {
+  const roots = [path.join(REPO_ROOT, "patterns")];
+  const beside = path.dirname(path.resolve(REPO_ROOT, topologyFile || "network.yml"));
+  roots.unshift(path.join(beside, "scenarios"));
+  return roots;
+}
+
 /** Every `write_symbol` block naming this node, across the scenario library. */
-async function scenarioSymbols(nodeId) {
-  const roots = [path.join(REPO_ROOT, "scenarios"), path.join(REPO_ROOT, "patterns")];
+async function scenarioSymbols(nodeId, roots) {
   const found = new Map();
 
   for (const root of roots) {
@@ -77,26 +90,27 @@ async function collect(dir) {
   return out;
 }
 
-export async function injectionPoints(node) {
+export async function injectionPoints(node, topologyFile = "network.yml") {
   const points = [];
   const raw = node.raw || {};
+
+  // The source is the topology this node actually came from, not the string
+  // "network.yml". Naming the wrong file as the evidence for a symbol is a
+  // small lie on a screen whose whole value is that its claims can be checked.
+  const from = topologyFile || "network.yml";
 
   // Declared on the node itself, in the topology.
   const txEnable = raw.tx_enable_symbol ?? node.tx_enable_symbol ?? null;
   if (txEnable) {
-    points.push({
-      symbol: txEnable,
-      role: "transmit enable",
-      source: "network.yml",
-    });
+    points.push({ symbol: txEnable, role: "transmit enable", source: from });
   }
   const signals = raw.signal_symbols ?? node.signal_symbols ?? {};
   for (const [signal, symbol] of Object.entries(signals)) {
-    points.push({ symbol, role: signal, source: "network.yml" });
+    points.push({ symbol, role: signal, source: from });
   }
 
   const seen = new Set(points.map((point) => point.symbol));
-  for (const [symbol, file] of await scenarioSymbols(node.id)) {
+  for (const [symbol, file] of await scenarioSymbols(node.id, scenarioRootsFor(topologyFile))) {
     if (seen.has(symbol)) continue;
     points.push({ symbol, role: "sensor value", source: file });
   }
