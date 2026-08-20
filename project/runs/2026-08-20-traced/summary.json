@@ -1,0 +1,11 @@
+{
+  "tests": 89,
+  "passed": 89,
+  "counts": {
+    "pass": 89
+  },
+  "shards": 4,
+  "suite_fingerprint": "a40f4a85cc88a05a",
+  "shard_seconds_total": 26784.084,
+  "complete": true
+}

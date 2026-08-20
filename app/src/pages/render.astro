@@ -1,0 +1,85 @@
+---
+import Base from "../layouts/Base.astro";
+import { renderChecks, RenderUnreadable } from "../../server/store/loaders/render.mjs";
+import { DesignUnreadable } from "../../server/store/loaders/design.mjs";
+
+/*
+ * Render -- Phase 3 section 10, the static half.
+ *
+ * Six checks over the project's own files. Green here means the system is
+ * DESCRIBED consistently; it does not mean it starts, and the page says so
+ * rather than letting a column of ticks imply it.
+ *
+ * The live boot check -- actually launching the emulator for two seconds -- is
+ * the other half of section 10 and is not wired to this screen yet. It is
+ * marked as such rather than mocked, because a tick claiming a boot nobody
+ * performed is exactly the failure this product exists to refuse.
+ */
+const topology = Astro.url.searchParams.get("file") || undefined;
+const boards = Astro.url.searchParams.get("boards") || undefined;
+const contract = Astro.url.searchParams.get("contract") || undefined;
+
+let result = null;
+let refused = null;
+try {
+  result = await renderChecks({ topology, boards, contract });
+} catch (err) {
+  if (err instanceof RenderUnreadable || err instanceof DesignUnreadable) refused = err.message;
+  else throw err;
+}
+---
+<Base title="Render — Bench">
+  <h1 class="page-head">Render</h1>
+
+  {refused && (
+    <section class="empty is-refused">
+      <h3>The project could not be read, so nothing could be checked.</h3>
+      <p>{refused}</p>
+    </section>
+  )}
+
+  {result && (
+    <>
+      <ul class="checks">
+        {result.checks.map((check) => (
+          <li class={`check is-${check.state}`}>
+            <span class="check-mark" aria-hidden="true">
+              {check.state === "ok" ? "✓" : check.state === "refused" ? "✗" : "✗"}
+            </span>
+            <span class="check-label">{check.label}</span>
+            {check.detail && <span class="check-detail mono">{check.detail}</span>}
+          </li>
+        ))}
+      </ul>
+
+      <p class={`render-verdict is-${result.verdict}`}>
+        {result.verdict === "ok" && (
+          <>Described consistently — <span class="mono">{result.nodes}</span> nodes.</>
+        )}
+        {result.verdict === "refused" && (
+          <>This system contains something Bench will not execute. See above.</>
+        )}
+        {result.verdict === "fault" && (
+          <>This system would not run as described. See above.</>
+        )}
+      </p>
+
+      <section class="not-checked">
+        <h2 class="section-head">Not checked here</h2>
+        <ul class="checks">
+          <li class="check is-pending">
+            <span class="check-mark" aria-hidden="true">—</span>
+            <span class="check-label">platform loads in the emulator</span>
+            <span class="check-detail">section 10's live half, not wired to this screen</span>
+          </li>
+          <li class="check is-pending">
+            <span class="check-mark" aria-hidden="true">—</span>
+            <span class="check-label">firmware reaches its boot banner</span>
+            <span class="check-detail mono">bash scripts/boot-check.sh</span>
+          </li>
+        </ul>
+        <p class="muted">{result.note}</p>
+      </section>
+    </>
+  )}
+</Base>

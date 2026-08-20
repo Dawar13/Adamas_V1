@@ -804,3 +804,82 @@ class Catalog:
                 f"bytes are known padding"
             )
         return buf
+
+
+def as_document(cat) -> dict:
+    """The loaded contract as plain data, for anything that inspects it.
+
+    ONE PARSER, for the same reason the topology has one. A studio that read
+    this file itself would be a second reader free to disagree with the first,
+    and this project has already paid for that: YAML 1.1 turns two of this
+    contract's own enum spellings into booleans, which is why the engine reads
+    through a strict loader.
+
+    A pre-flight check that disagreed with the compiler about what the contract
+    says would pass a system the compiler then refuses, or -- far worse -- pass
+    one it accepts and misreads.
+    """
+    messages = []
+    for message in cat.messages():
+        signals = []
+        for signal in message.signals:
+            table = cat.enum_for(signal.name)
+            signals.append({
+                "name": signal.name,
+                "start_bit": signal.start_bit,
+                "length": signal.length,
+                "signed": bool(signal.signed),
+                # The enum a symbolic value would be resolved through, named so
+                # a checker can tell "this signal takes names" from "this signal
+                # takes numbers" without guessing from the spelling.
+                "enum": table.name if table is not None else None,
+            })
+        messages.append({
+            "id": message.id,
+            "name": message.name,
+            "dlc": message.dlc,
+            "sender": message.sender,
+            "signals": signals,
+        })
+
+    enums = {}
+    for signal_name in cat.enum_tables():
+        table = cat.enum_for(signal_name)
+        if table is None:
+            continue
+        enums[table.name] = {str(value): name
+                             for value, name in table.by_value.items()}
+
+    return {
+        "source": str(getattr(cat, "source", "") or ""),
+        "messages": messages,
+        "enums": enums,
+    }
+
+
+def main(argv=None) -> int:
+    """Print the loaded contract as JSON, or say why it cannot be loaded."""
+    import argparse
+    import json as _json
+
+    parser = argparse.ArgumentParser(
+        description="Load a contract and print it as JSON.")
+    parser.add_argument("path", nargs="?", default=str(DEFAULT_CATALOG_PATH))
+    parser.add_argument("--json", action="store_true",
+                        help="print the contract as JSON (the default)")
+    args = parser.parse_args(argv if argv is not None else sys.argv[1:])
+
+    try:
+        cat = load(args.path)
+    except CatalogError as exc:
+        # Structured, because the caller is a program: a drawing or checking
+        # tool that got a stack trace would have nothing to show its reader.
+        print(_json.dumps({"error": str(exc), "path": args.path}, indent=2))
+        return 2
+
+    print(_json.dumps(as_document(cat), indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -14,6 +14,7 @@
  *      GET  /api/runs/:id/tests/:test/frames   the candump log, as a download
  *      GET  /api/design                        the topology, as the engine reads it
  *      GET  /api/file?path=...                 one configuration file, as text
+ *      GET  /api/render                        the pre-flight checks, static only
  *      POST /api/firmware?node=...             take in a binary and read it
  *
  * The one write. Everything else here reads. It saves the bytes, reads the ELF
@@ -31,6 +32,7 @@ import { listRuns, openRun, openTest, traceStream, RunUnreadable, REPO_ROOT } fr
 import { loadDesign, DesignUnreadable } from "../store/loaders/design.mjs";
 import { injectionPoints } from "../store/loaders/injection.mjs";
 import { readElf, checkSymbols, ElfUnreadable } from "../store/loaders/elf.mjs";
+import { renderChecks, RenderUnreadable } from "../store/loaders/render.mjs";
 import { saveUpload, WriteRefused } from "../store/writer.mjs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -338,6 +340,18 @@ export async function handleApi(req, res) {
       return true;
     }
 
+    if (pathname === "/api/render") {
+      // Static only. Starting the emulator is a different thing with a
+      // different cost, and merging them would let a green tick here be read
+      // as "it boots" -- which this cannot know.
+      json(res, 200, await renderChecks({
+        topology: url.searchParams.get("file") || undefined,
+        boards: url.searchParams.get("boards") || undefined,
+        contract: url.searchParams.get("contract") || undefined,
+      }));
+      return true;
+    }
+
     if (pathname === "/api/design") {
       /*
        * THE SAME CHECKS AS /api/file, BECAUSE THIS IS THE SAME KIND OF INPUT.
@@ -411,6 +425,10 @@ export async function handleApi(req, res) {
     });
     return true;
   } catch (err) {
+    if (err instanceof RenderUnreadable) {
+      json(res, 422, { error: err.message, refused: true });
+      return true;
+    }
     if (err instanceof DesignUnreadable) {
       json(res, 422, { error: err.message, refused: true });
       return true;

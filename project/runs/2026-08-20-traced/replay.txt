@@ -1,0 +1,1 @@
+bash scripts/run-suite-sharded.sh --shards 4

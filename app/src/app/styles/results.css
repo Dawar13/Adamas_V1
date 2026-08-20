@@ -1029,3 +1029,69 @@ tr.is-unresolved td {
   padding-top: 0.75rem;
   border-top: 1px solid var(--rule);
 }
+
+/* ---------------------------------------------------------------- render */
+
+.checks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--rule);
+}
+.check {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding: 0.5rem 0.25rem;
+  border-bottom: 1px solid var(--rule);
+  font-size: var(--step--1);
+  flex-wrap: wrap;
+}
+.check-mark {
+  width: 1rem;
+  text-align: center;
+}
+.check.is-ok .check-mark {
+  color: var(--pass);
+}
+.check.is-fault .check-mark,
+.check.is-fault .check-label {
+  color: var(--fault);
+}
+/* A refusal is amber, not red: definable-and-not-runnable is not broken. */
+.check.is-refused .check-mark,
+.check.is-refused .check-label {
+  color: var(--inject);
+}
+.check.is-pending {
+  color: var(--ink-faint);
+}
+.check-label {
+  min-width: 22rem;
+}
+.check-detail {
+  flex: 1 1 18rem;
+  color: var(--ink-muted);
+  font-size: 0.75rem;
+}
+.render-verdict {
+  margin: 1rem 0 0;
+  font-size: var(--step-1);
+}
+.render-verdict.is-ok {
+  color: var(--pass);
+}
+.render-verdict.is-fault {
+  color: var(--fault);
+}
+.render-verdict.is-refused {
+  color: var(--inject);
+}
+.not-checked {
+  margin-top: var(--gap-hero);
+}
+.not-checked .muted {
+  max-width: 46rem;
+  font-size: var(--step--1);
+  margin-top: 0.75rem;
+}

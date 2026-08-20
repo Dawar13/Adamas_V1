@@ -121,10 +121,45 @@ for shard in $(seq 1 "$SHARDS"); do
 	echo ""
 done
 
+COVERAGE_ARG=""
+if [ "$COVERAGE" -eq 1 ]; then
+	echo "--- measuring coverage from the traced run ---"
+	# coverage.py wants every run directory under one root, and a sharded run
+	# spreads them across four. Symlinks rather than copies: these directories
+	# hold the execution traces, and copying them would double the disk for a
+	# view that is thrown away at the end of this block.
+	ALL="$OUT/traced-all"
+	rm -rf "$ALL"; mkdir -p "$ALL"
+	linked=0
+	for shard in $(seq 1 "$SHARDS"); do
+		for dir in "$OUT/shard$shard"/*/; do
+			[ -f "$dir/results.json" ] || continue
+			ln -s "$(cd "$dir" && pwd)" "$ALL/$(basename "$dir")" 2>/dev/null && linked=$((linked+1))
+		done
+	done
+	echo "    $linked run directories"
+
+	"$PYTHON" harness/coverage.py --runs "$ALL" --out "$OUT/coverage.json" --quiet
+	cov_rc=$?
+	if [ "$cov_rc" -ne 0 ]; then
+		echo ""
+		echo "FATAL: coverage could not be measured (exit $cov_rc)."
+		echo "       The tests ran and their results are in $OUT. Storing the run"
+		echo "       without the report it was asked for would quietly produce a"
+		echo "       run that looks untraced."
+		exit "$cov_rc"
+	fi
+	COVERAGE_ARG="--coverage $OUT/coverage.json"
+	echo "    written to $OUT/coverage.json"
+	echo ""
+fi
+
 echo "--- merging $SHARDS shards into run $RUN_ID ---"
+# shellcheck disable=SC2086  # COVERAGE_ARG is a flag pair or empty, on purpose
 "$PYTHON" harness/merge.py \
 	--shards "$OUT"/shard-*.json \
 	--id "$RUN_ID" \
+	$COVERAGE_ARG \
 	--replay "$(printf 'bash scripts/run-suite-sharded.sh --shards %s%s' \
 		"$SHARDS" "${TOPOLOGY:+ --topology $TOPOLOGY}")"
 merge_rc=$?
