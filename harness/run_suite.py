@@ -184,12 +184,25 @@ def default_workers() -> int:
     return max(1, cores // 3)
 
 
-def expand(python, tests_dir: Path, say) -> None:
-    """Regenerate the tests. They are derived artefacts and never committed."""
+def expand(python, tests_dir: Path, say, topology=None, scenarios=None) -> None:
+    """Regenerate the tests. They are derived artefacts and never committed.
+
+    THE GENERATOR MUST BE POINTED AT THE SAME PROJECT AS THE SUITE.
+
+    This passed --out and nothing else, so a run given --topology regenerated
+    the tests from the REPOSITORY'S topology and scenarios and then executed
+    them against the topology it was given. The two example systems only avoid
+    it today because the second is always run with --no-expand, which is not a
+    property anyone declared -- it is a habit.
+    """
     say("  expanding ...")
+    command = python + [str(EXPANDER), "--out", str(tests_dir)]
+    if topology:
+        command += ["--topology", topology]
+    if scenarios:
+        command += ["--scenarios", scenarios]
     result = subprocess.run(
-        python + [str(EXPANDER), "--out", str(tests_dir)],
-        cwd=str(REPO_ROOT), capture_output=True, text=True,
+        command, cwd=str(REPO_ROOT), capture_output=True, text=True,
     )
     if result.returncode != 0:
         raise SuiteError(
@@ -413,6 +426,9 @@ def main(argv=None) -> int:
                         help="run only this shard, numbered from 1")
     parser.add_argument("--of", type=int, default=None,
                         help="how many shards the suite is split into")
+    parser.add_argument("--scenarios", default=None,
+                        help="the scenario directory to expand from, for a "
+                             "project whose data does not live at the defaults")
     parser.add_argument("--contract", default=None,
                         help="override the contract file, for a project whose "
                              "data does not live at the default paths")
@@ -438,7 +454,7 @@ def main(argv=None) -> int:
 
     try:
         if not args.no_expand:
-            expand(python, tests_dir, say)
+            expand(python, tests_dir, say, args.topology, args.scenarios)
         every = declared(tests_dir)
         tests = select(every, args.filter)
         if (args.shard is None) != (args.of is None):

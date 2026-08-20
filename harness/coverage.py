@@ -1089,16 +1089,22 @@ def render(document, out) -> None:
 # ---------------------------------------------------------------------------
 
 
-def resolve_subject():
+def resolve_subject(topology_path=None):
     """Which node is under test, from the topology.
 
     Presentation only: it decides which node the report points at first, and
     nothing else. A topology that cannot be read leaves the field null and
     every measured number untouched, so this is not one of the refusals.
+
+    The path is a parameter because there is more than one project. Reading
+    `network.yml` by name meant a coverage report measured from a second
+    system's run would name the FIRST system's device under test -- a wrong
+    name beside correct figures, which is harder to notice than a wrong figure.
     """
     try:
         from harness import network as topology
-        return str(topology.load(REPO_ROOT / "network.yml").dut().id)
+        where = Path(topology_path) if topology_path else (REPO_ROOT / "network.yml")
+        return str(topology.load(where).dut().id)
     except Exception:
         return None
 
@@ -1141,6 +1147,9 @@ def build_parser() -> argparse.ArgumentParser:
                              "harness/perturbation.py, so the report can say "
                              "whether tracing moved anything instead of "
                              "asserting that it did not")
+    parser.add_argument("--topology", default=None,
+                        help="the topology this run came from, so the report "
+                             "names the right device under test")
     parser.add_argument("--out", default="harness/out/coverage.json",
                         help="where the report is written")
     parser.add_argument("--work", default=None,
@@ -1174,8 +1183,8 @@ def main(argv=None) -> int:
             {node: entry.sha256 for node, entry in nodes.items()})
         perturbation = read_perturbation(args.perturbation,
                                          [run.test for run in runs])
-        document = build_report(runs, nodes, discrimination, resolve_subject(),
-                                perturbation)
+        document = build_report(runs, nodes, discrimination,
+                                resolve_subject(args.topology), perturbation)
     except CoverageError as exc:
         print("\nERROR: %s\n" % exc, file=sys.stderr)
         return EXIT_UNUSABLE

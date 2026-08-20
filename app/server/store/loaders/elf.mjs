@@ -30,6 +30,20 @@ const ELF_MAGIC = 0x7f454c46; // \x7fELF
 const CLASS_32 = 1;
 const CLASS_64 = 2;
 
+/*
+ * e_type. A RELOCATABLE OBJECT IS NOT FIRMWARE.
+ *
+ * In ET_REL, a symbol's st_value is an offset from the start of its section,
+ * not an address -- the linker has not placed anything yet. Reporting it as an
+ * address puts a number beside a symbol name that looks exactly like the real
+ * one and is not, on the screen whose entire job is to say where the harness
+ * will write. Injecting at it would write to whatever happens to live there.
+ */
+const ET_REL = 1;
+const ET_EXEC = 2;
+const ET_DYN = 3;
+const ELF_TYPES = { 0: "none", 1: "relocatable object", 2: "executable", 3: "shared object", 4: "core dump" };
+
 const SHT_SYMTAB = 2;
 const SHT_STRTAB = 3;
 const SHT_DYNSYM = 11;
@@ -117,7 +131,18 @@ export function readElf(buf) {
   const { u16, u32, u64 } = reader(buf, little);
   const word = wide ? u64 : u32;
 
+  const type = u16(16);
   const machine = u16(18);
+  if (type !== ET_EXEC && type !== ET_DYN) {
+    throw new ElfUnreadable(
+      `this is a ${ELF_TYPES[type] ?? `type ${type}`}, not a linked executable. ` +
+        (type === ET_REL
+          ? "Its symbols carry section-relative offsets rather than addresses, " +
+            "so nothing here could tell you where the harness would write. Link " +
+            "it first."
+          : "Firmware is a linked executable.")
+    );
+  }
   // Header layout differs between the two classes only in the widths.
   const shoff = wide ? u64(0x28) : u32(0x20);
   const shentsize = u16(wide ? 0x3a : 0x2e);
@@ -174,8 +199,17 @@ export function readElf(buf) {
     need(strtab.offset + strtab.size <= buf.length,
          "the symbol string table runs past the end of the file");
 
-    const entsize = table.entsize || (wide ? 24 : 16);
-    need(entsize > 0, "the symbol table declares a zero entry size");
+    /*
+     * sh_entsize comes from the file, so it is not to be trusted as a stride.
+     * Too small and entries overlap, producing symbols that were never written;
+     * unaligned and every field after the first is read from the wrong place.
+     * Both produce plausible names at wrong addresses rather than an error.
+     */
+    const minimum = wide ? 24 : 16;
+    const entsize = table.entsize || minimum;
+    need(entsize >= minimum,
+         `the symbol table declares a ${entsize}-byte entry, smaller than the ` +
+         `${minimum} bytes an ELF${wide ? 64 : 32} symbol occupies`);
     const count = Math.floor(table.size / entsize);
 
     for (let i = 0; i < count; i += 1) {

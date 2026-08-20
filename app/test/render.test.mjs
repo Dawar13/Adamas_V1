@@ -242,6 +242,114 @@ steps:
     assert.match(check.detail, /no_such_signal/);
   });
 
+  it("sees a signal named as a PATTERN PARAMETER, not just in a signals block", async () => {
+    /*
+     * The defect an audit found in this very check, after it had tests.
+     *
+     * A swept scenario carries no literal `signals:` mapping -- that lives
+     * templated in the pattern -- and names its signal in `params:` instead.
+     * Reading only `signals:` blocks made every sweep invisible, and by
+     * generated-test count the sweeps are the MAJORITY of both suites. The
+     * check was green over a minority of what its label claims.
+     *
+     * My own fixtures all used literal blocks, which is why the tests passed.
+     */
+    const where = await project("pattern", {
+      network: NETWORK,
+      boards: BOARDS,
+      catalog: CATALOG,
+      scenarios: {
+        "sweep.yml": `id: sweep
+title: a swept rule
+pattern: threshold-exceeded
+params:
+  node: thing
+  symbol: g_thing
+  limit: 10
+  unit: u
+  message: 0x0A0
+  signal: no_such_signal
+  value_name: SOMETHING
+  deadline: 50
+  latching: true
+  healthy: 1
+  observe_ms: 300
+  latch_ms: 600
+  boot_timeout: 100
+  state_message: 0x0A0
+  state_signal: also_not_a_signal
+  state_window: 150
+sweep:
+  values: [9, 10, 11]
+  at:
+    - { ms: 200, state: ONE }
+`,
+      },
+    });
+    const check = named(await renderChecks(where), "in the contract");
+    assert.equal(check.state, "fault", check.detail);
+    assert.match(check.detail, /no_such_signal/);
+    // Both signal-typed parameters, not just the first one the pattern declares.
+    assert.match(check.detail, /also_not_a_signal/);
+  });
+
+  it("reads scenarios in subdirectories", async () => {
+    // A flat readdir skipped scenarios/negative/ entirely, and a check that
+    // silently skips a directory reports on less than its label says.
+    const where = await project("nested", {
+      network: NETWORK,
+      boards: BOARDS,
+      catalog: CATALOG,
+    });
+    const { mkdir, writeFile } = await import("node:fs/promises");
+    const deep = path.join(scratch, "nested", "scenarios", "negative");
+    await mkdir(deep, { recursive: true });
+    await writeFile(
+      path.join(deep, "buried.yml"),
+      `id: buried
+steps:
+  - expect_can:
+      id: 0x0A0
+      signals:
+        buried_signal: 1
+      within_ms: 10
+      label: "in a subdirectory"
+`
+    );
+    const check = named(await renderChecks(where), "in the contract");
+    assert.equal(check.state, "fault");
+    assert.match(check.detail, /buried_signal/);
+  });
+
+  it("checks the contract that belongs to the project it was given", async () => {
+    /*
+     * The scenario directory was derived from the topology and the contract was
+     * not, so a second system's scenarios were checked against the FIRST
+     * system's contract. Every signal unknown -- or worse, a name present in
+     * both, passing for the wrong reason.
+     */
+    const where = await project("ownContract", {
+      network: NETWORK,
+      boards: BOARDS,
+      catalog: CATALOG,
+      scenarios: {
+        "t.yml": `id: t
+steps:
+  - expect_can:
+      id: 0x0A0
+      signals:
+        level: 1
+      within_ms: 10
+      label: "level is in THIS project's contract"
+`,
+      },
+    });
+    // Deliberately not passing `contract`: it must be found beside the topology.
+    const result = await renderChecks({ topology: where.topology, boards: where.boards });
+    assert.equal(named(result, "in the contract").state, "ok");
+    assert.equal(named(result, "one identifier").state, "ok");
+  });
+
   it("does not flag a step's own keys as signals", async () => {
     // The regression: within_ms and label are siblings of the signals block.
     const where = await project("siblings", {

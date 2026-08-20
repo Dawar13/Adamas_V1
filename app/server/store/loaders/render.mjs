@@ -78,24 +78,88 @@ async function exists(relative) {
   }
 }
 
-/** Every signal named by any step in any scenario of this project. */
-async function signalsUsedByTests(scenarioDir) {
-  const { readdir } = await import("node:fs/promises");
-  const used = new Map(); // signal -> file that names it
-  let files;
+/**
+ * Which of a pattern's parameters carry signal names.
+ *
+ * Patterns declare it: `- { name: state_signal, type: signal, doc: ... }`. So
+ * this asks rather than assuming. A hardcoded list of parameter names would rot
+ * the moment a pattern gained one, and it would rot in the flattering
+ * direction -- the check would go on passing while covering less.
+ */
+async function signalParamsOf(patternName) {
+  const names = new Set();
+  let text;
   try {
-    files = await readdir(path.join(REPO_ROOT, scenarioDir), { withFileTypes: true });
+    text = await readFile(path.join(REPO_ROOT, "patterns", `${patternName}.yml`), "utf8");
   } catch {
-    return used;
+    return names; // an unknown pattern is expand.py's refusal to make, not ours
   }
-  for (const entry of files) {
-    if (!entry.isFile() || !/\.ya?ml$/.test(entry.name)) continue;
-    const file = path.join(scenarioDir, entry.name).replace(/\\/g, "/");
+  for (const line of text.split("\n")) {
+    const declared = line.match(/^\s*-\s*\{\s*name:\s*([A-Za-z_][\w]*)\s*,\s*type:\s*signal\b/);
+    if (declared) names.add(declared[1]);
+  }
+  return names;
+}
+
+/** Every YAML file under a directory, including subdirectories. */
+async function everyYaml(dir) {
+  const { readdir } = await import("node:fs/promises");
+  const out = [];
+  let entries;
+  try {
+    entries = await readdir(path.join(REPO_ROOT, dir), { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const entry of entries) {
+    const child = path.posix.join(dir.replace(/\\/g, "/"), entry.name);
+    // Recursive: scenarios/negative/ was invisible to a flat readdir, and a
+    // check that silently skips a directory is a check that reports on less
+    // than its label says.
+    if (entry.isDirectory()) out.push(...(await everyYaml(child)));
+    else if (/\.ya?ml$/.test(entry.name)) out.push(child);
+  }
+  return out;
+}
+
+/** Every signal named by any scenario of this project, however it names it. */
+async function signalsUsedByTests(scenarioDir) {
+  const used = new Map(); // signal -> file that names it
+  for (const file of await everyYaml(scenarioDir)) {
     let text;
     try {
       text = await readFile(path.join(REPO_ROOT, file), "utf8");
     } catch {
       continue;
+    }
+
+    /*
+     * A PATTERN INSTANCE NAMES ITS SIGNALS AS PARAMETERS.
+     *
+     * The literal `signals:` mapping for a swept test lives templated in the
+     * pattern -- `signals: { "{{state_signal}}": "{{at_state}}" }` -- and the
+     * real name is bound in the scenario's `params:`. Reading only `signals:`
+     * blocks made every sweep invisible: six of the nineteen scenario files
+     * across both example systems have none at all, and by generated-test count
+     * the sweeps are the majority of each suite. The check was green over a
+     * minority of what it claimed.
+     */
+    const usesPattern = text.match(/^pattern:\s*['"]?([\w-]+)['"]?\s*$/m);
+    if (usesPattern) {
+      const signalParams = await signalParamsOf(usesPattern[1]);
+      const params = text.match(/^params:\s*$/m);
+      if (params && signalParams.size) {
+        const lines = text.split("\n");
+        const start = lines.findIndex((line) => /^params:\s*$/.test(line));
+        for (let i = start + 1; i < lines.length; i += 1) {
+          if (!lines[i].trim() || /^\s*#/.test(lines[i])) continue;
+          const bound = lines[i].match(/^(\s+)([A-Za-z_][\w]*):\s*['"]?([^'"#\s]+)/);
+          if (!bound) break; // dedented out of the params block
+          if (signalParams.has(bound[2]) && !used.has(bound[3])) {
+            used.set(bound[3], file);
+          }
+        }
+      }
     }
     /*
      * Read the CHILDREN of a `signals:` block, and only those.
@@ -138,6 +202,17 @@ async function signalsUsedByTests(scenarioDir) {
 export async function renderChecks({ topology, boards, contract, scenarios } = {}) {
   const design = await loadDesign(topology, boards);
   const checks = [];
+
+  /*
+   * A PROJECT'S FILES SIT TOGETHER, so all of them are derived from the one
+   * path the caller gave. The scenario directory was derived and the contract
+   * was not, so pointing this at a second system checked its scenarios against
+   * the FIRST system's contract -- every signal unknown, or worse, a name that
+   * happens to exist in both and passes for the wrong reason.
+   */
+  const beside = path.posix.dirname((topology || "network.yml").replace(/\\/g, "/"));
+  const contractFile = contract ?? path.posix.join(beside, "catalog.yml");
+  const scenarioDir = scenarios ?? path.posix.join(beside, "scenarios");
 
   // 1 — every node has firmware or a script
   const withoutBehaviour = design.nodes.filter(
@@ -220,7 +295,7 @@ export async function renderChecks({ topology, boards, contract, scenarios } = {
   let contractDoc = null;
   let contractError = null;
   try {
-    contractDoc = await loadContract(contract);
+    contractDoc = await loadContract(contractFile);
   } catch (err) {
     if (err instanceof RenderUnreadable) contractError = err.message;
     else throw err;
@@ -257,9 +332,6 @@ export async function renderChecks({ topology, boards, contract, scenarios } = {
     for (const message of contractDoc.messages) {
       for (const signal of message.signals) known.add(signal.name);
     }
-    const scenarioDir =
-      scenarios ??
-      path.posix.join(path.posix.dirname((topology || "network.yml").replace(/\\/g, "/")), "scenarios");
     const used = await signalsUsedByTests(scenarioDir);
     const unknown = [...used].filter(([name]) => !known.has(name));
     checks.push(

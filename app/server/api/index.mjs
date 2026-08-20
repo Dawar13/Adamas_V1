@@ -116,6 +116,19 @@ function contained(requested) {
   return !relative.startsWith("..") && !path.isAbsolute(relative);
 }
 
+/**
+ * Is this a project file this studio may open?
+ *
+ * One function, because the three conditions were repeated per route and the
+ * newest route got none of them.
+ */
+function projectFile(requested) {
+  const full = path.resolve(REPO_ROOT, requested);
+  return contained(requested) &&
+    !namesADevice(full) &&
+    VIEWABLE.has(path.extname(full).toLowerCase());
+}
+
 function namesADevice(full) {
   return full
     .split(/[\\/]/)
@@ -253,6 +266,12 @@ async function takeFirmware(req, res, url) {
     let wanted = [];
     let wantedFrom = null;
     try {
+      for (const key of ["file", "boards"]) {
+        const wanted = url.searchParams.get(key);
+        if (wanted !== null && !projectFile(wanted)) {
+          throw new WriteRefused(`'${wanted}' is not a project file inside this repository.`);
+        }
+      }
       const topologyFile = url.searchParams.get("file") || undefined;
       const design = await loadDesign(
         topologyFile,
@@ -297,7 +316,13 @@ async function takeFirmware(req, res, url) {
       json(res, 400, { error: err.message, refused: true });
       return;
     }
-    json(res, 500, { error: err.message });
+    // Not err.message: an unexpected failure here carries absolute paths from
+    // this machine, and an intake screen is not the place to publish them.
+    console.error("firmware intake failed:", err);
+    json(res, 500, {
+      error: "the upload could not be processed. The reason was logged where " +
+        "this studio is running.",
+    });
   }
 }
 
@@ -421,6 +446,22 @@ export async function handleApi(req, res) {
     }
 
     if (pathname === "/api/render") {
+      /*
+       * THE SAME CHECKS AS EVERY OTHER ROUTE THAT TAKES A PATH.
+       *
+       * This route was added after /api/file and /api/design were guarded and
+       * inherited none of it -- three more query parameters going straight to a
+       * subprocess. That is twice now that a new route arrived without the
+       * checks the old ones had, which is why the check is a shared function
+       * and every caller uses it rather than repeating three conditions.
+       */
+      for (const key of ["file", "boards", "contract"]) {
+        const wanted = url.searchParams.get(key);
+        if (wanted !== null && !projectFile(wanted)) {
+          json(res, 403, { error: `'${wanted}' is not a project file inside this repository.` });
+          return true;
+        }
+      }
       // Static only. Starting the emulator is a different thing with a
       // different cost, and merging them would let a green tick here be read
       // as "it boots" -- which this cannot know.
@@ -446,10 +487,7 @@ export async function handleApi(req, res) {
       const wanted = url.searchParams.get("file");
       const wantedBoards = url.searchParams.get("boards");
       for (const candidate of [wanted, wantedBoards]) {
-        if (candidate === null) continue;
-        const resolved = path.resolve(REPO_ROOT, candidate);
-        if (!contained(candidate) || namesADevice(resolved) ||
-            !VIEWABLE.has(path.extname(resolved).toLowerCase())) {
+        if (candidate !== null && !projectFile(candidate)) {
           json(res, 403, {
             error: `'${candidate}' is not a project file inside this repository.`,
           });

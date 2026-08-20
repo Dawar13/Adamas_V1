@@ -115,6 +115,11 @@ export default function FirmwareIntake({ nodes, topology, boards }) {
 
       {result && !error && (
         <section className="report">
+          {/*
+            The node the RESULT is about, not whichever the selector shows now.
+            Switching the selector after an upload re-labelled a finished report
+            with a node it was never about.
+          */}
           <h2 className="section-head">The file</h2>
           <table className="kv">
             <tbody>
@@ -162,15 +167,36 @@ export default function FirmwareIntake({ nodes, topology, boards }) {
           ) : (
             <>
               <h2 className="section-head">
-                Symbols this project injects into <span className="mono">{node}</span>
+                Symbols this project injects into{" "}
+                <span className="mono">{result.node}</span>
               </h2>
 
               {result.required_symbols.length === 0 ? (
-                <p className="muted">
-                  No scenario in this project writes a symbol into this node, so
-                  there is nothing to check. That is not the same as a binary that
-                  passed a check.
-                </p>
+                /*
+                 * THREE STATES, NOT TWO.
+                 *
+                 * `checked_against === null` means the project could not be
+                 * read at all -- the topology failed to load, or the node is
+                 * not in it. Saying "no scenario writes a symbol into this
+                 * node" in that case states a fact about the project having
+                 * never looked at it, on the screen whose stated purpose is
+                 * the symbol check.
+                 */
+                result.checked_against === null ? (
+                  <p className="is-fault">
+                    The symbol check could not be performed: this project's
+                    scenarios could not be read, or{" "}
+                    <span className="mono">{result.node}</span> is not a node in
+                    it. Nothing was checked, and nothing about this binary is
+                    claimed.
+                  </p>
+                ) : (
+                  <p className="muted">
+                    No scenario in this project writes a symbol into this node,
+                    so there is nothing to check. That is not the same as a
+                    binary that passed a check.
+                  </p>
+                )
               ) : (
                 <ul className="syms">
                   {result.required_symbols.map((entry) => (
