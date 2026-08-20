@@ -1,0 +1,63 @@
+---
+import Base from "../layouts/Base.astro";
+import TestPlan from "../app/views/TestPlan.jsx";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { REPO_ROOT } from "../../server/store/loaders/runs.mjs";
+
+/*
+ * The test plan -- Phase 3 section 11.
+ *
+ * Read on the server so the plan is on screen at first paint, and read from the
+ * generator's own manifest so the counts cannot drift from what would run. If
+ * there is no manifest, this says so and names the command; it does not invent
+ * a plan.
+ */
+const testsDir = Astro.url.searchParams.get("tests") || ".generated/tests";
+const query = {
+  tests: Astro.url.searchParams.get("tests"),
+  file: Astro.url.searchParams.get("file"),
+  contract: Astro.url.searchParams.get("contract"),
+  boards: Astro.url.searchParams.get("boards"),
+};
+
+let plan = null;
+let missing = null;
+try {
+  const manifest = JSON.parse(
+    await readFile(path.join(REPO_ROOT, testsDir, "manifest.json"), "utf8"));
+  const groups = new Map();
+  for (const test of manifest.tests || []) {
+    const key = test.scenario ?? "(unnamed)";
+    if (!groups.has(key)) groups.set(key, { scenario: key, source: test.source ?? null, tests: [] });
+    groups.get(key).tests.push(test.id);
+  }
+  plan = {
+    generator: manifest.generator ?? null,
+    declared: manifest.counts?.tests ?? (manifest.tests || []).length,
+    groups: [...groups.values()].sort((a, b) => a.scenario.localeCompare(b.scenario)),
+  };
+} catch (err) {
+  missing = err.code === "ENOENT" ? `${testsDir}/manifest.json does not exist` : err.message;
+}
+---
+<Base title="Tests — Bench">
+  <h1 class="page-head">Test plan</h1>
+
+  {missing && (
+    <section class="empty">
+      <h3>There is no expanded suite to run.</h3>
+      <p>{missing}</p>
+      <p>
+        The plan is read from what the generator wrote, so that the counts on
+        this screen and the tests that would actually run cannot disagree.
+        Nothing here invents one.
+      </p>
+      <p class="empty-how">
+        <code>python3 harness/expand.py --out {testsDir}</code>
+      </p>
+    </section>
+  )}
+
+  {plan && <TestPlan plan={plan} query={query} client:load />}
+</Base>

@@ -15,6 +15,9 @@
  *      GET  /api/design                        the topology, as the engine reads it
  *      GET  /api/file?path=...                 one configuration file, as text
  *      GET  /api/render                        the pre-flight checks, static only
+ *      GET  /api/tests                         the plan, from the generator's manifest
+ *      GET  /api/run                           what the runner is doing, and its events
+ *      POST /api/run                           hand a job to the runner
  *      POST /api/firmware?node=...             take in a binary and read it
  *
  * The one write. Everything else here reads. It saves the bytes, reads the ELF
@@ -33,6 +36,7 @@ import { loadDesign, DesignUnreadable } from "../store/loaders/design.mjs";
 import { injectionPoints } from "../store/loaders/injection.mjs";
 import { readElf, checkSymbols, ElfUnreadable } from "../store/loaders/elf.mjs";
 import { renderChecks, RenderUnreadable } from "../store/loaders/render.mjs";
+import * as runner from "../runner.mjs";
 import { saveUpload, WriteRefused } from "../store/writer.mjs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -308,6 +312,33 @@ export async function handleApi(req, res) {
     return true;
   }
 
+  if (req.method === "POST" && url.pathname === "/api/run") {
+    /*
+     * The handoff. This layer does not execute anything itself: it starts the
+     * engine's own runner and reports what that process says. Everything the
+     * studio knows about a run, it knows because the engine printed it -- so a
+     * bug here can lose progress and cannot invent a result.
+     */
+    try {
+      json(res, 200, runner.start({
+        id: url.searchParams.get("id"),
+        filter: url.searchParams.get("filter"),
+        tests: url.searchParams.get("tests") || undefined,
+        topology: url.searchParams.get("file") || undefined,
+        contract: url.searchParams.get("contract") || undefined,
+        boards: url.searchParams.get("boards") || undefined,
+        workers: url.searchParams.get("workers") || undefined,
+      }));
+    } catch (err) {
+      if (err instanceof runner.RunRefused) {
+        json(res, 409, { error: err.message, refused: true });
+        return true;
+      }
+      json(res, 500, { error: err.message });
+    }
+    return true;
+  }
+
   if (req.method !== "GET") {
     json(res, 405, {
       error: `${req.method} is not available here. The only write this studio ` +
@@ -337,6 +368,55 @@ export async function handleApi(req, res) {
         return true;
       }
       await serveFrames(res, id, test);
+      return true;
+    }
+
+    if (pathname === "/api/tests") {
+      /*
+       * COUNTS COME FROM THE GENERATOR, NEVER FROM THIS FILE.
+       *
+       * Section 11 says so, and the reason is that a hardcoded number is a
+       * claim about work that would be done. The manifest is written by
+       * expand.py at the moment it writes the tests, so the two cannot
+       * disagree -- and if the manifest is absent, that is reported rather
+       * than filled in.
+       */
+      const dir = url.searchParams.get("tests") || ".generated/tests";
+      if (!contained(dir)) {
+        json(res, 403, { error: `'${dir}' is outside the project.` });
+        return true;
+      }
+      let manifest;
+      try {
+        manifest = JSON.parse(
+          await readFile(path.join(REPO_ROOT, dir, "manifest.json"), "utf8"));
+      } catch (err) {
+        json(res, 422, {
+          error: `no expansion manifest at ${dir}/manifest.json. The plan is ` +
+            `read from what the generator wrote; nothing here invents one.`,
+          refused: true,
+        });
+        return true;
+      }
+      const groups = new Map();
+      for (const test of manifest.tests || []) {
+        const key = test.scenario ?? "(unnamed)";
+        if (!groups.has(key)) {
+          groups.set(key, { scenario: key, source: test.source ?? null, tests: [] });
+        }
+        groups.get(key).tests.push(test.id);
+      }
+      json(res, 200, {
+        generator: manifest.generator ?? null,
+        declared: manifest.counts?.tests ?? (manifest.tests || []).length,
+        groups: [...groups.values()].sort((a, b) => a.scenario.localeCompare(b.scenario)),
+      });
+      return true;
+    }
+
+    if (pathname === "/api/run") {
+      const since = Number(url.searchParams.get("since") || 0);
+      json(res, 200, { ...runner.status(), events: runner.events(since) });
       return true;
     }
 
