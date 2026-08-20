@@ -749,11 +749,124 @@ keeps the instants under the firmware they describe.
 Only a second system could have taught that. It is the cheapest place this could have been
 found, and the argument for §13 in one paragraph.
 
+### Sections 3.5, 3.6 and 3.7
+
+**Firmware intake** reads the uploaded ELF itself rather than shelling out to `nm`, because
+PROJECT.md is explicit that a customer uploading a compiled `.elf` needs none of Zephyr or
+the SDK — a screen that worked here and failed on their machine would be the worst place to
+discover a dependency. Verified against an independent source rather than itself: the
+toolchain's own reader reports the same addresses through the build gate, and a real run
+injected at one of them.
+
+```
+bms    g_cell_temp_dC    0x24000004      sha256 927fe278d929, the digest the run records
+press  g_pressure_kpa    0x24000062
+       g_medium_temp_dC  0x24000060
+       g_tx_enable       0x24000084
+```
+
+The missing-symbol report distinguishes three things a lazier one would merge: absent from a
+full table (most often the linker), stripped so only dynamic symbols remain, and no symbol
+table at all. *"This binary has no such symbol"* and *"this binary has no symbols"* are
+different statements and only one is about the symbol.
+
+**Render** performs six static checks over the project's own files, and the contract is read
+through `harness/catalog.py`, which grew an `as_document()` and a `--json` CLI for the
+purpose — the same one-parser rule the topology already follows. Every check is broken on
+purpose in a test, because a pre-flight that only ever says "ok" costs a screen, earns
+trust, and detects nothing.
+
+The live half of §10 — launching the emulator for two seconds — is listed on the page as
+**not checked here**, with the command that does it. A tick claiming a boot nobody performed
+is the failure this product exists to refuse.
+
+**The test plan** reads its counts from the generator's own manifest, so the number on screen
+and the tests that would run cannot disagree: 89 declared summing to 89 across groups, 22 for
+the second system from the same code. A missing manifest is refused with the command that
+makes one. The runner spawns `harness/run_suite.py` and reports what that process said; it
+parses no verdicts and writes no run record, so a bug in it can lose progress and cannot
+invent a result.
+
+One design decision earned itself immediately. Anything the runner cannot parse is passed
+through rather than dropped, and the very first run printed:
+
+```
+PARTIAL: 1 of the 89 tests the manifest declares were run. This is not a suite result.
+```
+
+the most important line in that output, for which there was no parser. A runner showing only
+what it recognises would have hidden exactly the message that matters.
+
+### The second audit, and two tests that passed for the wrong reason
+
+Thirty candidates, nine verified, six confirmed, and twenty-one **named in the log** rather
+than dropped silently — the mistake the first audit made. Several of the named ones were
+real on reading and were fixed too.
+
+**The flagship check was green over a minority of the suite.** Render's "every signal the
+tests name is in the contract" read only literal `signals:` blocks — but a swept scenario has
+none: its signal names live in `params:` and the mapping itself is templated inside the
+pattern. Six of nineteen scenario files across both systems were invisible, and by
+generated-test count the sweeps are the *majority* of each suite.
+
+Ten tests had been written for that check hours earlier. They passed because every fixture
+used literal `signals:` blocks — **the shape I had in mind rather than the shapes the
+repository contains.** Two audit lenses found it independently.
+
+**The same blindness was in the injection list**, which feeds the firmware intake symbol
+check — the worse of the two places for it. It was masked because non-swept scenarios happen
+to inject the same symbols, so the list looked complete; a symbol used only by a sweep would
+have been absent from the intake report, and a missing entry there reads as *"the emulator
+models this"*. Both readers now share one lookup that asks the pattern what it declares
+(`type: signal`, `type: injectable_symbol`) rather than carrying a name list that would rot
+in the flattering direction.
+
+**A check that could not fire.** `harness/catalog.py` refuses a duplicate identifier while
+loading, so render's own comparison for it was unreachable. Its test asserted only
+`notEqual("ok")` and passed on the contract-error branch, saying nothing about the check.
+The screen now reports the engine's refusal as check 5's own result and says where the
+guarantee comes from; the comparison stays as a backstop.
+
+**A relocatable object was accepted as firmware.** In `ET_REL` a symbol's `st_value` is a
+section-relative offset, not an address, and intake printed it as one — a number beside a
+symbol name that looks exactly like the real thing, on the screen whose whole job is to say
+where the harness will write.
+
+**`/api/render` had none of the path checks** that `/api/file` and `/api/design` have. That
+was the second time a new route arrived without the guards the old ones had, so the three
+conditions are now one shared function every caller uses.
+
+**The intake screen stated a fact about a project it had not read.** When the topology fails
+to load, or the node is not in it, the API returns an empty symbol list with
+`checked_against: null` — and the screen printed *"No scenario in this project writes a
+symbol into this node."* Three states, not two.
+
+**Two more places assumed one project.** `run_suite`'s expand step invoked the generator with
+`--out` only, so a run given `--topology` regenerated tests from the repository's topology
+and ran them against a different one — the second example system avoids this today only by
+always passing `--no-expand`, which is a habit rather than a property. And `coverage.py`
+resolved the device under test from `network.yml` by name, which would have put the first
+system's node name beside the second system's figures.
+
+Also fixed: an upload whose client disconnects left a promise pending forever, and node names
+permitted a trailing dot and compared case-sensitively where Win32 does neither — `bms.`,
+`BMS` and `bms` would have shared one directory while reading as three nodes.
+
+### What the audits keep showing
+
+Across both audits, every confirmed defect failed in the **flattering direction**, and not
+one produced a visible error. They produced confident sentences: a green "pass" made of two
+absent measurements, a coverage tab denying a report it never read, a symbol check covering
+one of three symbols, a pre-flight green over a minority of the suite.
+
+Two of my own tests passed for reasons other than the one intended. That is the argument for
+adversarial review by something that did not write the code, and for the standing habit of
+breaking every check on purpose before believing it.
+
 ### Not yet built
 
-Sections 3.5, 3.6 and 3.7 — firmware upload with symbol verification, Render, and
-running tests from the interface. The canvas is read-only, which section 3.8 permits
-explicitly, and section 3.9 is done.
+Nothing in the build order. Sections 3.1 through 3.7 and 3.9 are built; the canvas is
+read-only, which section 3.8 permits explicitly.
 
 One exit criterion remains open: **coverage joined to discrimination on the results
 screen**. It is now possible rather than done — the runner can trace a whole suite and the
