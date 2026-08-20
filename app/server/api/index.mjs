@@ -204,10 +204,25 @@ function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let total = 0;
+    // 'close' fires when the connection ends for ANY reason, including a client
+    // that walks away mid-upload. Settling only on 'end' and 'error' left this
+    // promise pending forever in that case, and the request handler with it --
+    // a leak per abandoned upload, invisible until the studio stops answering.
+    let settled = false;
+    const done = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      fn(value);
+    };
+    req.on("close", () => {
+      done(reject, new WriteRefused(
+        "the upload ended before the whole file arrived, so nothing was read. " +
+        "Nothing was stored."));
+    });
     req.on("data", (chunk) => {
       total += chunk.length;
       if (total > UPLOAD_LIMIT) {
-        reject(new WriteRefused(
+        done(reject, new WriteRefused(
           `the upload is larger than ${UPLOAD_LIMIT / (1024 * 1024)} MB, which is ` +
           `far beyond any firmware image this tests`));
         req.destroy();
@@ -215,8 +230,8 @@ function readBody(req) {
       }
       chunks.push(chunk);
     });
-    req.on("end", () => resolve(Buffer.concat(chunks)));
-    req.on("error", reject);
+    req.on("end", () => done(resolve, Buffer.concat(chunks)));
+    req.on("error", (err) => done(reject, err));
   });
 }
 

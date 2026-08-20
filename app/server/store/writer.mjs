@@ -27,8 +27,30 @@ export class WriteRefused extends Error {}
 
 export const UPLOAD_ROOT = path.join(REPO_ROOT, "project", "uploads");
 
-/** Node names come from a request, so they are checked before they are joined. */
-const SAFE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+/**
+ * Node names come from a request, so they are checked before they are joined.
+ *
+ * WINDOWS DOES NOT COMPARE FILENAMES THE WAY THIS REGEX DOES. It strips a
+ * trailing dot and matches case-insensitively, so 'bms.' and 'BMS' would both
+ * land in the same directory as 'bms' while reading as three different nodes --
+ * one node's binary stored under another's name, which on this screen is a
+ * binary attributed to the wrong device under test.
+ *
+ * So: no trailing dot, no leading dot, and no device name. The pattern is
+ * deliberately narrower than what a filesystem would accept.
+ */
+const SAFE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}[A-Za-z0-9]$|^[A-Za-z0-9]$/;
+const RESERVED = new Set([
+  "con", "prn", "aux", "nul", "clock$",
+  ...Array.from({ length: 9 }, (_, i) => `com${i + 1}`),
+  ...Array.from({ length: 9 }, (_, i) => `lpt${i + 1}`),
+]);
+
+function safeName(name) {
+  if (typeof name !== "string" || !SAFE_NAME.test(name)) return false;
+  if (name.includes("..")) return false;
+  return !RESERVED.has(name.split(".")[0].toLowerCase());
+}
 
 /**
  * A binary is stored under its own digest.
@@ -40,7 +62,7 @@ const SAFE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
  * rewrite.
  */
 export async function saveUpload(node, bytes, { originalName = null } = {}) {
-  if (!SAFE_NAME.test(node ?? "")) {
+  if (!safeName(node ?? "")) {
     throw new WriteRefused(`'${node}' is not a node name`);
   }
   if (!Buffer.isBuffer(bytes) || bytes.length === 0) {
@@ -91,7 +113,7 @@ export async function saveUpload(node, bytes, { originalName = null } = {}) {
 }
 
 export async function readUpload(node, digest) {
-  if (!SAFE_NAME.test(node ?? "") || !/^[0-9a-f]{64}$/.test(digest ?? "")) {
+  if (!safeName(node ?? "") || !/^[0-9a-f]{64}$/.test(digest ?? "")) {
     throw new WriteRefused("that is not an upload this can name");
   }
   return await readFile(path.join(UPLOAD_ROOT, node, `${digest}.bin`));
