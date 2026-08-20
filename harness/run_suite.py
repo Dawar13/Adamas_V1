@@ -342,6 +342,16 @@ def run_one(python, test: Path, out_root: Path, timeout_s: int,
                 "answer could have been read as this one: %s" % (previous, exc))
             return record
 
+    # HOST WALL CLOCK, AND NOTHING ELSE READS IT.
+    #
+    # Named host_wall_seconds so it can never be mistaken for a latency. Every
+    # number this product reports about firmware is virtual time; this is time
+    # on the machine that hosted the emulator, it varies with load by design,
+    # and no verdict may depend on it. It exists so the real-time factor -- how
+    # many host seconds one simulated second costs -- can be measured rather
+    # than guessed, because that ratio is what decides whether this fits in a
+    # customer's CI at all.
+    started = time.monotonic()
     try:
         finished = subprocess.run(
             command, cwd=str(REPO_ROOT), capture_output=True, text=True,
@@ -358,6 +368,7 @@ def run_one(python, test: Path, out_root: Path, timeout_s: int,
         record["detail"] = str(exc)
         return record
 
+    record["host_wall_seconds"] = round(time.monotonic() - started, 3)
     record["exit_code"] = finished.returncode
     record["outcome"] = OUTCOME_FOR_CODE.get(finished.returncode, "crashed")
 

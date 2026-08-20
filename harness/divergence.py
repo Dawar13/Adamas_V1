@@ -184,6 +184,31 @@ STATUS_WARNING = "WARNING"
 STATUS_GAP = "GAP"
 
 
+#: One shard's contribution. Deliberately a different schema from the gate
+#: record: a shard holds outcomes and no comparison, and anything that reads one
+#: expecting a verdict should fail loudly rather than find a plausible-looking
+#: document with the comparison missing.
+SHARD_SCHEMA = "bench.divergence.shard.v1"
+
+
+def shard_of(tests, shard: int, of: int):
+    """The tests belonging to one shard.
+
+    ROUND-ROBIN, NOT CONTIGUOUS BLOCKS -- the same invariant run_suite.py uses,
+    and for the same reason. The suite is ordered by scenario, so contiguous
+    blocks would put every variant of one sweep in one shard: that shard runs
+    long while others idle, and a shard that dies takes a whole rule's evidence
+    with it rather than a scattering of tests.
+    """
+    if of < 1:
+        raise DivergenceError("--of must be at least 1")
+    if not 1 <= shard <= of:
+        raise DivergenceError(
+            "--shard %d is outside 1..%d. A shard index that does not exist "
+            "would silently run nothing and report a clean subset." % (shard, of))
+    return [test for index, test in enumerate(tests) if index % of == shard - 1]
+
+
 class DivergenceError(Exception):
     """The inputs are unusable, so no comparison can be made."""
 
@@ -1351,6 +1376,57 @@ def as_document(baseline: Arm, comparisons, suite: Suite, dut_node_id: str,
 # ---------------------------------------------------------------------------
 
 
+def shard_document(shard: int, of: int, declared: int, suite: Suite,
+                   dut_node_id: str, workers: int, baseline: Arm, arms: dict,
+                   traced: bool) -> dict:
+    """One shard's outcomes, in the form gate_merge.py reassembles arms from.
+
+    It carries no verdict and no comparison. It carries the manifest hash, the
+    declared suite size and every binary's digest, because those are what the
+    merge checks before it will treat several shards as one gate.
+    """
+    def outcomes_of(arm: Arm) -> list:
+        return [
+            {
+                "test": outcome.test_id,
+                "verdict": outcome.verdict,
+                "latency_us": outcome.latency_us,
+                "binary_sha256": outcome.binary_sha256,
+                "failing": list(outcome.failing),
+                "exit_code": outcome.exit_code,
+                "results": _relative(outcome.results_path),
+                "reused": bool(outcome.reused),
+            }
+            for _, outcome in sorted(arm.outcomes.items())
+        ]
+
+    return {
+        "schema": SHARD_SCHEMA,
+        "shard": int(shard),
+        "of": int(of),
+        "suite": {
+            "declared": int(declared),
+            "tests": list(suite.ids),
+            "count": len(suite),
+            "directory": _relative(suite.directory),
+            "manifest": _relative(suite.manifest_path),
+            "manifest_sha256": suite.manifest_sha256,
+        },
+        "device_under_test": dut_node_id,
+        "workers": int(workers),
+        "baseline_traced": bool(traced),
+        "arms": {
+            label: {
+                "binary": _relative(arm.binary),
+                "binary_sha256": arm.binary_sha256,
+                "wall_seconds": arm.wall_seconds,
+                "outcomes": outcomes_of(arm),
+            }
+            for label, arm in [("baseline", baseline)] + sorted(arms.items())
+        },
+    }
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="divergence.py",
@@ -1382,6 +1458,14 @@ def build_parser() -> argparse.ArgumentParser:
                         help="trace the baseline arm, so coverage can be "
                              "measured from the same run this gate's "
                              "discrimination comes from")
+    parser.add_argument("--shard", type=int, default=None,
+                        help="run only this shard of the suite, numbered from "
+                             "1. Every arm is run over the shard's tests, and "
+                             "no comparison is made -- see --of")
+    parser.add_argument("--of", type=int, default=None,
+                        help="how many shards the suite is split into. A shard "
+                             "writes its outcomes for harness/gate_merge.py to "
+                             "combine; comparison needs whole verdict sets")
     parser.add_argument("--list", action="store_true",
                         help="print the plan and execute nothing")
     parser.add_argument("--quiet", action="store_true",
@@ -1410,8 +1494,26 @@ def main(argv=None) -> int:
         REPO_ROOT / "harness" / "out" / "divergence")
     workers = None
 
+    sharded = args.shard is not None or args.of is not None
+    if sharded and (args.shard is None or args.of is None):
+        print("\nERROR: --shard and --of are given together or not at all. One "
+              "without the other cannot say what fraction of the suite ran.\n",
+              file=sys.stderr)
+        return EXIT_UNUSABLE
+
     try:
         suite = Suite.load(tests_dir)
+        declared = len(suite)
+        if sharded:
+            chosen = shard_of(list(suite.tests), int(args.shard), int(args.of))
+            if not chosen:
+                raise DivergenceError(
+                    "shard %d of %d holds no tests: the suite has %d and there "
+                    "are more shards than tests. A shard that runs nothing "
+                    "still reports a clean subset."
+                    % (args.shard, args.of, declared))
+            suite = Suite(suite.directory, suite.manifest_path,
+                          suite.manifest_sha256, chosen)
         net = topology.load(topology_path)
         dut = net.dut()
         # Derived from what a test in THIS topology costs, not from a constant.
@@ -1479,6 +1581,10 @@ def main(argv=None) -> int:
         % (len(variants) + 1, _plural(len(variants) + 1, "run", "runs"),
            workers, _plural(workers, "worker", "workers"), len(variants),
            _plural(len(variants), "build", "builds")))
+    if sharded:
+        out("  shard %d of %d: %d of the %d declared %s"
+            % (args.shard, args.of, len(suite), declared,
+               _plural(declared, "test", "tests")))
 
     try:
         out("")
@@ -1495,6 +1601,7 @@ def main(argv=None) -> int:
                 % ", ".join(baseline.failed())
             )
 
+        arms = {}
         comparisons = []
         for variant in variants:
             out("")
@@ -1504,13 +1611,35 @@ def main(argv=None) -> int:
                 variant.binary)
             arm = runner.run(variant.name, suite, copied, out_root / variant.name,
                              dut.id, variant.binary, variant.sha256)
-            comparisons.append(compare(baseline, variant, arm, suite))
+            arms[variant.name] = arm
+            if not sharded:
+                comparisons.append(compare(baseline, variant, arm, suite))
     except NoExecutionPath as exc:
         print("\nREFUSED: %s\n" % exc, file=sys.stderr)
         return EXIT_NO_EXECUTION_PATH
     except (DivergenceError, topology.NetworkError) as exc:
         print("\nERROR: %s\n" % exc, file=sys.stderr)
         return EXIT_UNUSABLE
+
+    if sharded:
+        """A shard reports outcomes. It does not report a gate."""
+        out_root.mkdir(parents=True, exist_ok=True)
+        record = out_root / ("gate-shard-%d.json" % args.shard)
+        record.write_text(
+            json.dumps(shard_document(args.shard, args.of, declared, suite, dut.id,
+                                      workers, baseline, arms, args.coverage),
+                       indent=2, sort_keys=False) + "\n",
+            encoding="utf-8", newline="\n")
+        out("")
+        out("  shard %d of %d complete: %d %s against %d %s"
+            % (args.shard, args.of, len(suite),
+               _plural(len(suite), "test", "tests"), len(variants) + 1,
+               _plural(len(variants) + 1, "binary", "binaries")))
+        out("  no comparison was made: that needs whole verdict sets.")
+        out("  %s" % _relative(record))
+        out("")
+        return EXIT_OK
+
 
     failures = _failure_lines(comparisons)
     warnings = []
