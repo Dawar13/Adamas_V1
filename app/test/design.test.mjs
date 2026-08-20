@@ -111,6 +111,37 @@ describe("what is injected instead of emulated", () => {
     }
   });
 
+  it("sees a symbol injected only by a SWEPT scenario", async () => {
+    /*
+     * A swept scenario has no literal `write_symbol:` block -- the stimulus is
+     * templated in the pattern and the symbol is bound as a parameter. Reading
+     * only literal blocks made every sweep invisible to this list, which is the
+     * list the firmware intake screen checks a binary against.
+     *
+     * It was masked because non-swept scenarios happen to inject the same
+     * symbols. A symbol used ONLY by a sweep would simply have been absent from
+     * the intake report -- and a missing entry there reads as "the emulator
+     * models this", on the screen built to catch a symbol the linker discarded.
+     *
+     * Asserted against the real projects: both device-under-test symbol lists
+     * must cite a sweep file, which they could not before.
+     */
+    for (const [topology, boards] of [
+      ["network.yml", "harness/boards.yml"],
+      ["examples/sensor-node/network.yml", "examples/sensor-node/boards.yml"],
+    ]) {
+      const design = await loadDesign(topology, boards);
+      const dut = design.nodes.find((node) => node.dut);
+      const points = await injectionPoints(dut, topology);
+      const fromASweep = points.filter((point) => /-sweep\.ya?ml$/.test(point.source));
+      assert.ok(
+        fromASweep.length > 0,
+        `${topology}: no injection point was attributed to a swept scenario, ` +
+          `so the sweeps are invisible again: ${JSON.stringify(points)}`
+      );
+    }
+  });
+
   it("never attributes a pattern's template to a node", async () => {
     // Patterns write "{{node}}" until a scenario binds them. Counting those
     // would attribute every pattern's injections to every node on the bus.

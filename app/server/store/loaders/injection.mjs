@@ -26,6 +26,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { REPO_ROOT } from "./runs.mjs";
+import { paramsOfType, patternBinding } from "./patterns.mjs";
 
 /**
  * Where a project's scenarios live.
@@ -61,6 +62,32 @@ async function scenarioSymbols(nodeId, roots) {
       }
       // Both spellings the library uses: a block, and the inline mapping the
       // pattern files write.
+      /*
+       * A SWEPT SCENARIO HAS NO write_symbol BLOCK.
+       *
+       * Its stimulus lives templated in the pattern and the symbol it writes is
+       * bound as a parameter: `symbol: g_cell_temp_dC`. Reading only literal
+       * blocks made every sweep invisible here -- the same defect an audit
+       * confirmed in the render pre-flight, in the reader that feeds the
+       * firmware intake check.
+       *
+       * It is masked today because a non-swept scenario happens to inject the
+       * same symbols, so the list looks complete. A symbol used ONLY by a sweep
+       * would be missing from the intake report, and a missing entry there
+       * reads as "the emulator models this" -- the flattering direction, on the
+       * screen built to catch a symbol the linker discarded.
+       */
+      const binding = patternBinding(text);
+      if (binding) {
+        const symbolParams = await paramsOfType(binding.pattern, "injectable_symbol");
+        const targetsThisNode = binding.params.node === nodeId;
+        for (const [param, value] of Object.entries(binding.params)) {
+          if (targetsThisNode && symbolParams.has(param) && !value.includes("{{")) {
+            found.set(value, path.relative(REPO_ROOT, file).replace(/\\/g, "/"));
+          }
+        }
+      }
+
       const block = /write_symbol:\s*(?:\{([^}]*)\}|((?:\s*\n\s+\w+:.*)+))/g;
       let match;
       while ((match = block.exec(text)) !== null) {

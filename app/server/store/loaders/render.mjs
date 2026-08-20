@@ -30,6 +30,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { REPO_ROOT } from "./runs.mjs";
 import { loadDesign, DesignUnreadable } from "./design.mjs";
+import { paramsOfType, patternBinding } from "./patterns.mjs";
 
 const run = promisify(execFile);
 
@@ -78,29 +79,6 @@ async function exists(relative) {
   }
 }
 
-/**
- * Which of a pattern's parameters carry signal names.
- *
- * Patterns declare it: `- { name: state_signal, type: signal, doc: ... }`. So
- * this asks rather than assuming. A hardcoded list of parameter names would rot
- * the moment a pattern gained one, and it would rot in the flattering
- * direction -- the check would go on passing while covering less.
- */
-async function signalParamsOf(patternName) {
-  const names = new Set();
-  let text;
-  try {
-    text = await readFile(path.join(REPO_ROOT, "patterns", `${patternName}.yml`), "utf8");
-  } catch {
-    return names; // an unknown pattern is expand.py's refusal to make, not ours
-  }
-  for (const line of text.split("\n")) {
-    const declared = line.match(/^\s*-\s*\{\s*name:\s*([A-Za-z_][\w]*)\s*,\s*type:\s*signal\b/);
-    if (declared) names.add(declared[1]);
-  }
-  return names;
-}
-
 /** Every YAML file under a directory, including subdirectories. */
 async function everyYaml(dir) {
   const { readdir } = await import("node:fs/promises");
@@ -144,21 +122,11 @@ async function signalsUsedByTests(scenarioDir) {
      * the sweeps are the majority of each suite. The check was green over a
      * minority of what it claimed.
      */
-    const usesPattern = text.match(/^pattern:\s*['"]?([\w-]+)['"]?\s*$/m);
-    if (usesPattern) {
-      const signalParams = await signalParamsOf(usesPattern[1]);
-      const params = text.match(/^params:\s*$/m);
-      if (params && signalParams.size) {
-        const lines = text.split("\n");
-        const start = lines.findIndex((line) => /^params:\s*$/.test(line));
-        for (let i = start + 1; i < lines.length; i += 1) {
-          if (!lines[i].trim() || /^\s*#/.test(lines[i])) continue;
-          const bound = lines[i].match(/^(\s+)([A-Za-z_][\w]*):\s*['"]?([^'"#\s]+)/);
-          if (!bound) break; // dedented out of the params block
-          if (signalParams.has(bound[2]) && !used.has(bound[3])) {
-            used.set(bound[3], file);
-          }
-        }
+    const binding = patternBinding(text);
+    if (binding) {
+      const signalParams = await paramsOfType(binding.pattern, "signal");
+      for (const [param, value] of Object.entries(binding.params)) {
+        if (signalParams.has(param) && !used.has(value)) used.set(value, file);
       }
     }
     /*
