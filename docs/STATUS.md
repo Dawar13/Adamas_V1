@@ -879,9 +879,73 @@ section 3.7, and the Coverage tab names the command that would produce a report 
 of showing a figure. A button that looked live would break the placeholder rule in the
 most expensive place — in front of someone evaluating whether the tool tells the truth.
 
-## Phase 4 — Hosting and CI
+## Phase 4 — CI, distribution, and requirements
 
-- [ ] Shareable link, CI job gating merges
+### §0.1 The divergence gate, sharded
+
+The gate had been killed twice by the host at 274 of 356 executions — once by a WSL
+teardown, once by a session ending. Nothing was wrong with it; this machine has never
+once provided a two-hour uninterrupted window. Sharded, it completes:
+
+```
+gate held across 12 shards · 3 of 3 documented divergences observed exactly · 0 warnings
+
+bms-broken         caught by  4 of 89 tests   limit itself faults (> became >=)
+bms-broken-latch   caught by 17 of 89 tests   fault self-clears on cooling
+bms-broken-state   caught by  5 of 89 tests   rule fires in every state
+
+unexpected divergence: none        expected but missing: none
+```
+
+**"Unexpected: none, missing: none" is the result**, not "the broken builds were caught".
+Catching them is the easy half. Nothing diverged that should not have, which is what says
+the suite is stable and each defective build is broken only in the way it documents.
+
+**Zero warnings, where Phase 2 recorded two.** Two of the three defects then rested on a
+single test each — one file carrying a whole proof. The thinnest is now 4 tests and the
+thickest 17. That came from the sweeps, and it is what boundary testing was supposed to buy.
+
+All four tests that catch `bms-broken` inject **exactly 550**, the limit itself. Every test
+injecting a value comfortably above it passes against that binary, because both
+implementations fault identically there. That is the blind spot which let all eight original
+Phase 1 scenarios pass against it.
+
+**A shard makes no comparison, and its record carries no verdict.** Divergence is a claim
+about whole verdict sets — these binaries differ in exactly these tests and no others — and
+a subset saying its tests agree is true about a fraction and false about the gate, in the
+flattering direction: most shards contain no diverging test at all and would report
+contentedly. `harness/gate_merge.py` reassembles complete arms and compares with the same
+functions the unsharded gate uses, so a sharded run and an unsharded one cannot disagree.
+
+Nine refusals, each tested: a record that is not a shard, different manifest hashes,
+disagreeing shard counts, a missing shard, a duplicated shard, a test in two shards,
+different binaries between shards, different sets of defective builds, and a suite on disk
+that is not the one the shards ran.
+
+Writing those tests found two defects. The merge loaded the suite from disk before checking
+the shards against each other, so a genuine "these shards ran different binaries" fault came
+out as "no expansion manifest" — the right refusal pointing at the wrong place. And the test
+asserting that a shard carries no verdict grepped the source for the string, failing on the
+*per-test* verdicts a shard must carry; it now builds a real shard document and asks its top
+level.
+
+### §1.1 Real-time factor — the instrument, not yet the number
+
+The runner records `host_wall_seconds` per test, named so it can never be read as a latency.
+Every number this product reports about firmware is virtual time; this is time on the machine
+that hosted the emulator, it varies with load by design — one 22-test shard recorded 236
+minutes against another's 7 — and no verdict depends on it.
+
+`harness/measure.py` divides the two, and that is the only place in the project where those
+clocks meet. It **refuses** to infer a factor from the three existing stored runs, which
+carry simulated time and no host time: a ratio from one clock is not a ratio.
+
+The number matters more than it sounds. A practitioner who built virtual ECUs on QEMU for a
+Japanese OEM reported roughly 10× slower than real time and said that is what killed CI
+adoption on that programme — not fidelity, not trust. Speed. Ours should be materially
+better on a single Cortex-M7, and *should* is not a measurement, so nothing is claimed until
+a run made with the new recording produces one.
+
 
 ## Phase 5 — Depth
 
