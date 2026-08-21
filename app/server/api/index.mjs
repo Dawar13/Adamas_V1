@@ -16,6 +16,7 @@
  *      GET  /api/file?path=...                 one configuration file, as text
  *      GET  /api/render                        the pre-flight checks, static only
  *      GET  /api/bringup                       load each platform and boot it, live
+ *      GET  /api/boards                        every platform file on this machine
  *      GET  /api/tests                         the plan, from the generator's manifest
  *      GET  /api/run                           what the runner is doing, and its events
  *      POST /api/run                           hand a job to the runner
@@ -39,6 +40,7 @@ import { readElf, checkSymbols, ElfUnreadable } from "../store/loaders/elf.mjs";
 import { renderChecks, RenderUnreadable } from "../store/loaders/render.mjs";
 import * as runner from "../runner.mjs";
 import { bringUp, bringUpPlan } from "../bringup.mjs";
+import { listBoards } from "../store/loaders/boards.mjs";
 import { saveUpload, WriteRefused } from "../store/writer.mjs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -459,6 +461,11 @@ export async function handleApi(req, res) {
     if (pathname === "/api/run") {
       const since = Number(url.searchParams.get("since") || 0);
       json(res, 200, { ...runner.status(), events: runner.events(since) });
+      return true;
+    }
+
+    if (pathname === "/api/boards") {
+      json(res, 200, await listBoards());
       return true;
     }
 

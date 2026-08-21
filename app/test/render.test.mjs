@@ -135,7 +135,7 @@ describe("each check can fail", () => {
       catalog: CATALOG,
     });
     const result = await renderChecks(where);
-    const check = named(result, "platform file on disk");
+    const check = named(result, "platform file");
     assert.equal(check.state, "fault");
     assert.match(check.detail, /no_such_board/);
     assert.equal(result.verdict, "fault");
@@ -150,7 +150,7 @@ describe("each check can fail", () => {
       ),
       catalog: CATALOG,
     });
-    const check = named(await renderChecks(where), "platform file on disk");
+    const check = named(await renderChecks(where), "platform file");
     assert.equal(check.state, "fault");
     assert.match(check.detail, /not-here\.repl/);
     assert.match(check.detail, /not on disk/);
@@ -168,7 +168,7 @@ describe("each check can fail", () => {
       catalog: CATALOG,
     });
     const result = await renderChecks(where);
-    const check = named(result, "tier is runnable");
+    const check = named(result, "can be run");
     assert.equal(check.state, "refused");
     assert.notEqual(check.state, "fault");
     assert.match(check.detail, /DECLARED/);
@@ -213,7 +213,7 @@ describe("each check can fail", () => {
 `,
     });
     const result = await renderChecks(where);
-    const check = named(result, "one identifier");
+    const check = named(result, "identifier");
     /*
      * The engine's contract loader refuses a duplicate while loading, so this
      * check never reaches its own comparison -- and the first version of this
@@ -241,7 +241,7 @@ describe("each check can fail", () => {
       catalog: "this: is: not: a: contract\n  - [\n",
     });
     const result = await renderChecks(where);
-    for (const fragment of ["one identifier", "in the contract"]) {
+    for (const fragment of ["identifier", "signal the tests name"]) {
       const check = named(result, fragment);
       assert.equal(check.state, "refused", `${fragment}: ${check.detail}`);
       assert.match(check.detail, /could not be checked/);
@@ -265,7 +265,7 @@ steps:
 `,
       },
     });
-    const check = named(await renderChecks(where), "in the contract");
+    const check = named(await renderChecks(where), "signal the tests name");
     assert.equal(check.state, "fault");
     assert.match(check.detail, /no_such_signal/);
   });
@@ -314,7 +314,7 @@ sweep:
 `,
       },
     });
-    const check = named(await renderChecks(where), "in the contract");
+    const check = named(await renderChecks(where), "signal the tests name");
     assert.equal(check.state, "fault", check.detail);
     assert.match(check.detail, /no_such_signal/);
     // Both signal-typed parameters, not just the first one the pattern declares.
@@ -344,7 +344,7 @@ steps:
       label: "in a subdirectory"
 `
     );
-    const check = named(await renderChecks(where), "in the contract");
+    const check = named(await renderChecks(where), "signal the tests name");
     assert.equal(check.state, "fault");
     assert.match(check.detail, /buried_signal/);
   });
@@ -374,8 +374,8 @@ steps:
     });
     // Deliberately not passing `contract`: it must be found beside the topology.
     const result = await renderChecks({ topology: where.topology, boards: where.boards });
-    assert.equal(named(result, "in the contract").state, "ok");
-    assert.equal(named(result, "one identifier").state, "ok");
+    assert.equal(named(result, "signal the tests name").state, "ok");
+    assert.equal(named(result, "identifier").state, "ok");
   });
 
   it("does not flag a step's own keys as signals", async () => {
@@ -400,7 +400,7 @@ steps:
 `,
       },
     });
-    const check = named(await renderChecks(where), "in the contract");
+    const check = named(await renderChecks(where), "signal the tests name");
     assert.equal(check.state, "ok", check.detail);
   });
 });

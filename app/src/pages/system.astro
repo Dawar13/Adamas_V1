@@ -1,74 +1,83 @@
 ---
 import Base from "../layouts/Base.astro";
 import { loadDesign, DesignUnreadable } from "../../server/store/loaders/design.mjs";
+import SystemCanvas from "../app/views/SystemCanvas.jsx";
 
 /*
  * The system — the landing page, and a real bus topology.
  *
- * WHY THIS IS DRAWN AND NOT LISTED
- * ---------------------------------------------------------------------------
  * The previous version was six cards in a row with a horizontal rule under
- * them. The one thing an engineer looks for -- which controller sits on which
- * bus -- was the one thing not drawn. A CAN topology with no visible bus line
- * is a credibility leak: it says the tool has not understood the system it
- * claims to test.
+ * them. The one thing an engineer looks for — which controller sits on which
+ * bus — was the one thing not drawn. A CAN topology with no visible bus line is
+ * a credibility leak: it says the tool has not understood the system it claims
+ * to test.
  *
  * NOTHING HERE IS A LITERAL. Every node, bus, speed, board and peripheral is
- * read from network.yml through the engine's own loader, at request time. The
- * layout is computed from that file and is deterministic -- no physics, no
- * force simulation -- so the same topology always draws the same way.
+ * read from the topology through the engine's own loader, at request time.
+ * Layout is computed from that file and is deterministic — no physics, no force
+ * simulation — so the same topology always draws the same way.
  */
 const topology = Astro.url.searchParams.get("file") || undefined;
-const boards = Astro.url.searchParams.get("boards") || undefined;
+const boardsFile = Astro.url.searchParams.get("boards") || undefined;
 
 let design = null;
 let refused = null;
 try {
-  design = await loadDesign(topology, boards);
+  design = await loadDesign(topology, boardsFile);
 } catch (err) {
   if (err instanceof DesignUnreadable) refused = err.message;
   else throw err;
 }
 
-/* ------------------------------------------------------------------ layout */
 const NODE_W = 208;
 const NODE_H = 76;
 const GAP_X = 40;
-const RAIL_DROP = 56;      // node bottom to rail
-const BUS_BLOCK = 260;     // vertical space one bus and its nodes occupy
+const RAIL_DROP = 56;
+const BUS_BLOCK = 250;
 const PAD = 48;
 
-let width = 960;
-let height = 300;
+let width = 900;
+let height = 320;
 const lanes = [];
 
 if (design) {
-  // A node is drawn on the first bus it declares. A node on two buses is a
-  // gateway and is drawn on the upper one, with a drop to the lower.
   const placed = new Set();
   design.buses.forEach((bus, index) => {
     const members = design.nodes.filter(
       (node) => node.buses.includes(bus.id) && !placed.has(node.id)
     );
     members.forEach((node) => placed.add(node.id));
-
-    const rowWidth = members.length * NODE_W + Math.max(0, members.length - 1) * GAP_X;
-    const startX = PAD;
     const top = PAD + index * BUS_BLOCK;
 
     lanes.push({
-      bus,
+      bus: { id: bus.id },
+      // Built here rather than in the component: every part of it comes from
+      // the topology, and a bus with no declared rate says so instead of
+      // showing a zero nobody wrote.
+      label:
+        bus.id +
+        (bus.type ? ` · ${String(bus.type).toUpperCase()}` : "") +
+        (typeof bus.bitrate === "number" && bus.bitrate > 0
+          ? ` · ${(bus.bitrate / 1000).toFixed(0)} kbit/s`
+          : " · rate not declared"),
       railY: top + NODE_H + RAIL_DROP,
       nodes: members.map((node, i) => ({
-        node,
-        x: startX + i * (NODE_W + GAP_X),
+        node: {
+          id: node.id,
+          board: node.board,
+          dut: node.dut,
+          is_real: node.is_real,
+          is_scripted: node.is_scripted,
+          emits: node.emits,
+          ports: node.ports,
+          tier: node.board_detail?.tier ?? null,
+        },
+        x: PAD + i * (NODE_W + GAP_X),
         y: top,
       })),
-      // A node on more than one bus bridges them; drawn so the link is visible.
-      gateways: members.filter((node) => node.buses.length > 1).map((node) => node.id),
     });
-    width = Math.max(width, startX + rowWidth + PAD);
-    height = Math.max(height, top + NODE_H + RAIL_DROP + PAD);
+    width = Math.max(width, PAD * 2 + members.length * NODE_W + Math.max(0, members.length - 1) * GAP_X);
+    height = Math.max(height, top + NODE_H + RAIL_DROP + PAD + 60);
   });
 }
 ---
@@ -82,107 +91,12 @@ if (design) {
   )}
 
   {design && (
-    <div class="bench">
-      <div class="canvas-wrap">
-        <header class="canvas-head">
-          <h1>System</h1>
-          <span class="canvas-sub mono">
-            {design.nodes.length} nodes · {design.buses.length} bus{design.buses.length === 1 ? "" : "es"}
-          </span>
-        </header>
-
-        <div class="canvas-scroll">
-          <svg
-            class="canvas"
-            id="canvas"
-            width={width}
-            height={height}
-            viewBox={`0 0 ${width} ${height}`}
-            role="img"
-            aria-label="Bus topology"
-          >
-            <defs>
-              <pattern id="dots" width="16" height="16" patternUnits="userSpaceOnUse">
-                <circle cx="1" cy="1" r="1" class="grid-dot" />
-              </pattern>
-              <pattern id="hatch" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-                <line x1="0" y1="0" x2="0" y2="8" class="hatch-line" />
-              </pattern>
-            </defs>
-            <rect width={width} height={height} fill="url(#dots)" />
-
-            {lanes.map((lane) => (
-              <g>
-                {/* the rail */}
-                <line
-                  class="rail"
-                  x1={PAD - 16}
-                  y1={lane.railY}
-                  x2={width - PAD + 16}
-                  y2={lane.railY}
-                />
-                <g transform={`translate(${PAD - 16}, ${lane.railY})`}>
-                  <rect class="rail-pill" x="0" y="-11" rx="3"
-                        width={String(lane.bus.id.length * 7 + 132)} height="22" />
-                  <text class="rail-label mono" x="8" y="4">
-                    {lane.bus.id}
-                    {lane.bus.type ? ` · ${String(lane.bus.type).toUpperCase()}` : ""}
-                    {typeof lane.bus.bitrate === "number" && lane.bus.bitrate > 0
-                      ? ` · ${(lane.bus.bitrate / 1000).toFixed(0)} kbit/s`
-                      : " · rate not declared"}
-                  </text>
-                </g>
-
-                {lane.nodes.map(({ node, x, y }) => (
-                  <g>
-                    {/* orthogonal elbow: straight down, right angle onto the rail */}
-                    <path
-                      class="drop"
-                      d={`M ${x + NODE_W / 2} ${y + NODE_H} L ${x + NODE_W / 2} ${lane.railY}`}
-                    />
-                    <circle class="tap" cx={x + NODE_W / 2} cy={lane.railY} r="3.5" />
-
-                    <a href={`/system/${node.id}${Astro.url.search}`}>
-                      <g transform={`translate(${x}, ${y})`} class={`node ${node.dut ? "is-dut" : ""}`}>
-                        <rect class="node-body" width={NODE_W} height={NODE_H} rx="6" />
-                        {/* Left bar: filled = real firmware executing, hollow = frame
-                            player. This replaces the dot-and-legend: an encoding that
-                            needs a legend has failed. */}
-                        <rect
-                          class={`node-edge ${node.is_real ? "is-real" : "is-played"}`}
-                          x="0" y="0" width="3" height={NODE_H}
-                        />
-                        <text class="node-title" x="14" y="24">{node.id}</text>
-                        <text class="node-slug mono" x="14" y="42">
-                          {node.board ?? (node.is_scripted ? "frame player" : "no board")}
-                        </text>
-                        <text class="node-chips mono" x="14" y="62">
-                          {node.is_real
-                            ? node.ports.map((p) => p.name.replace(/^sysbus\./, "")).join("  ")
-                            : `emits ${node.emits.map((id) => "0x" + id.toString(16).toUpperCase()).join(" ")}`}
-                        </text>
-                        {node.board_detail?.tier && (
-                          <text class={`node-tier tier-${node.board_detail.tier}`} x={NODE_W - 12} y="20">
-                            {node.board_detail.tier}
-                          </text>
-                        )}
-                        {node.dut && (
-                          <text class="node-dut" x={NODE_W - 12} y={NODE_H - 12}>DUT</text>
-                        )}
-                      </g>
-                    </a>
-                  </g>
-                ))}
-              </g>
-            ))}
-          </svg>
-        </div>
-
-        <p class="canvas-foot">
-          Connections are bus-level. The emulator models peripherals, not physical
-          packages. Drawn from <code>{design.source_topology ?? "network.yml"}</code>.
-        </p>
-      </div>
-    </div>
+    <SystemCanvas
+      lanes={lanes}
+      width={width}
+      height={height}
+      search={Astro.url.search}
+      client:load
+    />
   )}
 </Base>
