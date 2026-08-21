@@ -929,6 +929,29 @@ asserting that a shard carries no verdict grepped the source for the string, fai
 *per-test* verdicts a shard must carry; it now builds a real shard document and asks its top
 level.
 
+### §0.2 Determinism under parallelism, re-verified against the current engine
+
+Re-run rather than carried forward. Phase 3 closed this, and the engine has changed
+materially since — a distinct crash exit code, the runner clearing a previous answer before
+launching, new project-override flags — so the earlier verification described different code.
+
+```
+tests compared        9
+wall clock N=1        1086.5 s
+wall clock N=4         204.7 s
+
+RESULT: IDENTICAL at N=1 and N=4 — verdicts, latencies and every event log,
+        byte for byte.
+```
+
+Every one of the nine event logs hashes identically between the serial and four-way runs.
+Not "the verdicts matched": every recorded instant, to the microsecond.
+
+The wall clock moved by **5.3×** and virtual time did not move at all. That is the property
+stated exactly: host load is real, visible, and reaches nothing inside the simulation. It is
+what makes "run it again, get the same microseconds" a fact rather than a slogan — and the
+one claim that would quietly invalidate every latency this product reports if it were false.
+
 ### §1.1 Real-time factor — the instrument, not yet the number
 
 The runner records `host_wall_seconds` per test, named so it can never be read as a latency.
