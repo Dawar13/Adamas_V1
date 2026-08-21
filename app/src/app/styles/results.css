@@ -17,7 +17,7 @@
 .brand {
   font-weight: 650;
   letter-spacing: -0.02em;
-  color: var(--ink);
+  color: var(--b-ink);
   text-decoration: none;
 }
 .brand-note {
@@ -326,10 +326,10 @@
   margin-bottom: -1px;
 }
 .tab:hover {
-  color: var(--ink);
+  color: var(--b-ink);
 }
 .tab.is-active {
-  color: var(--ink);
+  color: var(--b-ink);
   background: var(--bg-raised);
   border-color: var(--rule);
   font-weight: 600;
@@ -558,7 +558,7 @@ tr.is-fault td {
   color: var(--ink-muted);
 }
 .empty h3 {
-  color: var(--ink);
+  color: var(--b-ink);
   font-size: var(--step-0);
   margin-bottom: 0.5rem;
 }
@@ -731,8 +731,8 @@ tr.is-fault td {
   flex: none;
 }
 .node-dot.is-real {
-  background: var(--ink);
-  border-color: var(--ink);
+  background: var(--b-ink);
+  border-color: var(--b-ink);
 }
 .node-dot.is-scripted {
   background: transparent;
@@ -952,7 +952,7 @@ tr.is-unresolved td {
   border: 1px solid var(--rule-strong);
   border-radius: var(--radius);
   background: var(--bg);
-  color: var(--ink);
+  color: var(--b-ink);
 }
 .intake-drop {
   flex: 1 1 22rem;
@@ -1175,8 +1175,8 @@ tr.is-unresolved td {
  * ====================================================================== */
 
 body.bench-surface {
-  background: var(--paper);
-  color: var(--ink);
+  background: var(--b-paper);
+  color: var(--b-ink);
 }
 .bench {
   display: flex;
@@ -1201,38 +1201,38 @@ body.bench-surface {
   letter-spacing: -0.01em;
 }
 .canvas-sub {
-  color: var(--ink-3);
+  color: var(--b-ink-3);
   font-size: 0.78rem;
 }
 .canvas-scroll {
   overflow: auto;
-  border: 1px solid var(--rule-b);
+  border: 1px solid var(--b-rule);
   border-radius: 4px;
-  background: var(--paper-2);
+  background: var(--b-card);
 }
 .canvas {
   display: block;
   min-width: 100%;
 }
-.grid-dot { fill: var(--grid-dot); opacity: 0.35; }
-.hatch-line { stroke: var(--ink-3); stroke-width: 1; opacity: 0.45; }
+.grid-dot { fill: var(--b-dot); opacity: 0.35; }
+.hatch-line { stroke: var(--b-ink-3); stroke-width: 1; opacity: 0.45; }
 
 /* The rail. This is the element whose absence was the credibility leak. */
 .rail-line { stroke: var(--bus); stroke-width: 2; }
-.rail-pill { fill: var(--paper); stroke: var(--bus); stroke-width: 1; opacity: 0.96; }
+.rail-pill { fill: var(--b-paper); stroke: var(--bus); stroke-width: 1; opacity: 0.96; }
 .rail-label { fill: var(--bus); font-size: 11.5px; }
 .drop { stroke: var(--bus); stroke-width: 1.5; fill: none; opacity: 0.75; }
 .tap { fill: var(--bus); }
 
-.node-body { fill: var(--paper-2); stroke: var(--rule-b); stroke-width: 1; }
+.node-body { fill: var(--b-card); stroke: var(--b-rule); stroke-width: 1; }
 .node.is-dut .node-body { stroke: var(--reaction); stroke-width: 2; }
 .node:hover .node-body { stroke: var(--bus); }
 /* Filled = real firmware executing. Hollow = frame player, runs no code. */
 .node-edge.is-real { fill: var(--bus); }
 .node-edge.is-played { fill: none; stroke: var(--bus); stroke-width: 1; }
-.node-title { fill: var(--ink); font-size: 14px; font-weight: 600; letter-spacing: -0.005em; }
-.node-slug { fill: var(--ink-3); font-size: 12px; }
-.node-chips { fill: var(--ink-2); font-size: 11px; }
+.node-title { fill: var(--b-ink); font-size: 14px; font-weight: 600; letter-spacing: -0.005em; }
+.node-slug { fill: var(--b-ink-3); font-size: 12px; }
+.node-chips { fill: var(--b-ink-2); font-size: 11px; }
 .node-tier { font-size: 10px; text-anchor: end; letter-spacing: 0.05em; text-transform: uppercase; }
 .tier-verified { fill: var(--pass-v); }
 .tier-modelled { fill: var(--bus); }
@@ -1243,34 +1243,34 @@ body.bench-surface {
 .canvas-foot {
   margin: 0.75rem 0 0;
   font-size: 0.75rem;
-  color: var(--ink-3);
+  color: var(--b-ink-3);
   max-width: 46rem;
 }
-.canvas-foot code { background: transparent; color: var(--ink-2); }
+.canvas-foot code { background: transparent; color: var(--b-ink-2); }
 
-body.bench-surface .topbar { background: var(--paper-2); border-bottom-color: var(--rule-b); }
-body.bench-surface .brand { color: var(--ink); }
-body.bench-surface .brand-note, body.bench-surface .topnav a { color: var(--ink-2); }
+body.bench-surface .topbar { background: var(--b-card); border-bottom-color: var(--b-rule); }
+body.bench-surface .brand { color: var(--b-ink); }
+body.bench-surface .brand-note, body.bench-surface .topnav a { color: var(--b-ink-2); }
 body.bench-surface .topnav a:hover { color: var(--bus); }
-.topnav-divider { color: var(--ink-3); opacity: 0.6; }
+.topnav-divider { color: var(--b-ink-3); opacity: 0.6; }
 
 /* ---------------------------------------------------- render, two stages */
 
-.stage-lead { color: var(--ink-2); max-width: 44rem; margin: 0 0 1.25rem; }
+.stage-lead { color: var(--b-ink-2); max-width: 44rem; margin: 0 0 1.25rem; }
 .limits-note { margin: 0.9rem 0 0; font-size: 0.8rem; }
 .limits-note summary {
-  cursor: pointer; color: var(--ink-3);
+  cursor: pointer; color: var(--b-ink-3);
   text-decoration: underline; text-underline-offset: 2px;
 }
-.limits-note p { color: var(--ink-2); max-width: 46rem; margin: 0.5rem 0 0; }
+.limits-note p { color: var(--b-ink-2); max-width: 46rem; margin: 0.5rem 0 0; }
 
 /* Stage 2 is the instrument surface: the change of surface is what tells the
    room that something started. */
 .bringup {
   margin-top: 1.75rem;
   border-radius: 4px;
-  border: 1px solid var(--rule-b);
-  background: var(--paper-2);
+  border: 1px solid var(--b-rule);
+  background: var(--b-card);
   padding: 1rem 1.25rem 1.25rem;
 }
 .bringup.is-live {
@@ -1280,7 +1280,7 @@ body.bench-surface .topnav a:hover { color: var(--bus); }
 }
 .bringup-head { display: flex; align-items: baseline; gap: 0.9rem; flex-wrap: wrap; }
 .bringup-head h2 { font-size: 1.05rem; font-weight: 600; }
-.bringup-sub { flex: 1; margin: 0; font-size: 0.8rem; color: var(--ink-3); }
+.bringup-sub { flex: 1; margin: 0; font-size: 0.8rem; color: var(--b-ink-3); }
 .bringup.is-live .bringup-sub { color: #8A939B; }
 .btn-go {
   background: var(--bus); color: #fff; border-color: var(--bus);
@@ -1317,37 +1317,37 @@ body.bench-surface .topnav a:hover { color: var(--bus); }
 
 .rail {
   width: 15rem; flex: none;
-  border-right: 1px solid var(--rule-b);
-  background: var(--paper-2);
+  border-right: 1px solid var(--b-rule);
+  background: var(--b-card);
   padding: 1.25rem 0.9rem;
   display: flex; flex-direction: column; gap: 0.5rem;
   max-height: calc(100vh - 46px); overflow: hidden;
 }
-.rail-head { font-size: 0.7rem; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-3); }
+.rail-head { font-size: 0.7rem; letter-spacing: 0.07em; text-transform: uppercase; color: var(--b-ink-3); }
 .rail-search {
   font: inherit; font-size: 0.8rem; padding: 0.35rem 0.5rem;
-  border: 1px solid var(--rule-b); border-radius: 3px;
-  background: var(--paper); color: var(--ink);
+  border: 1px solid var(--b-rule); border-radius: 3px;
+  background: var(--b-paper); color: var(--b-ink);
 }
-.rail-count { font-size: 0.7rem; color: var(--ink-3); }
+.rail-count { font-size: 0.7rem; color: var(--b-ink-3); }
 .rail-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; }
 .rail-item {
   width: 100%; display: flex; align-items: baseline; gap: 0.5rem;
-  background: none; border: 0; border-bottom: 1px solid var(--rule-b);
-  padding: 0.35rem 0.15rem; cursor: pointer; text-align: left; color: var(--ink);
+  background: none; border: 0; border-bottom: 1px solid var(--b-rule);
+  padding: 0.35rem 0.15rem; cursor: pointer; text-align: left; color: var(--b-ink);
 }
-.rail-item:hover { background: var(--paper); }
+.rail-item:hover { background: var(--b-paper); }
 .rail-slug { font-size: 0.76rem; flex: 1; }
 .rail-tier { font-size: 0.62rem; letter-spacing: 0.05em; text-transform: uppercase; }
 .rail-tier.tier-verified { color: var(--pass-v); }
 .rail-tier.tier-listed { color: var(--unknown-v); }
-.rail-note { font-size: 0.7rem; color: var(--ink-3); line-height: 1.4; }
+.rail-note { font-size: 0.7rem; color: var(--b-ink-3); line-height: 1.4; }
 
 /* The draft banner. Not an apology — it is the product refusing to run what it
    cannot stand behind, said out loud. */
 .draft-banner {
   border: 1px solid var(--reaction); border-left-width: 3px;
-  background: #FBF3EC; color: var(--ink);
+  background: #FBF3EC; color: var(--b-ink);
   padding: 0.7rem 0.9rem; margin-bottom: 0.9rem;
   font-size: 0.82rem; border-radius: 3px;
   display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap;
@@ -1359,5 +1359,155 @@ body.bench-surface .topnav a:hover { color: var(--bus); }
 
 /* Render is disabled while any draft exists, with the reason on hover. */
 html[data-drafts]:not([data-drafts="0"]) .topnav a[href="/render"] {
-  color: var(--ink-3); pointer-events: none; text-decoration: line-through;
+  color: var(--b-ink-3); pointer-events: none; text-decoration: line-through;
 }
+
+/* ======================================================================
+ * The bench surface sets every colour explicitly.
+ * ======================================================================
+ * Nothing here inherits from the instrument palette. That inheritance is
+ * exactly what made every bench page unreadable on a dark-mode machine.
+ */
+body.bench-surface,
+body.bench-surface .page,
+body.bench-surface h1,
+body.bench-surface h2,
+body.bench-surface h3,
+body.bench-surface p,
+body.bench-surface li,
+body.bench-surface td,
+body.bench-surface th,
+body.bench-surface label,
+body.bench-surface summary {
+  color: var(--b-ink);
+}
+body.bench-surface { background: var(--b-paper); }
+body.bench-surface .muted,
+body.bench-surface .canvas-sub,
+body.bench-surface .canvas-foot,
+body.bench-surface .rail-note,
+body.bench-surface .rail-count,
+body.bench-surface .stage-lead,
+body.bench-surface .check-detail { color: var(--b-ink-2); }
+body.bench-surface .section-head { color: var(--b-ink-3); }
+body.bench-surface .checks,
+body.bench-surface .check { border-color: var(--b-rule); }
+body.bench-surface .check-label { color: var(--b-ink); }
+body.bench-surface .btn { background: var(--b-card); border-color: var(--b-rule); color: var(--bus); }
+body.bench-surface .empty { border-color: var(--b-rule); color: var(--b-ink-2); }
+body.bench-surface .empty h3 { color: var(--b-ink); }
+body.bench-surface .kv th { color: var(--b-ink-2); }
+body.bench-surface code { color: var(--b-ink-2); }
+
+/* SVG text takes fill, not color. */
+.node-title { fill: var(--b-ink); }
+.node-slug  { fill: var(--b-ink-3); }
+.node-chips { fill: var(--b-ink-2); }
+.rail-label { fill: var(--bus); }
+
+/* ------------------------------------------------------- canvas controls */
+
+.canvas-wrap { display: flex; flex-direction: column; min-height: 0; }
+.canvas-tools {
+  display: flex; align-items: center; gap: 0.35rem;
+  margin-bottom: 0.5rem; font-size: 0.75rem;
+}
+.tool {
+  min-width: 1.9rem; padding: 0.2rem 0.4rem;
+  border: 1px solid var(--b-rule); border-radius: 3px;
+  background: var(--b-card); color: var(--b-ink); cursor: pointer;
+}
+.tool:hover { border-color: var(--bus); color: var(--bus); }
+.tool-wide { min-width: auto; }
+.tool-read { min-width: 3rem; text-align: center; color: var(--b-ink-2); }
+.tool-hint { margin-left: auto; color: var(--b-ink-3); font-size: 0.72rem; }
+
+/* The canvas fills what is left of the viewport, so a system with more nodes
+   than fit is panned and zoomed rather than cropped. */
+.canvas-scroll {
+  flex: 1; min-height: 26rem;
+  overflow: hidden;             /* pan and zoom replace scrollbars */
+  border: 1px solid var(--b-rule); border-radius: 4px;
+  background: var(--b-card);
+  cursor: grab; touch-action: none;
+}
+.canvas-scroll:active { cursor: grabbing; }
+.canvas { display: block; width: 100%; height: 100%; }
+.node { cursor: grab; }
+.node:active { cursor: grabbing; }
+.page:has(.bench) { max-width: none; padding: 0; }
+body.bench-surface .page { max-width: none; padding: 0; }
+
+/* ------------------------------------------------------- run tests panel */
+
+.runtests {
+  margin-top: 1.25rem; border-radius: 4px;
+  border: 1px solid var(--b-rule); background: var(--b-card);
+  padding: 1rem 1.25rem 1.25rem;
+}
+.runtests.is-live {
+  background: var(--console); border-color: var(--console-rule); color: var(--console-ink);
+}
+.runtests-head { display: flex; align-items: baseline; gap: 0.75rem; flex-wrap: wrap; }
+.runtests-head h2 { font-size: 1.05rem; font-weight: 600; }
+.runtests-sub { flex: 1; margin: 0; font-size: 0.8rem; color: var(--b-ink-3); }
+.runtests.is-live .runtests-sub { color: #8A939B; }
+.runtests-pick {
+  font: inherit; font-size: 0.78rem; padding: 0.25rem 0.4rem;
+  border: 1px solid var(--b-rule); border-radius: 3px;
+  background: var(--b-paper); color: var(--b-ink);
+}
+.runtests-tally { margin: 0.9rem 0 0.5rem; font-size: 0.85rem; }
+.rt-count { font-size: 1.1rem; font-weight: 600; }
+.runtests-tally .is-ok { color: #4BBD83; }
+.runtests-tally .is-fail { color: #F2695F; }
+
+.runtests-log {
+  max-height: 22rem; overflow-y: auto;
+  background: var(--console-2); border: 1px solid var(--console-rule);
+  border-radius: 3px; padding: 0.5rem 0.7rem;
+  font-family: var(--font-mono); font-size: 0.72rem; line-height: 1.55;
+}
+.rt-line { display: flex; gap: 0.6rem; white-space: pre-wrap; color: #9AA3AA; }
+.rt-line.is-ok .rt-mark { color: #4BBD83; }
+.rt-line.is-fail { color: #F2695F; }
+.rt-mark { width: 1.2rem; }
+.rt-name { flex: 1; color: var(--console-ink); }
+.rt-outcome { color: #6E767D; }
+.rt-plain { color: #C9A227; }
+.rt-exit { color: #6E767D; }
+.runtests-verdict { margin: 0.75rem 0 0; font-size: 0.8rem; color: #8A939B; }
+.runtests-verdict.is-fail { color: #F2695F; }
+
+/* ----------------------------------------------------------- the profiler */
+
+.profile-caveat {
+  border-left: 3px solid var(--reaction);
+  background: var(--console-2);
+  padding: 0.7rem 0.9rem; margin: 0 0 0.75rem;
+  font-size: 0.85rem; max-width: 52rem;
+}
+.profile-source { font-size: 0.75rem; margin: 0 0 1.5rem; }
+.prof-node { margin-bottom: 2rem; }
+.prof-node h2 {
+  display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap;
+  font-size: 1rem; margin-bottom: 0.6rem;
+}
+.prof-total { margin-left: auto; font-size: 0.75rem; color: var(--ink-faint); }
+.prof-bars { list-style: none; margin: 0; padding: 0; }
+.prof-bars li {
+  display: grid;
+  grid-template-columns: 18rem 1fr 3.2rem 6rem 6.5rem;
+  gap: 0.6rem; align-items: center;
+  padding: 0.15rem 0; font-size: 0.74rem;
+}
+.prof-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prof-bar { background: var(--bg-sunken); height: 12px; border-radius: 2px; overflow: hidden; }
+.prof-fill { display: block; height: 100%; background: var(--bus); }
+/* Reached, but no test that reaches it catches a defective build: its tests
+   confirm rather than probe. The third state, given its own colour. */
+.prof-bars li.is-unknown .prof-fill { background: var(--unknown-v); }
+.prof-bars li.is-unknown .prof-tests { color: var(--unknown-v); }
+.prof-pct { text-align: right; }
+.prof-n, .prof-tests { text-align: right; color: var(--ink-faint); }
+.prof-foot { font-size: 0.75rem; margin-top: 0.6rem; }

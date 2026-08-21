@@ -31,10 +31,13 @@ function snap(value) {
   return Math.round(value / GRID) * GRID;
 }
 
-function SavedNode({ node, x, y, search }) {
+function SavedNode({ node, x, y, search, onDrag }) {
   return (
-    <a href={`/system/${node.id}${search}`}>
-      <g transform={`translate(${x}, ${y})`} className={`node ${node.dut ? "is-dut" : ""}`}>
+    <a href={`/system/${node.id}${search}`} onClick={(e) => e.preventDefault()}>
+      <g transform={`translate(${x}, ${y})`}
+         className={`node ${node.dut ? "is-dut" : ""}`}
+         onPointerDown={onDrag}
+         onDoubleClick={() => { window.location.href = `/system/${node.id}${search}`; }}>
         <rect className="node-body" width={NODE_W} height={NODE_H} rx="6" />
         <rect
           className={`node-edge ${node.is_real ? "is-real" : "is-played"}`}
@@ -78,6 +81,18 @@ export default function SystemCanvas({ lanes, width, height, search }) {
   const [filter, setFilter] = useState("");
   const [drafts, setDrafts] = useState([]);
   const [dragging, setDragging] = useState(null);
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  /*
+   * Where each node has been dragged to. Seeded from the layout the file
+   * produced, then moved freely.
+   *
+   * MOVING A NODE IS NOT AN EDIT TO THE SYSTEM. Positions live here and are not
+   * written to the topology: the file describes what is connected to what, and
+   * a picture rearranged for legibility is not a change to that. Reload and the
+   * file's own layout returns.
+   */
+  const [moved, setMoved] = useState({});
 
   useEffect(() => {
     fetch("/api/boards")
@@ -105,25 +120,28 @@ export default function SystemCanvas({ lanes, width, height, search }) {
     ]);
   }, [height]);
 
-  const startDrag = useCallback((event, id) => {
+  const startDrag = useCallback((event, id, kind) => {
     event.preventDefault();
+    event.stopPropagation();
     const svg = event.currentTarget.ownerSVGElement;
     const point = svg.createSVGPoint();
-    setDragging({ id, svg, point, dx: 0, dy: 0 });
+    setDragging({ id, kind, svg, point });
   }, []);
 
   useEffect(() => {
     if (!dragging) return undefined;
     const move = (event) => {
-      const { svg, point, id } = dragging;
+      const { svg, point, id, kind } = dragging;
       point.x = event.clientX;
       point.y = event.clientY;
       const local = point.matrixTransform(svg.getScreenCTM().inverse());
-      setDrafts((was) =>
-        was.map((d) =>
-          d.id === id ? { ...d, x: snap(local.x - NODE_W / 2), y: snap(local.y - NODE_H / 2) } : d
-        )
-      );
+      const x = snap(local.x - NODE_W / 2);
+      const y = snap(local.y - NODE_H / 2);
+      if (kind === "draft") {
+        setDrafts((was) => was.map((d) => (d.id === id ? { ...d, x, y } : d)));
+      } else {
+        setMoved((was) => ({ ...was, [id]: { x, y } }));
+      }
     };
     const up = () => setDragging(null);
     window.addEventListener("pointermove", move);
@@ -133,6 +151,31 @@ export default function SystemCanvas({ lanes, width, height, search }) {
       window.removeEventListener("pointerup", up);
     };
   }, [dragging]);
+
+  const onWheel = useCallback((event) => {
+    if (!event.ctrlKey && !event.metaKey) return;   // plain scroll still scrolls
+    event.preventDefault();
+    setZoom((z) => Math.min(2, Math.max(0.25, z - Math.sign(event.deltaY) * 0.1)));
+  }, []);
+
+  const startPan = useCallback((event) => {
+    // Only when the background was grabbed: a pointer-down that started on a
+    // node is a node drag, and the node handler has already stopped it.
+    if (event.target.closest?.(".node")) return;
+    const from = { x: event.clientX, y: event.clientY, pan: { ...pan } };
+    const move = (moveEvent) => {
+      setPan({
+        x: from.pan.x + (moveEvent.clientX - from.x) / zoom,
+        y: from.pan.y + (moveEvent.clientY - from.y) / zoom,
+      });
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  }, [pan, zoom]);
 
   // Render is disabled while drafts exist. The nav link is outside this island,
   // so the flag is published on the document for the layout to read.
@@ -204,12 +247,28 @@ export default function SystemCanvas({ lanes, width, height, search }) {
           </div>
         )}
 
-        <div className="canvas-scroll">
+        <div className="canvas-tools">
+          <button className="tool" onClick={() => setZoom((z) => Math.max(0.25, z - 0.15))}
+                  aria-label="Zoom out">−</button>
+          <span className="tool-read mono">{Math.round(zoom * 100)}%</span>
+          <button className="tool" onClick={() => setZoom((z) => Math.min(2, z + 0.15))}
+                  aria-label="Zoom in">+</button>
+          <button className="tool tool-wide" onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }); }}>
+            100%
+          </button>
+          <button className="tool tool-wide" onClick={() => { setMoved({}); setPan({ x: 0, y: 0 }); }}>
+            Reset layout
+          </button>
+          <span className="tool-hint">drag a node · ctrl+scroll to zoom · drag the background to pan</span>
+        </div>
+
+        <div className="canvas-scroll" onWheel={onWheel} onPointerDown={startPan}>
           <svg
             className="canvas"
-            width={width}
-            height={height}
-            viewBox={`0 0 ${width} ${height}`}
+            width="100%"
+            height="100%"
+            viewBox={`${-pan.x} ${-pan.y} ${width / zoom} ${height / zoom}`}
+            preserveAspectRatio="xMinYMin meet"
             role="img"
             aria-label="Bus topology"
           >
@@ -232,19 +291,26 @@ export default function SystemCanvas({ lanes, width, height, search }) {
                         width={lane.label.length * 6.6 + 16} height="22" />
                   <text className="rail-label mono" x="8" y="4">{lane.label}</text>
                 </g>
-                {lane.nodes.map(({ node, x, y }) => (
-                  <g key={node.id}>
-                    <path className="drop"
-                          d={`M ${x + NODE_W / 2} ${y + NODE_H} L ${x + NODE_W / 2} ${lane.railY}`} />
-                    <circle className="tap" cx={x + NODE_W / 2} cy={lane.railY} r="3.5" />
-                    <SavedNode node={node} x={x} y={y} search={search} />
-                  </g>
-                ))}
+                {lane.nodes.map(({ node, x, y }) => {
+                  const at = moved[node.id] ?? { x, y };
+                  return (
+                    <g key={node.id}>
+                      {/* The drop follows the node, so the picture stays true
+                          to the file however it is rearranged. */}
+                      <path className="drop"
+                            d={`M ${at.x + NODE_W / 2} ${at.y + NODE_H} L ${at.x + NODE_W / 2} ${lane.railY}`} />
+                      <circle className="tap" cx={at.x + NODE_W / 2} cy={lane.railY} r="3.5" />
+                      <SavedNode node={node} x={at.x} y={at.y} search={search}
+                                 onDrag={(event) => startDrag(event, node.id, "saved")} />
+                    </g>
+                  );
+                })}
               </g>
             ))}
 
             {drafts.map((draft) => (
-              <DraftNode key={draft.id} draft={draft} onDrag={startDrag} />
+              <DraftNode key={draft.id} draft={draft}
+                         onDrag={(event, id) => startDrag(event, id, "draft")} />
             ))}
           </svg>
         </div>

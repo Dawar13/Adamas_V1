@@ -176,38 +176,39 @@ hr {
 }
 
 /* ===========================================================================
- * BUILD-1HR — two surfaces, deliberately different
+ * Two surfaces, deliberately different
  * ===========================================================================
- * Bench is light: the canvas, the library, intake, checks. This is where you
- * author. Instrument is dark: runs, event streams, timelines. This is where you
- * observe. Switching surface tells the user which mode they are in before they
- * read a word — engineers already live in this split, because CAD is light and
- * terminals are dark.
+ * Bench is light: canvas, library, intake, checks — where you author.
+ * Instrument is dark: runs, streams, timelines — where you observe.
  *
- * Not a theme toggle. The surface is semantic, not a preference.
+ * THE NAMES ARE DISTINCT ON PURPOSE. The first version reused --ink and --rule,
+ * which the dark-mode block already defines through `:root:not([data-theme])` —
+ * a higher specificity than a plain :root, so it won whatever the order. On a
+ * dark-mode machine every bench page painted near-white text onto paper and was
+ * unreadable. Prefixed names cannot collide, and the bench surface sets each one
+ * explicitly rather than inheriting anything.
  */
 :root {
-  --paper:      #EFEEE9;
-  --paper-2:    #F7F6F2;
-  --ink:        #14181B;
-  --ink-2:      #4A5257;
-  --ink-3:      #868C8F;
-  --rule-b:     #D6D4CC;
-  --grid-dot:   #C9C7BE;
+  --b-paper:   #EFEEE9;
+  --b-card:    #F7F6F2;
+  --b-ink:     #14181B;
+  --b-ink-2:   #43494D;
+  --b-ink-3:   #6E7478;
+  --b-rule:    #D2D0C7;
+  --b-dot:     #BFBDB3;
 
   --console:    #0E1114;
   --console-2:  #161B20;
   --console-ink:#D8DDE1;
   --console-rule:#242C33;
 
-  /* THREE verdict states, not two. `unknown` is the one design decision that
-   * is genuinely this product's: every other tool has pass and fail. A visitor
-   * who notices a third state has understood the pitch without being told. */
+  /* THREE verdict states, not two. `unknown` is this product's own: every other
+   * tool has pass and fail. A visitor who notices a third has understood the
+   * pitch without being told. */
   --pass-v:     #2F6B45;
   --fail-v:     #9B2C2C;
   --unknown-v:  #7E7A6C;
 
-  /* Content colours encode meaning; they are not decoration. */
   --bus:        #1F5E73;
   --reaction:   #B4531A;
   --deadline:   #4A5257;

@@ -1,0 +1,88 @@
+---
+import Base from "../layouts/Base.astro";
+import { loadProfile, ProfileUnreadable } from "../../server/store/loaders/profile.mjs";
+
+/*
+ * Profile — where the processor spends instructions.
+ *
+ * A re-aggregation of the same execution trace coverage reads, by function
+ * instead of by presence. Nothing extra is collected.
+ *
+ * The caveat below is not decoration and is not collapsible: without it this
+ * screen looks exactly like a hardware profile and is not one.
+ */
+const run = Astro.url.searchParams.get("run") || null;
+
+let profile = null;
+let refused = null;
+try {
+  profile = await loadProfile(run);
+} catch (err) {
+  if (err instanceof ProfileUnreadable) refused = err.message;
+  else throw err;
+}
+---
+<Base title="Profile — Bench">
+  <div class="page">
+    <h1 class="page-head">Profile</h1>
+
+    {refused && (
+      <section class="empty">
+        <h3>Nothing to attribute yet.</h3>
+        <p>{refused}</p>
+      </section>
+    )}
+
+    {profile && (
+      <>
+        <p class="profile-caveat">{profile.caveat}</p>
+
+        <p class="muted profile-source">
+          From <code>{profile.source}</code>
+          {profile.tests_measured !== null && <> · {profile.tests_measured} tests</>}
+          {profile.measured_by && <> · {profile.measured_by}</>}
+        </p>
+
+        {profile.nodes.map((node) => (
+          <section class="prof-node">
+            <h2>
+              <span class="mono">{node.node}</span>
+              {node.device_under_test && <span class="chip">device under test</span>}
+              <span class="prof-total mono">
+                {node.total_instructions.toLocaleString()} instructions ·
+                {" "}{node.attributed_functions} functions attributed
+              </span>
+            </h2>
+
+            <ul class="prof-bars">
+              {node.functions.map((fn) => (
+                <li class={fn.confirmed_only ? "is-unknown" : ""}>
+                  <span class="prof-name mono">{fn.name}</span>
+                  <span class="prof-bar">
+                    <span class="prof-fill" style={`width: ${(fn.share * 100).toFixed(2)}%`}></span>
+                  </span>
+                  <span class="prof-pct mono">{(fn.share * 100).toFixed(1)}%</span>
+                  <span class="prof-n mono">{fn.instructions.toLocaleString()}</span>
+                  <span class="prof-tests mono" title={
+                    fn.confirmed_only
+                      ? "reached by tests, but no test that reaches it catches any defective build: its tests confirm rather than probe"
+                      : `${fn.tests} test(s) reach this`
+                  }>
+                    {fn.confirmed_only ? "confirms only" : `${fn.tests} tests`}
+                  </span>
+                </li>
+              ))}
+            </ul>
+
+            {node.never_executed !== null && (
+              <p class="muted prof-foot">
+                {node.never_executed} function(s) in this binary were never executed
+                by these tests.
+              </p>
+            )}
+          </section>
+        ))}
+      </>
+    )}
+  </div>
+</Base>

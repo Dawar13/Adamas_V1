@@ -2,6 +2,10 @@
 import Base from "../layouts/Base.astro";
 import { renderChecks, RenderUnreadable } from "../../server/store/loaders/render.mjs";
 import BringUp from "../app/views/BringUp.jsx";
+import RunTests from "../app/views/RunTests.jsx";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { REPO_ROOT } from "../../server/store/loaders/runs.mjs";
 import { DesignUnreadable } from "../../server/store/loaders/design.mjs";
 
 /*
@@ -19,6 +23,24 @@ import { DesignUnreadable } from "../../server/store/loaders/design.mjs";
 const topology = Astro.url.searchParams.get("file") || undefined;
 const boards = Astro.url.searchParams.get("boards") || undefined;
 const contract = Astro.url.searchParams.get("contract") || undefined;
+
+// The test plan, read from the generator's own manifest so the groups offered
+// here and the tests that would actually run cannot disagree.
+let groups = [];
+try {
+  const manifest = JSON.parse(await readFile(
+    path.join(REPO_ROOT, Astro.url.searchParams.get("tests") || ".generated/tests", "manifest.json"),
+    "utf8"));
+  const byScenario = new Map();
+  for (const test of manifest.tests || []) {
+    const key = test.scenario ?? "(unnamed)";
+    if (!byScenario.has(key)) byScenario.set(key, { scenario: key, tests: [] });
+    byScenario.get(key).tests.push(test.id);
+  }
+  groups = [...byScenario.values()].sort((a, b) => a.scenario.localeCompare(b.scenario));
+} catch {
+  groups = [];   // no expanded suite: the run panel says so rather than offering one
+}
 
 let result = null;
 let refused = null;
@@ -88,6 +110,12 @@ try {
       </details>
 
       <BringUp query={{ file: topology, boards: boards, contract: contract }} client:load />
+
+      <RunTests
+        query={{ file: topology, boards: boards, contract: contract }}
+        groups={groups}
+        client:load
+      />
     </>
   )}
 </Base>

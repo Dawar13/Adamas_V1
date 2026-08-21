@@ -41,6 +41,7 @@ import { renderChecks, RenderUnreadable } from "../store/loaders/render.mjs";
 import * as runner from "../runner.mjs";
 import { bringUp, bringUpPlan } from "../bringup.mjs";
 import { listBoards } from "../store/loaders/boards.mjs";
+import { loadProfile, ProfileUnreadable } from "../store/loaders/profile.mjs";
 import { saveUpload, WriteRefused } from "../store/writer.mjs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -464,6 +465,11 @@ export async function handleApi(req, res) {
       return true;
     }
 
+    if (pathname === "/api/profile") {
+      json(res, 200, await loadProfile(url.searchParams.get("run") || null));
+      return true;
+    }
+
     if (pathname === "/api/boards") {
       json(res, 200, await listBoards());
       return true;
@@ -618,6 +624,10 @@ data: ${JSON.stringify(data)}
     });
     return true;
   } catch (err) {
+    if (err instanceof ProfileUnreadable) {
+      json(res, 422, { error: err.message, refused: true });
+      return true;
+    }
     if (err instanceof RenderUnreadable) {
       json(res, 422, { error: err.message, refused: true });
       return true;
