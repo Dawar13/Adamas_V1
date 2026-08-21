@@ -15,6 +15,7 @@
  *      GET  /api/design                        the topology, as the engine reads it
  *      GET  /api/file?path=...                 one configuration file, as text
  *      GET  /api/render                        the pre-flight checks, static only
+ *      GET  /api/bringup                       load each platform and boot it, live
  *      GET  /api/tests                         the plan, from the generator's manifest
  *      GET  /api/run                           what the runner is doing, and its events
  *      POST /api/run                           hand a job to the runner
@@ -37,6 +38,7 @@ import { injectionPoints } from "../store/loaders/injection.mjs";
 import { readElf, checkSymbols, ElfUnreadable } from "../store/loaders/elf.mjs";
 import { renderChecks, RenderUnreadable } from "../store/loaders/render.mjs";
 import * as runner from "../runner.mjs";
+import { bringUp, bringUpPlan } from "../bringup.mjs";
 import { saveUpload, WriteRefused } from "../store/writer.mjs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -457,6 +459,57 @@ export async function handleApi(req, res) {
     if (pathname === "/api/run") {
       const since = Number(url.searchParams.get("since") || 0);
       json(res, 200, { ...runner.status(), events: runner.events(since) });
+      return true;
+    }
+
+    if (pathname === "/api/bringup") {
+      /*
+       * STAGE 2. This really runs the emulator, once per node, and streams a
+       * line as each finishes. It is fast enough to do live -- seconds per node
+       * against minutes for a scenario -- which is exactly why there is no
+       * reason to fake it.
+       */
+      for (const key of ["file", "boards"]) {
+        const wanted = url.searchParams.get(key);
+        if (wanted !== null && !projectFile(wanted)) {
+          json(res, 403, { error: `'${wanted}' is not a project file inside this repository.` });
+          return true;
+        }
+      }
+      const topology = url.searchParams.get("file") || undefined;
+      const boards = url.searchParams.get("boards") || undefined;
+      const design = await loadDesign(topology, boards);
+      const plan = bringUpPlan(design);
+
+      res.statusCode = 200;
+      res.setHeader("content-type", "text/event-stream; charset=utf-8");
+      res.setHeader("cache-control", "no-store");
+      res.setHeader("connection", "keep-alive");
+      const send = (event, data) =>
+        res.write(`event: ${event}
+data: ${JSON.stringify(data)}
+
+`);
+
+      send("plan", { nodes: plan });
+      let failed = 0;
+      for (const entry of plan) {
+        if (entry.skip) {
+          send("node", { node: entry.node, skipped: true, detail: entry.skip });
+          continue;
+        }
+        send("node", { node: entry.node, running: true });
+        const result = await bringUp(entry.node, { topology, boards });
+        if (!result.ok) failed += 1;
+        send("node", result);
+      }
+      send("done", {
+        ok: failed === 0,
+        brought_up: plan.filter((p) => !p.skip).length,
+        failed,
+        skipped: plan.filter((p) => p.skip).length,
+      });
+      res.end();
       return true;
     }
 

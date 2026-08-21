@@ -2,6 +2,11 @@
 import "../app/styles/tokens.css";
 import "../app/styles/results.css";
 const { title } = Astro.props;
+// The surface is chosen by route, not by preference: bench is where you author,
+// instrument is where you observe.
+const path = Astro.url.pathname;
+const bench = path === "/" || path.startsWith("/system") || path.startsWith("/firmware")
+  || path.startsWith("/tests") || path.startsWith("/requirements");
 ---
 <!doctype html>
 <html lang="en">
@@ -10,15 +15,16 @@ const { title } = Astro.props;
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title}</title>
   </head>
-  <body>
+  <body class={bench ? "bench-surface" : ""}>
     <header class="topbar">
       <a class="brand" href="/">Bench</a>
       <nav class="topnav">
-        <a href="/">runs</a>
-        <a href="/design">system</a>
-        <a href="/firmware">firmware</a>
-        <a href="/render">render</a>
-        <a href="/tests">tests</a>
+        <a href="/system">System</a>
+        <a href="/firmware">Firmware</a>
+        <a href="/tests">Tests</a>
+        <span class="topnav-divider">·</span>
+        <a href="/render">Render</a>
+        <a href="/runs">Runs</a>
       </nav>
       <span class="brand-note">software-in-the-loop firmware validation</span>
     </header>

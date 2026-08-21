@@ -1169,3 +1169,146 @@ tr.is-unresolved td {
 .progress-list li.is-fault {
   background: var(--fault-soft);
 }
+
+/* ======================================================================
+ * Bench surface — the canvas
+ * ====================================================================== */
+
+body.bench-surface {
+  background: var(--paper);
+  color: var(--ink);
+}
+.bench {
+  display: flex;
+  gap: 0;
+  align-items: stretch;
+  min-height: calc(100vh - 46px);
+}
+.canvas-wrap {
+  flex: 1;
+  min-width: 0;
+  padding: 1.25rem 1.5rem 1rem;
+}
+.canvas-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.9rem;
+  margin-bottom: 0.9rem;
+}
+.canvas-head h1 {
+  font-size: 1.75rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.canvas-sub {
+  color: var(--ink-3);
+  font-size: 0.78rem;
+}
+.canvas-scroll {
+  overflow: auto;
+  border: 1px solid var(--rule-b);
+  border-radius: 4px;
+  background: var(--paper-2);
+}
+.canvas {
+  display: block;
+  min-width: 100%;
+}
+.grid-dot { fill: var(--grid-dot); opacity: 0.35; }
+.hatch-line { stroke: var(--ink-3); stroke-width: 1; opacity: 0.45; }
+
+/* The rail. This is the element whose absence was the credibility leak. */
+.rail { stroke: var(--bus); stroke-width: 2; }
+.rail-pill { fill: var(--paper); stroke: var(--bus); stroke-width: 1; opacity: 0.96; }
+.rail-label { fill: var(--bus); font-size: 11.5px; }
+.drop { stroke: var(--bus); stroke-width: 1.5; fill: none; opacity: 0.75; }
+.tap { fill: var(--bus); }
+
+.node-body { fill: var(--paper-2); stroke: var(--rule-b); stroke-width: 1; }
+.node.is-dut .node-body { stroke: var(--reaction); stroke-width: 2; }
+.node:hover .node-body { stroke: var(--bus); }
+/* Filled = real firmware executing. Hollow = frame player, runs no code. */
+.node-edge.is-real { fill: var(--bus); }
+.node-edge.is-played { fill: none; stroke: var(--bus); stroke-width: 1; }
+.node-title { fill: var(--ink); font-size: 14px; font-weight: 600; letter-spacing: -0.005em; }
+.node-slug { fill: var(--ink-3); font-size: 12px; }
+.node-chips { fill: var(--ink-2); font-size: 11px; }
+.node-tier { font-size: 10px; text-anchor: end; letter-spacing: 0.05em; text-transform: uppercase; }
+.tier-verified { fill: var(--pass-v); }
+.tier-modelled { fill: var(--bus); }
+.tier-declared, .tier-listed { fill: var(--unknown-v); }
+.node-dut { fill: var(--reaction); font-size: 10px; text-anchor: end; letter-spacing: 0.07em; font-weight: 600; }
+.node-draft .node-body { fill: url(#hatch); stroke-dasharray: 4 3; }
+
+.canvas-foot {
+  margin: 0.75rem 0 0;
+  font-size: 0.75rem;
+  color: var(--ink-3);
+  max-width: 46rem;
+}
+.canvas-foot code { background: transparent; color: var(--ink-2); }
+
+body.bench-surface .topbar { background: var(--paper-2); border-bottom-color: var(--rule-b); }
+body.bench-surface .brand { color: var(--ink); }
+body.bench-surface .brand-note, body.bench-surface .topnav a { color: var(--ink-2); }
+body.bench-surface .topnav a:hover { color: var(--bus); }
+.topnav-divider { color: var(--ink-3); opacity: 0.6; }
+
+/* ---------------------------------------------------- render, two stages */
+
+.stage-lead { color: var(--ink-2); max-width: 44rem; margin: 0 0 1.25rem; }
+.limits-note { margin: 0.9rem 0 0; font-size: 0.8rem; }
+.limits-note summary {
+  cursor: pointer; color: var(--ink-3);
+  text-decoration: underline; text-underline-offset: 2px;
+}
+.limits-note p { color: var(--ink-2); max-width: 46rem; margin: 0.5rem 0 0; }
+
+/* Stage 2 is the instrument surface: the change of surface is what tells the
+   room that something started. */
+.bringup {
+  margin-top: 1.75rem;
+  border-radius: 4px;
+  border: 1px solid var(--rule-b);
+  background: var(--paper-2);
+  padding: 1rem 1.25rem 1.25rem;
+}
+.bringup.is-live {
+  background: var(--console);
+  border-color: var(--console-rule);
+  color: var(--console-ink);
+}
+.bringup-head { display: flex; align-items: baseline; gap: 0.9rem; flex-wrap: wrap; }
+.bringup-head h2 { font-size: 1.05rem; font-weight: 600; }
+.bringup-sub { flex: 1; margin: 0; font-size: 0.8rem; color: var(--ink-3); }
+.bringup.is-live .bringup-sub { color: #8A939B; }
+.btn-go {
+  background: var(--bus); color: #fff; border-color: var(--bus);
+  padding: 0.35rem 1rem; cursor: pointer;
+}
+.btn-go:disabled { opacity: 0.55; cursor: default; }
+
+.bu-list { list-style: none; margin: 1rem 0 0; padding: 0; }
+.bu-line {
+  display: grid; grid-template-columns: 8rem 1fr; gap: 0.75rem;
+  padding: 0.4rem 0; border-bottom: 1px solid var(--console-rule);
+  font-size: 0.8rem; align-items: baseline;
+}
+.bu-node { font-weight: 600; }
+.bu-line.is-skipped { color: #6E767D; }
+.bu-line.is-running .bu-detail { color: #8A939B; }
+.bu-steps { display: flex; flex-direction: column; gap: 0.15rem; }
+.bu-step { display: flex; gap: 0.6rem; align-items: baseline; flex-wrap: wrap; }
+.bu-step-label { width: 3.4rem; color: #8A939B; }
+.bu-step.is-ok .bu-step-mark { color: #4BBD83; }
+.bu-step.is-fail .bu-step-mark { color: #F2695F; }
+.bu-step-ms { color: #6E767D; font-size: 0.72rem; }
+.bu-stderr {
+  grid-column: 2; margin: 0.4rem 0 0; padding: 0.5rem 0.7rem;
+  background: var(--console-2); border-left: 2px solid var(--fail-v);
+  font-size: 0.72rem; white-space: pre-wrap; color: #E4B4B0;
+}
+.bringup-verdict { margin: 1rem 0 0; font-size: 0.95rem; }
+.bringup-verdict.is-ok { color: #4BBD83; }
+.bringup-verdict.is-fail { color: #F2695F; }
+.bringup-skipped { color: #8A939B; font-size: 0.8rem; }

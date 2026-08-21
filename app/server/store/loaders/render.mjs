@@ -188,11 +188,11 @@ export async function renderChecks({ topology, boards, contract, scenarios } = {
   );
   checks.push(
     withoutBehaviour.length === 0
-      ? ok("every node has firmware or a script",
+      ? ok("every node has firmware or a frame script",
            `${design.nodes.length} node(s): ` +
            `${design.nodes.filter((n) => n.is_real).length} real, ` +
            `${design.nodes.filter((n) => n.is_scripted).length} played`)
-      : bad("every node has firmware or a script",
+      : bad("every node has firmware or a frame script",
             `${withoutBehaviour.map((n) => n.id).join(", ")} would do nothing at all`)
   );
 
@@ -209,24 +209,24 @@ export async function renderChecks({ topology, boards, contract, scenarios } = {
   }
   checks.push(
     missingRepl.length === 0
-      ? ok("every board resolves to a platform file on disk",
+      ? ok("every board has a platform file",
            boardNodes.map((n) => n.board_detail?.repl).filter(Boolean).join(", ") ||
              "no boards to resolve")
-      : bad("every board resolves to a platform file on disk", missingRepl.join("; "))
+      : bad("every board has a platform file", missingRepl.join("; "))
   );
 
   // 3 — board tier is runnable
   const declared = boardNodes.filter((node) => node.board_detail?.tier === "declared");
   checks.push(
     declared.length === 0
-      ? ok("every board's tier is runnable",
+      ? ok("every board can be run",
            // A board absent from the table has no tier to report, and check 2
            // has already said so. Dereferencing it here crashed the whole
            // screen at the exact moment it had something to tell you.
            [...new Set(boardNodes.map((n) => n.board_detail?.tier).filter(Boolean))]
              .join(", ") || "no tier recorded for any board")
       : refused(
-          "every board's tier is runnable",
+          "every board can be run",
           declared
             .map((node) =>
               `${node.board} is DECLARED: definable, not runnable` +
@@ -280,15 +280,15 @@ export async function renderChecks({ topology, boards, contract, scenarios } = {
     const duplicate = /is used by both/.test(contractError);
     checks.push(
       duplicate
-        ? bad("no two senders claim one identifier", contractError)
+        ? bad("no identifier claimed twice", contractError)
         : refused(
-            "no two senders claim one identifier",
+            "no identifier claimed twice",
             `this could not be checked: ${contractError}`
           )
     );
     checks.push(
       refused(
-        "every signal the tests name is in the contract",
+        "every signal the tests name exists",
         `this could not be checked: the contract did not load`
       )
     );
@@ -309,14 +309,14 @@ export async function renderChecks({ topology, boards, contract, scenarios } = {
     }
     checks.push(
       clashes.length === 0
-        ? ok("no two senders claim one identifier",
+        ? ok("no identifier claimed twice",
              `${contractDoc.messages.length} message(s) across ` +
              `${new Set(contractDoc.messages.map((m) => m.sender)).size} sender(s)` +
-             `, and the engine's contract loader refuses a duplicate before this point`)
+             ``)
         : // Kept as a backstop rather than deleted: if the loader ever stops
           // refusing, this is what notices, and a second reading of the same
           // rule costs nothing next to a contract that silently accepts one.
-          bad("no two senders claim one identifier", clashes.join("; "))
+          bad("no identifier claimed twice", clashes.join("; "))
     );
 
     // 6 — every signal in every test exists in the contract
@@ -328,10 +328,10 @@ export async function renderChecks({ topology, boards, contract, scenarios } = {
     const unknown = [...used].filter(([name]) => !known.has(name));
     checks.push(
       unknown.length === 0
-        ? ok("every signal the tests name is in the contract",
+        ? ok("every signal the tests name exists",
              `${used.size} signal(s) named across ${scenarioDir}`)
         : bad(
-            "every signal the tests name is in the contract",
+            "every signal the tests name exists",
             unknown.map(([name, file]) => `'${name}' in ${file}`).join("; ")
           )
     );

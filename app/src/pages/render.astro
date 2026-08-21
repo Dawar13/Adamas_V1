@@ -1,6 +1,7 @@
 ---
 import Base from "../layouts/Base.astro";
 import { renderChecks, RenderUnreadable } from "../../server/store/loaders/render.mjs";
+import BringUp from "../app/views/BringUp.jsx";
 import { DesignUnreadable } from "../../server/store/loaders/design.mjs";
 
 /*
@@ -30,6 +31,10 @@ try {
 ---
 <Base title="Render — Bench">
   <h1 class="page-head">Render</h1>
+  <p class="stage-lead">
+    Two stages. The first reads your project's files. The second actually starts
+    the emulator.
+  </p>
 
   {refused && (
     <section class="empty is-refused">
@@ -64,22 +69,25 @@ try {
         )}
       </p>
 
-      <section class="not-checked">
-        <h2 class="section-head">Not checked here</h2>
-        <ul class="checks">
-          <li class="check is-pending">
-            <span class="check-mark" aria-hidden="true">—</span>
-            <span class="check-label">platform loads in the emulator</span>
-            <span class="check-detail">section 10's live half, not wired to this screen</span>
-          </li>
-          <li class="check is-pending">
-            <span class="check-mark" aria-hidden="true">—</span>
-            <span class="check-label">firmware reaches its boot banner</span>
-            <span class="check-detail mono">bash scripts/boot-check.sh</span>
-          </li>
-        </ul>
-        <p class="muted">{result.note}</p>
-      </section>
+      {/*
+        The honesty stays; its volume drops. It used to be a section heading set
+        at the same weight as the passing checks, followed by two paragraphs of
+        caveat -- so the loudest thing on the screen was a disclaimer, and the
+        screen's message was "we are not sure" when the fact was "six checks
+        passed and the other two happen in stage two". Quiet and always
+        reachable, one click away.
+      */}
+      <details class="limits-note">
+        <summary>what this stage doesn't check</summary>
+        <p>{result.note}</p>
+        <p>
+          Starting the emulator and booting each binary is stage two below, and
+          it runs for real. A verdict about the firmware comes only from a test
+          run.
+        </p>
+      </details>
+
+      <BringUp query={{ file: topology, boards: boards, contract: contract }} client:load />
     </>
   )}
 </Base>

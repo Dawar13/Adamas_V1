@@ -174,3 +174,41 @@ hr {
   clip: rect(0 0 0 0);
   white-space: nowrap;
 }
+
+/* ===========================================================================
+ * BUILD-1HR — two surfaces, deliberately different
+ * ===========================================================================
+ * Bench is light: the canvas, the library, intake, checks. This is where you
+ * author. Instrument is dark: runs, event streams, timelines. This is where you
+ * observe. Switching surface tells the user which mode they are in before they
+ * read a word — engineers already live in this split, because CAD is light and
+ * terminals are dark.
+ *
+ * Not a theme toggle. The surface is semantic, not a preference.
+ */
+:root {
+  --paper:      #EFEEE9;
+  --paper-2:    #F7F6F2;
+  --ink:        #14181B;
+  --ink-2:      #4A5257;
+  --ink-3:      #868C8F;
+  --rule-b:     #D6D4CC;
+  --grid-dot:   #C9C7BE;
+
+  --console:    #0E1114;
+  --console-2:  #161B20;
+  --console-ink:#D8DDE1;
+  --console-rule:#242C33;
+
+  /* THREE verdict states, not two. `unknown` is the one design decision that
+   * is genuinely this product's: every other tool has pass and fail. A visitor
+   * who notices a third state has understood the pitch without being told. */
+  --pass-v:     #2F6B45;
+  --fail-v:     #9B2C2C;
+  --unknown-v:  #7E7A6C;
+
+  /* Content colours encode meaning; they are not decoration. */
+  --bus:        #1F5E73;
+  --reaction:   #B4531A;
+  --deadline:   #4A5257;
+}
