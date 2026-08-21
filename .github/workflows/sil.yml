@@ -1,0 +1,125 @@
+# Firmware software-in-the-loop, sharded.
+#
+# =============================================================================
+# WHAT THIS IS
+# =============================================================================
+# The job a customer adds to their own repository. It runs the pinned image,
+# splits the suite across runners, and merges the shards into one run record.
+#
+# It is also how this repository tests itself, deliberately: a CI definition
+# nobody runs is a CI definition that does not work, and shipping one to a
+# customer untested would be shipping a placeholder that reads as a product.
+#
+# =============================================================================
+# TWO LESSONS ALREADY PAID FOR, BOTH ONE-LINERS
+# =============================================================================
+# fetch-depth: 0 IS MANDATORY. A shallow checkout silently produces wrong diffs,
+# and the change report is built on real history. Wrong is worse than absent
+# here: an empty diff reports "nothing changed" and passes.
+#
+# A WORKFLOW-ONLY EDIT MAY NOT RE-TRIGGER THE CHECK THAT VALIDATES IT. CI
+# configuration needs the same "does this actually run" scrutiny as product
+# code, which is why paths-ignore is not used to skip this on workflow changes.
+name: Firmware SIL
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+# A second push supersedes the first. Twelve runners times two pushes is a lot of
+# machine for an answer nobody will read.
+concurrency:
+  group: sil-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sil:
+    runs-on: ubuntu-latest
+    container:
+      # Pinned by digest, not by tag. A tag can be moved to point at different
+      # bytes tomorrow; a digest cannot. Every run records what it ran in.
+      image: ${{ vars.BENCH_IMAGE || 'ghcr.io/bench/bench:1.16.1' }}
+    strategy:
+      # One shard failing must not cancel the others: a partial matrix reports
+      # less than the suite while looking like a whole run, and the merge is
+      # what refuses that. Let them all finish and let the merge decide.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # mandatory; see the header
+
+      - name: Record which image this ran in
+        run: |
+          echo "BENCH_IMAGE=${{ job.container.image }}" >> "$GITHUB_ENV"
+          echo "BENCH_IMAGE_DIGEST=${{ job.container.id }}" >> "$GITHUB_ENV"
+
+      - name: Expand scenarios into tests
+        run: python3 harness/expand.py --out .generated/tests
+
+      - name: Run shard ${{ matrix.shard }} of 12
+        run: |
+          python3 harness/run_suite.py --no-expand \
+            --shard ${{ matrix.shard }} --of 12 \
+            --out "harness/out/shard${{ matrix.shard }}" \
+            --json "harness/out/shard-${{ matrix.shard }}.json"
+
+      - uses: actions/upload-artifact@v4
+        # Uploaded even when the shard reports failing tests: a failing suite is
+        # a real result and its evidence is what someone needs most.
+        if: always()
+        with:
+          name: results-${{ matrix.shard }}
+          path: |
+            harness/out/shard-${{ matrix.shard }}.json
+            harness/out/shard${{ matrix.shard }}/**/results.json
+            harness/out/shard${{ matrix.shard }}/**/trace_*.log
+          retention-days: 30
+
+  merge:
+    needs: sil
+    # Runs even if a shard failed, because the merge is what distinguishes "the
+    # firmware failed" from "a shard never ran". Skipping it on failure would
+    # leave the most important case unreported.
+    if: always()
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ vars.BENCH_IMAGE || 'ghcr.io/bench/bench:1.16.1' }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: harness/out
+          merge-multiple: true
+
+      - name: Merge the shards into one run
+        run: |
+          python3 harness/merge.py \
+            --shards harness/out/shard-*.json \
+            --id "ci-${{ github.run_id }}" \
+            --replay "gh run rerun ${{ github.run_id }}"
+
+      - name: Real-time factor
+        # Measured on the machine that actually ran it, because that is the
+        # number a customer's CI pays. Never carried over from another machine.
+        run: |
+          python3 harness/measure.py --realtime-factor \
+            --runs "project/runs/ci-${{ github.run_id }}" \
+            --out harness/out/realtime.json || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: run-record
+          path: |
+            project/runs/ci-${{ github.run_id }}/**
+            harness/out/realtime.json
+          retention-days: 90

@@ -1868,6 +1868,35 @@ TIER_NOTES = {
 }
 
 
+def _image_provenance() -> dict:
+    """The container image this ran in, as far as it can honestly be known.
+
+    Never invented. `docker inspect` cannot be run from inside the container it
+    would describe, and the tag visible in an environment is not evidence of the
+    bytes behind it, so the digest is taken from what the caller declared and
+    nothing else.
+    """
+    digest = os.environ.get("BENCH_IMAGE_DIGEST") or None
+    reference = os.environ.get("BENCH_IMAGE") or None
+    # /.dockerenv is created by the runtime and is the one signal available from
+    # inside. It answers "was this containerised", not "which image".
+    containerised = os.path.exists("/.dockerenv") or bool(digest)
+
+    if digest:
+        state = "recorded"
+    elif containerised:
+        state = "containerised, digest not declared"
+    else:
+        state = "not run in a container"
+
+    return {
+        "digest": digest,
+        "reference": reference,
+        "containerised": containerised,
+        "state": state,
+    }
+
+
 def _tier_note(tier: str) -> str:
     """One wording, shared by every artefact that carries a verdict.
 
@@ -2258,6 +2287,19 @@ def main(argv=None):
         ],
         "provenance": {
             "pinned": versions,
+            # WHICH IMAGE THIS RAN IN, WHEN THERE WAS ONE.
+            #
+            # "Same digest, same binaries, same result" is how reproducible
+            # becomes a fact rather than a claim -- but only a digest does that.
+            # A tag can be moved to point at different bytes tomorrow, so a run
+            # recording a tag records something that may not be true later.
+            #
+            # A container cannot read its own digest, so the environment that
+            # started it has to say. When nothing said, that is recorded as
+            # nothing said: an absent digest is a run whose image is unknown,
+            # which is a different statement from a run made outside one, and
+            # neither may be quietly turned into the other.
+            "image": _image_provenance(),
             "observed_emulator": banner,
             "inputs_sha256": inputs,
             "note": "No host clock and no random number appears anywhere in this "
