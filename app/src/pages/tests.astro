@@ -1,6 +1,8 @@
 ---
 import Base from "../layouts/Base.astro";
 import TestPlan from "../app/views/TestPlan.jsx";
+import ReplayRun from "../app/views/ReplayRun.jsx";
+import { listRuns } from "../../server/store/loaders/runs.mjs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { REPO_ROOT } from "../../server/store/loaders/runs.mjs";
@@ -20,6 +22,15 @@ const query = {
   contract: Astro.url.searchParams.get("contract"),
   boards: Astro.url.searchParams.get("boards"),
 };
+
+// Stored runs, for the replay. A run missing provenance is not offered, for
+// the same reason it does not appear in history.
+let storedRuns = [];
+try {
+  storedRuns = (await listRuns()).filter((run) => run.readable);
+} catch {
+  storedRuns = [];
+}
 
 let plan = null;
 let missing = null;
@@ -60,4 +71,6 @@ try {
   )}
 
   {plan && <TestPlan plan={plan} query={query} client:load />}
+
+  {storedRuns.length > 0 && <ReplayRun runs={storedRuns} client:load />}
 </Base>

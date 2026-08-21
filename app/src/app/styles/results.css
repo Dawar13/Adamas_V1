@@ -1511,3 +1511,82 @@ body.bench-surface .page { max-width: none; padding: 0; }
 .prof-pct { text-align: right; }
 .prof-n, .prof-tests { text-align: right; color: var(--ink-faint); }
 .prof-foot { font-size: 0.75rem; margin-top: 0.6rem; }
+
+.runtests-waiting {
+  margin: 0.5rem 0 0.75rem; padding: 0.6rem 0.8rem;
+  border-left: 2px solid var(--bus);
+  background: var(--console-2); color: #9AA3AA;
+  font-size: 0.78rem; max-width: 48rem;
+}
+
+/* ======================================================================
+ * Bench pages: every panel that inherited an instrument colour.
+ * ======================================================================
+ * Same root cause as the canvas — .plan, .empty, .kv and the tables were
+ * written against the dark palette and then shown on paper. Listed explicitly
+ * rather than fixed one at a time, so a new bench page cannot inherit the
+ * wrong surface by default.
+ */
+body.bench-surface .plan,
+body.bench-surface .intake,
+body.bench-surface .report,
+body.bench-surface .detail-grid,
+body.bench-surface .cov-node,
+body.bench-surface .focus,
+body.bench-surface .replay,
+body.bench-surface .limits {
+  background: var(--b-card);
+  border-color: var(--b-rule);
+  color: var(--b-ink);
+}
+body.bench-surface .plan-group label,
+body.bench-surface .plan-foot,
+body.bench-surface .sym,
+body.bench-surface .periph li,
+body.bench-surface .filelist li,
+body.bench-surface .kvlist dd,
+body.bench-surface th,
+body.bench-surface td { color: var(--b-ink); }
+body.bench-surface .plan-name { color: var(--b-ink); }
+body.bench-surface .plan-count,
+body.bench-surface .plan-note,
+body.bench-surface .kvlist dt,
+body.bench-surface .periph-kind,
+body.bench-surface .periph-src,
+body.bench-surface .periph-note,
+body.bench-surface .sym-addr,
+body.bench-surface .sym-kind { color: var(--b-ink-2); }
+body.bench-surface .plan-list,
+body.bench-surface .plan-foot,
+body.bench-surface .syms,
+body.bench-surface .sym,
+body.bench-surface th,
+body.bench-surface td,
+body.bench-surface .limits-head { border-color: var(--b-rule); }
+body.bench-surface .limits { background: var(--b-paper); }
+body.bench-surface input[type="checkbox"] { accent-color: var(--bus); }
+body.bench-surface .btn-go { background: var(--bus); color: #fff; }
+body.bench-surface .replay { background: var(--b-paper); color: var(--b-ink-2); }
+
+/* ------------------------------------------------------------ replay a run */
+
+.replayrun {
+  margin-top: 1.75rem; border-radius: 4px;
+  border: 1px solid var(--b-rule); background: var(--b-card);
+  padding: 1rem 1.25rem 1.25rem; max-width: 60rem;
+}
+.replayrun.is-live {
+  background: var(--console); border-color: var(--console-rule); color: var(--console-ink);
+}
+.replayrun.is-live .runtests-sub { color: #8A939B; }
+.replayrun h2 { font-size: 1.05rem; font-weight: 600; }
+/* Never out of sight while it streams. */
+.replay-banner {
+  margin: 0.9rem 0 0.5rem; padding: 0.5rem 0.8rem;
+  border-left: 3px solid var(--reaction);
+  background: #2A2010; color: #E6C08A;
+  font-size: 0.78rem; border-radius: 2px;
+}
+.runtests-tally .is-unknown, .rt-line.is-unknown { color: #A79E8C; }
+.rt-line.is-unknown .rt-mark { color: #A79E8C; }
+.replayrun .runtests-verdict a { color: #8EA3FF; }

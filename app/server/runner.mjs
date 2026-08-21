@@ -34,7 +34,14 @@ export class RunRefused extends Error {}
 const PYTHON = process.env.BENCH_PYTHON || (process.platform === "win32" ? "py" : "python3");
 const PYTHON_ARGS = process.env.BENCH_PYTHON ? [] : process.platform === "win32" ? ["-3"] : [];
 
-/** One live job, or none. Deliberately not a map. */
+/*
+ * One live job, or none. Deliberately not a map.
+ *
+ * IT DOES NOT SURVIVE A RESTART OF THIS PROCESS. The child is killed with the
+ * server and this state goes with it, so a run in progress simply stops. That
+ * is worth knowing rather than discovering: the panel reads as idle, and the
+ * reason is invisible from the browser.
+ */
 let current = null;
 
 /*
