@@ -21,12 +21,10 @@ than an assumption, so this reports the one there is and says so plainly.
 -----------------------------------------------------------------------------
 BRING-UPS ARE COUNTED, NOT BOARD ENTRIES
 -----------------------------------------------------------------------------
-Three board entries in this repository are `declared` and blocked, and all three
-are roles on ONE chip: bms_s32k, vcu_s32k and chg_s32k are a battery, a vehicle
-and a charger controller on the same S32K388, blocked by the same single missing
-model. Counting entries would report three failures where one investigation
-happened, inflating the denominator by exactly the factor that would flatter a
-future ratio.
+Several board entries in a project can be distinct roles on ONE chip, blocked by
+one and the same missing model. Counting entries would then report several
+failures where one investigation happened, inflating the denominator by exactly
+the factor that would flatter a future ratio.
 
 So distinct bring-ups are grouped by the platform layer a board actually rests
 on, and the report says how many entries each one covers.
