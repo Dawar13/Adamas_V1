@@ -104,3 +104,41 @@ Two consequences worth keeping:
   minutes: far above any real test, still finite.
 - **Re-measure the ceiling against the workload you actually run.** A number
   derived from cheap tests will overstate what expensive ones can share.
+
+## Real-time factor — measured, and what it does not say
+
+Phase 4 §1.1. Measured on this machine, 32 tests at one worker so contention could not
+distort the per-test timing.
+
+```
+tests measured             32
+host wall clock            2294.0 s
+simulated time               37.0 s
+REAL-TIME FACTOR             62.0 x
+
+per test   median 62.7x   fastest 27.4x   slowest 189.8x
+```
+
+**Roughly 80% of that is process startup, not simulation.** Fitting
+`wall = fixed + rate x simulated` over the 32 tests gives a fixed cost of **57.7 s per
+test** — starting the emulator, loading the binary, tearing it down — which accounts for
+1846 s of the 2294 s.
+
+So 62x is a property of **this suite** as much as of the emulator: 32 tests that each
+simulate about one second are dominated by their own startup. It is not comparable with the
+~10x a practitioner reported for a QEMU-based virtual ECU, which is a simulation rate.
+
+**The simulation rate itself is NOT DETERMINED by this run, and is not claimed.** The spread
+of simulated durations is 1.04 s while the median residual in host time is 19 s — at an
+identical 0.600 s simulated, wall clock ranged from 45 s to 82 s. A slope through that is
+mostly fitting host contention. Fitted anyway it reads 12.1x, which is close enough to the
+reference figure to be tempting, and that is exactly why it is refused: `harness/measure.py`
+reports the fixed cost, states the rate as undetermined, and names what would determine it —
+tests with very different simulated durations.
+
+**The actionable finding is that the bottleneck is per-test startup, which is fixable** —
+batching scenarios into one emulator process, or keeping a warm one — whereas simulation
+speed would not be. Which of the two you have is worth knowing before optimising either.
+
+Nothing about speed should be claimed in a customer conversation beyond what is written
+here.

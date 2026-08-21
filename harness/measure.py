@@ -129,10 +129,71 @@ def samples_from_run(run_dir: Path) -> list:
     return samples, missing
 
 
+def decompose(samples) -> dict:
+    """Split what a test costs into a fixed part and a per-simulated-second part.
+
+    wall = fixed + rate x simulated
+
+    THE FIXED PART IS THE ONE THIS DATA SUPPORTS. Starting the emulator, loading
+    the binary and tearing it down costs the same whether a test simulates half a
+    second or thirty, and a suite of short tests is dominated by it.
+
+    THE RATE IS REFUSED UNLESS THE DATA CAN DETERMINE IT. Fitting a slope needs
+    the spread of simulated durations to be large next to the scatter in wall
+    clock. When every test simulates about the same length and the host varies by
+    a factor of two under contention, the fit is measuring contention. Reporting
+    that as a simulation rate would be inventing the more flattering of the two
+    numbers.
+    """
+    points = [(sim, wall) for _, wall, sim in samples if sim > 0]
+    if len(points) < 3:
+        return {"determined": False,
+                "why": "fewer than three tests carried both clocks"}
+
+    n = len(points)
+    sx = sum(x for x, _ in points)
+    sy = sum(y for _, y in points)
+    sxx = sum(x * x for x, _ in points)
+    sxy = sum(x * y for x, y in points)
+    denominator = n * sxx - sx * sx
+    if denominator <= 0:
+        return {"determined": False,
+                "why": "every test simulated the same duration, so no rate can "
+                       "be separated from the fixed cost"}
+
+    rate = (n * sxy - sx * sy) / denominator
+    fixed = (sy - rate * sx) / n
+
+    spread = max(x for x, _ in points) - min(x for x, _ in points)
+    residuals = [abs(y - (fixed + rate * x)) for x, y in points]
+    scatter = statistics.median(residuals)
+
+    # The slope is only as trustworthy as the lever arm is long compared with the
+    # noise. A spread of one simulated second against a median residual of tens
+    # of host seconds determines nothing.
+    swing = rate * spread          # host seconds the slope claims across the range
+    determined = spread > 0 and swing > 3 * scatter
+
+    return {
+        "determined": bool(determined),
+        "fixed_seconds_per_test": round(fixed, 1),
+        "rate_if_fitted": round(rate, 1),
+        "simulated_spread_seconds": round(spread, 3),
+        "median_residual_seconds": round(scatter, 1),
+        "why": None if determined else (
+            "the spread of simulated durations (%.2f s) is too small next to the "
+            "scatter in host time (median residual %.0f s) to determine a rate. "
+            "Tests with very different simulated durations would determine it; "
+            "these do not."
+            % (spread, scatter)),
+    }
+
+
 def report(out, samples, missing, source) -> dict:
     ratios = [wall / simulated for _, wall, simulated in samples if simulated > 0]
     host = sum(wall for _, wall, _ in samples)
     simulated = sum(sim for _, _, sim in samples)
+    split = decompose(samples)
 
     document = {
         "schema": "bench.measure.realtime.v1",
@@ -149,9 +210,12 @@ def report(out, samples, missing, source) -> dict:
             "fastest": round(min(ratios), 1) if ratios else None,
             "slowest": round(max(ratios), 1) if ratios else None,
         },
+        "cost_split": split,
         "note": "Host seconds per simulated second. The host clock varies with "
                 "load and no verdict depends on it; this ratio is a fact about "
-                "the machine, not about the firmware.",
+                "the machine, not about the firmware. It is a property of THIS "
+                "SUITE as well as of the emulator: a suite of short tests is "
+                "dominated by per-test startup, which cost_split separates.",
     }
 
     out("")
@@ -172,6 +236,24 @@ def report(out, samples, missing, source) -> dict:
         spread = document["per_test"]["slowest"] / document["per_test"]["median"]
         out("      the slowest test cost %.1fx the median, which is host "
             "contention rather than firmware" % spread)
+    out("")
+    out("    WHERE THE TIME GOES")
+    if split.get("fixed_seconds_per_test") is not None:
+        out("      %-24s %.1f s per test" % ("fixed cost", split["fixed_seconds_per_test"]))
+        out("        starting the emulator, loading the binary, tearing it down.")
+        out("        %d tests x %.0f s = %.0f s of the %.0f s above."
+            % (len(samples), split["fixed_seconds_per_test"],
+               len(samples) * split["fixed_seconds_per_test"], host))
+    if split.get("determined"):
+        out("      %-24s %.1fx" % ("simulation rate", split["rate_if_fitted"]))
+    else:
+        out("      %-24s NOT DETERMINED BY THESE TESTS" % "simulation rate")
+        out("        %s" % split.get("why", ""))
+        out("        A rate fitted anyway would be %.1fx, and would be mostly a"
+            % (split.get("rate_if_fitted") or 0))
+        out("        measurement of host contention. It is not reported as one.")
+    out("")
+
     if document["tests_without_both_clocks"]:
         out("")
         out("    %d test(s) carried only one of the two clocks and were left "

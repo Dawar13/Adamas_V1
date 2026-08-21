@@ -1,0 +1,23 @@
+{
+  "schema": "bench.measure.realtime.v1",
+  "source": "harness\\out\\rtf.json",
+  "tests_measured": 32,
+  "tests_without_both_clocks": [],
+  "host_seconds_total": 2294.048,
+  "simulated_seconds_total": 36.98,
+  "realtime_factor": 62.0,
+  "per_test": {
+    "median": 62.7,
+    "fastest": 27.4,
+    "slowest": 189.8
+  },
+  "cost_split": {
+    "determined": false,
+    "fixed_seconds_per_test": 57.7,
+    "rate_if_fitted": 12.1,
+    "simulated_spread_seconds": 1.04,
+    "median_residual_seconds": 19.1,
+    "why": "the spread of simulated durations (1.04 s) is too small next to the scatter in host time (median residual 19 s) to determine a rate. Tests with very different simulated durations would determine it; these do not."
+  },
+  "note": "Host seconds per simulated second. The host clock varies with load and no verdict depends on it; this ratio is a fact about the machine, not about the firmware. It is a property of THIS SUITE as well as of the emulator: a suite of short tests is dominated by per-test startup, which cost_split separates."
+}
