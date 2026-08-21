@@ -1,0 +1,48 @@
+{
+  "schema": "bench.bringup.v1",
+  "source": "harness/boards.yml",
+  "bringups_attempted": 2,
+  "came_up": 1,
+  "blocked": 1,
+  "by_cause": {
+    "missing-peripheral-model": {
+      "count": 1,
+      "cost": "weeks",
+      "platforms": [
+        "platforms/cpus/nxp-s32k388.repl"
+      ]
+    }
+  },
+  "bringups": [
+    {
+      "platform": "platforms/cpus/nxp-s32k388.repl",
+      "boards": [
+        "bms_s32k",
+        "chg_s32k",
+        "vcu_s32k"
+      ],
+      "board_count": 3,
+      "tier": [
+        "declared"
+      ],
+      "blocked_by": "missing-peripheral-model",
+      "came_up": false
+    },
+    {
+      "platform": "platforms/cpus/stm32h743.repl",
+      "boards": [
+        "bms_ecu",
+        "chg_ecu",
+        "nucleo_h743zi",
+        "vcu_ecu"
+      ],
+      "board_count": 4,
+      "tier": [
+        "modelled"
+      ],
+      "blocked_by": null,
+      "came_up": true
+    }
+  ],
+  "note": "Counted per platform layer, not per board entry: several board roles on one chip are one bring-up and one failure. A ratio drawn from this few attempts is a record, not a rate."
+}
