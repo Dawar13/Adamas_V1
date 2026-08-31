@@ -46,6 +46,8 @@ suite-run.log
 # Evidence and results belong to the project directory now (PROJECT-V2 §8.1).
 projects/*/spike-snapshot/
 projects/*/verify-refusals/
-projects/*/spike-snapshot-toolkit/
-projects/*/spike-snapshot-phase/
+# Every spike's evidence, whatever it is called next time: these directories
+# hold multi-megabyte snapshots and emulator logs, and one of them reached a
+# commit because the ignore rule named the two spikes that existed that day.
+projects/*/spike-*/
 projects/*/runs/
