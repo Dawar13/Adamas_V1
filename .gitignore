@@ -42,3 +42,4 @@ harness/out/
 # run. Committing them would create a second source of truth and make the sweep
 # generator unverifiable.
 .generated/
+suite-run.log
