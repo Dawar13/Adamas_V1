@@ -46,4 +46,6 @@ suite-run.log
 # Evidence and results belong to the project directory now (PROJECT-V2 §8.1).
 projects/*/spike-snapshot/
 projects/*/verify-refusals/
+projects/*/spike-snapshot-toolkit/
+projects/*/spike-snapshot-phase/
 projects/*/runs/
