@@ -340,6 +340,13 @@ Every CAN company already has this as a **DBC file** — the automotive standard
 
 ### `<project>/scenarios/*.yml` — the thirteen verbs
 
+> **This list is no longer the source of truth, and is kept as an overview.**
+> Each verb is now a manifest in `harness/verbs/`, and
+> [`docs/VERBS.md`](VERBS.md) is generated from those manifests -- arguments,
+> refusal messages and all. `scripts/verb-docs.py --check` fails if the
+> generated page and the manifests disagree, and a test runs it. If this
+> table and that page ever differ, that page is right.
+
 The entire authoring surface. A user must never need to know Renode, Robot Framework, or Python.
 
 ```

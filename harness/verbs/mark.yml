@@ -1,0 +1,23 @@
+# mark -- PROJECT-V2 section 10.2. This file IS the verb: its arguments,
+# its refusals and their exact words, and its documentation.
+verb: mark
+class: book
+summary: A labelled point in the event log
+args:
+  text: { type: text, required: true, doc: what to record at this instant }
+bare_arg: text
+applies_to: [real, scripted]
+emits: MARK
+handler: mark
+doc: |
+  Writes a MARK line into the event log at the current virtual instant. It
+  changes nothing about the run: it is there so a reader of the log, or of a
+  trace, can find the moment the scenario meant something by.
+
+  Accepts a bare string as well as a mapping, because `- mark: "precharge"` is
+  what everyone writes.
+refusals:
+  - if: text_missing
+    exit: 2
+    message: |-
+        needs the text to record

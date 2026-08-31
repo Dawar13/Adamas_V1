@@ -1,0 +1,31 @@
+{
+  "expect_symbol": {
+    "node_is_scripted": "test-scenario.yml: step 1: node 'motor' has no firmware behind it, so it has no memory to read"
+  },
+  "flood": {
+    "count_not_positive": "test-scenario.yml: step 1: count must be positive, got 0"
+  },
+  "mark": {
+    "text_missing": "test-scenario.yml: step 1: needs the text to record"
+  },
+  "node_freeze": {
+    "board_names_no_core": "test-scenario.yml: step 1: board 'bms_ecu' does not name the core, so there is nothing to halt.\n  Add   cpu_peripheral: <name>   to that board in test-boards.yml.\n  The engine must not guess what a core is called on a customer's part: a guess that resolved to nothing would halt nothing, and the scenario would still report PASS.",
+    "node_is_scripted": "test-scenario.yml: step 1: node 'motor' is a frame player, and 'node_freeze' halts a core that is executing firmware. There is no core behind a player to halt.\n  To take this node off the bus, use   node_silence: { node: motor, silence: true }   which works on either kind of node.\n  To model a hung ECU here, give the node firmware (type: real) in the topology file. No scenario changes."
+  },
+  "node_resume": {
+    "board_names_no_core": "test-scenario.yml: step 1: board 'bms_ecu' does not name the core, so there is nothing to halt.\n  Add   cpu_peripheral: <name>   to that board in test-boards.yml.\n  The engine must not guess what a core is called on a customer's part: a guess that resolved to nothing would halt nothing, and the scenario would still report PASS.",
+    "node_is_scripted": "test-scenario.yml: step 1: node 'motor' is a frame player, and 'node_resume' halts a core that is executing firmware. There is no core behind a player to halt.\n  To take this node off the bus, use   node_silence: { node: motor, silence: true }   which works on either kind of node.\n  To model a hung ECU here, give the node firmware (type: real) in the topology file. No scenario changes."
+  },
+  "node_signal": {
+    "no_signal_symbols": "test-scenario.yml: step 1: node 'bms' is executed as firmware, so this verb writes the globals behind those signals, and the topology binds none.\n  Add   signal_symbols: { <signal>: <symbol>, ... }   to that node in the topology file.\n  Nothing in the scenario changes.",
+    "node_does_not_emit": "test-scenario.yml: step 1: node 'motor' does not emit 0x200, so there is no payload to change",
+    "signal_not_bound": "test-scenario.yml: step 1: node 'vcu' binds no symbol for signal 'not_a_bound_signal'. Bound signals: drive_state",
+    "signals_missing": "test-scenario.yml: step 1: needs 'signals' with at least one entry"
+  },
+  "wait_uart": {
+    "node_is_scripted": "test-scenario.yml: step 1: node 'motor' has no firmware behind it, so it has no console to wait on"
+  },
+  "write_symbol": {
+    "node_is_scripted": "test-scenario.yml: step 1: node 'motor' has no firmware behind it, so it has no memory to write into. This verb is for executed nodes only"
+  }
+}

@@ -1,0 +1,34 @@
+# node_freeze -- PROJECT-V2 section 10.2. This file IS the verb: its arguments,
+# its refusals and their exact words, and its documentation.
+verb: node_freeze
+class: stimulus
+summary: Halt a node's core, leaving virtual time running for everyone else
+args:
+  node: { type: node_ref, required: true, must_be: real }
+applies_to: [real]
+requires_capabilities: [core_halt]
+emits: STIM
+handler: node_freeze
+doc: |
+  HALT, NEVER PAUSE. `machine Pause` stops that machine reporting to the time
+  barrier, so virtual time stops for EVERY machine: every deadline becomes
+  unreachable and the run deadlocks instead of producing a verdict. A stalled
+  run and a failing one are not the same answer.
+
+  Halting the core leaves the machine in the barrier executing nothing, so its
+  peers keep running and can observe that it went quiet. That is the only
+  reason this verb exists, and it is what makes a hung ECU testable rather than
+  merely describable.
+refusals:
+  - if: board_names_no_core
+    exit: 2
+    message: |-
+        board {board!r} does not name the core, so there is nothing to halt.
+          Add   cpu_peripheral: <name>   to that board in {boards_file}.
+          The engine must not guess what a core is called on a customer's part: a guess that resolved to nothing would halt nothing, and the scenario would still report PASS.
+  - if: node_is_scripted
+    exit: 2
+    message: |-
+        node {node!r} is a frame player, and {verb!r} halts a core that is executing firmware. There is no core behind a player to halt.
+          To take this node off the bus, use   node_silence: {{ node: {node}, silence: true }}   which works on either kind of node.
+          To model a hung ECU here, give the node firmware (type: real) in the topology file. No scenario changes.

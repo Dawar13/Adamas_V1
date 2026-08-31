@@ -248,6 +248,13 @@ Peripheral names come from `boards.yml`, never from code.
 
 ### The thirteen verbs
 
+> **This list is no longer the source of truth, and is kept as an overview.**
+> Each verb is now a manifest in `harness/verbs/`, and
+> [`docs/VERBS.md`](VERBS.md) is generated from those manifests -- arguments,
+> refusal messages and all. `scripts/verb-docs.py --check` fails if the
+> generated page and the manifests disagree, and a test runs it. If this
+> table and that page ever differ, that page is right.
+
 ```
 wait_uart      { node, text, timeout_ms }
 node_signal    { node, id, signals }      scripted → repaint payload

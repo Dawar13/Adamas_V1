@@ -119,6 +119,105 @@ class TestTheOneExcusedDifference(Temp):
         self.assertIn("snapshot shim", result.text())
 
 
+class TestTheEngineChangedExemption(Temp):
+    """A deliberately narrow hole in the safety bar, cut narrowly.
+
+    It exists for one question: did a REFACTOR of the engine change any answer?
+    The engine's own hashes must move -- provenance that did not notice would
+    describe a run made by an engine that no longer exists -- and everything
+    else must not.
+
+    The tests below are mostly the second half. An exemption that quietly grew
+    to cover the firmware would turn "the migration changed nothing" into a
+    sentence that could not be false.
+    """
+
+    def with_inputs(self, directory, extra):
+        run = write_run(directory)
+        answer = json.loads((run / "results.json").read_text(encoding="utf-8"))
+        answer["provenance"]["inputs_sha256"].update(extra)
+        (run / "results.json").write_text(
+            json.dumps(answer, indent=2) + chr(10),
+            encoding="utf-8", newline=chr(10))
+        return run
+
+    def test_a_moved_engine_hash_is_excused_and_named(self):
+        a = self.with_inputs(self.root / "a", {"harness/run_scenarios.py": "1" * 64})
+        b = self.with_inputs(self.root / "b", {"harness/run_scenarios.py": "2" * 64})
+        result = equivalence.compare(a, b, engine_changed=True)
+        self.assertTrue(result.equivalent)
+        self.assertIn("harness/run_scenarios.py", result.text())
+        self.assertIn("excused", result.text())
+
+    def test_the_same_difference_is_a_failure_without_the_flag(self):
+        """The other direction. Without this, the flag could be doing nothing
+        and every test above would still pass."""
+        a = self.with_inputs(self.root / "a", {"harness/run_scenarios.py": "1" * 64})
+        b = self.with_inputs(self.root / "b", {"harness/run_scenarios.py": "2" * 64})
+        self.assertFalse(equivalence.compare(a, b).equivalent)
+
+    def test_a_moved_firmware_hash_is_not_excused(self):
+        a = self.with_inputs(self.root / "a", {"harness/run_scenarios.py": "1" * 64,
+                                               "firmware:one": "a" * 64})
+        b = self.with_inputs(self.root / "b", {"harness/run_scenarios.py": "2" * 64,
+                                               "firmware:one": "b" * 64})
+        result = equivalence.compare(a, b, engine_changed=True)
+        self.assertFalse(result.equivalent)
+        self.assertIn("firmware:one", " ".join(result.failures))
+
+    def test_a_moved_scenario_hash_is_not_excused(self):
+        a = self.with_inputs(self.root / "a", {"harness/run_scenarios.py": "1" * 64})
+        b = self.with_inputs(self.root / "b", {"harness/run_scenarios.py": "2" * 64})
+        answer = json.loads((b / "results.json").read_text(encoding="utf-8"))
+        answer["provenance"]["inputs_sha256"]["scenarios/thing.yml"] = "9" * 64
+        (b / "results.json").write_text(
+            json.dumps(answer, indent=2) + chr(10),
+            encoding="utf-8", newline=chr(10))
+        result = equivalence.compare(a, b, engine_changed=True)
+        self.assertFalse(result.equivalent)
+        self.assertIn("scenarios/thing.yml", " ".join(result.failures))
+
+    def test_a_moved_verdict_is_not_excused(self):
+        """The flag is about provenance. It must never reach the answer."""
+        a = self.with_inputs(self.root / "a", {"harness/run_scenarios.py": "1" * 64})
+        b = write_run(self.root / "b", verdict="FAIL")
+        answer = json.loads((b / "results.json").read_text(encoding="utf-8"))
+        answer["provenance"]["inputs_sha256"]["harness/run_scenarios.py"] = "2" * 64
+        (b / "results.json").write_text(
+            json.dumps(answer, indent=2) + chr(10),
+            encoding="utf-8", newline=chr(10))
+        self.assertFalse(equivalence.compare(a, b, engine_changed=True).equivalent)
+
+    def test_excusing_nothing_while_claiming_to_is_refused(self):
+        """A run with no engine entry at all. Reporting "equivalent, engine
+        excused" there would be the narrower comparison reading as a clean
+        one."""
+        def without_engine(directory):
+            run = write_run(directory)
+            answer = json.loads((run / "results.json").read_text(encoding="utf-8"))
+            inputs = answer["provenance"]["inputs_sha256"]
+            for key in [k for k in inputs if k.startswith("harness/")]:
+                inputs.pop(key)
+            (run / "results.json").write_text(
+                json.dumps(answer, indent=2) + chr(10),
+                encoding="utf-8", newline=chr(10))
+            return run
+
+        with self.assertRaises(equivalence.CannotCompare) as caught:
+            equivalence.compare(without_engine(self.root / "a"),
+                                without_engine(self.root / "b"),
+                                engine_changed=True)
+        self.assertIn("nothing this flag could be excusing", str(caught.exception))
+
+    def test_the_event_log_is_never_excused(self):
+        a = self.with_inputs(self.root / "a", {"harness/run_scenarios.py": "1" * 64})
+        b = self.with_inputs(self.root / "b", {"harness/run_scenarios.py": "2" * 64})
+        (b / "events.log").write_bytes(b"0 BOOT" + bytes([10]) + b"9 TX 604" + bytes([10]))
+        result = equivalence.compare(a, b, engine_changed=True)
+        self.assertFalse(result.equivalent)
+        self.assertIn("event logs differ", " ".join(result.failures))
+
+
 class TestWhatItRefuses(Temp):
 
     def test_a_missing_directory(self):

@@ -437,10 +437,19 @@ class TestEveryEngineModuleHoldsNoProjectData(IntegrationBase):
     The per-module tests each scan their own file, so a module added later is
     scanned by nobody. This scans every ``harness/*.py`` there is, with the
     forbidden terms derived from the shipped files.
+
+    IT ALSO SCANS THE VERB MANIFESTS, and that is not a detail. The registry
+    moved a large amount of the engine's PROSE out of Python and into
+    ``harness/verbs/*.yml`` -- summaries, documentation, and the exact words of
+    every refusal. Had this guard gone on scanning only ``*.py`` it would have
+    reported a clean engine while the one place the vocabulary now lives went
+    unchecked, which is the shape of a guard that rots the moment the thing it
+    guards is refactored.
     """
 
     def engine_sources(self):
-        found = sorted(p for p in (REPO_ROOT / "harness").glob("*.py"))
+        found = sorted((REPO_ROOT / "harness").glob("*.py"))
+        found += sorted((REPO_ROOT / "harness" / "verbs").glob("*.yml"))
         self.assertGreater(len(found), 1, "no engine modules found to scan")
         return found
 

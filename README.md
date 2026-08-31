@@ -38,6 +38,11 @@ an emulated UART. That is the Phase 0 proof everything else stands on.
 The **engine** is `harness/`, the **tooling** is `scripts/`, and the **studio** is `app/`. None of
 them holds project data.
 
+The engine's **vocabulary** is `harness/verbs/` — one manifest per verb, carrying its arguments,
+the node kinds it applies to, and the exact words of every refusal it can make. Adding a verb that
+needs no logic is adding a file. [docs/VERBS.md](docs/VERBS.md) is generated from those manifests
+and checked against them by a test, so it cannot go stale.
+
 A **project** is a directory of one customer's answers — `network.yml`, `catalog.yml`, `boards.yml`,
 `patterns/`, `scenarios/`, `platforms/`, `firmware/`, its stored `runs/` and a
 disposable `cache/`. This repository ships

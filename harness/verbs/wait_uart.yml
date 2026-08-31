@@ -1,0 +1,27 @@
+# wait_uart -- PROJECT-V2 section 10.2. This file IS the verb: its arguments,
+# its refusals and their exact words, and its documentation.
+verb: wait_uart
+class: observe
+polarity: expect
+summary: Wait for text to appear on a node's console
+args:
+  node:       { type: node_ref, required: true, must_be: real }
+  text:       { type: text, required: true, doc: the substring to wait for }
+  timeout_ms: { type: window_ms, required: true, doc: how long to wait before giving up }
+  label:      { type: label, doc: what this wait means }
+applies_to: [real]
+requires_capabilities: [console]
+emits: EXPECT_ARM
+handler: wait_uart
+doc: |
+  Arms a console watcher and then runs for the whole timeout. The window always
+  runs to its end: stopping early on a match would make elapsed time depend on
+  the outcome, and two runs of one scenario would stop agreeing.
+
+  A node with no firmware behind it has no console, so it is refused rather
+  than waited on forever.
+refusals:
+  - if: node_is_scripted
+    exit: 2
+    message: |-
+        node {node!r} has no firmware behind it, so it has no console to wait on

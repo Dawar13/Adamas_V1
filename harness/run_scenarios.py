@@ -87,6 +87,7 @@ import catalog as contract          # noqa: E402  the CAN contract loader
 import project                      # noqa: E402  where the project is
 import pool                         # noqa: E402  live emulator processes
 import network as topology          # noqa: E402  the topology loader
+import verb_registry                # noqa: E402  the vocabulary, as data
 from yaml_strict import StrictBoolLoader  # noqa: E402
 
 import yaml                         # noqa: E402
@@ -110,25 +111,26 @@ TIER_ORDER = (TIER_VERIFIED, TIER_MODELLED, TIER_DECLARED)
 # own injection would be measuring the tool's echo, not the firmware.
 FIRMWARE_FRAME_KINDS = ("TX", "TXN")
 
-VERBS = (
-    "wait_uart",
-    "node_signal",
-    "node_silence",
-    "node_freeze",
-    "node_resume",
-    "can_send",
-    "flood",
-    "write_symbol",
-    "expect_can",
-    "expect_no_can",
-    "expect_symbol",
-    "run_for",
-    "mark",
-)
+#: THE VOCABULARY IS NOT IN THIS FILE ANY MORE.
+#:
+#: It was a tuple here, and a table of allowed keys below it, and two tuples of
+#: polarity beside that, and a dictionary of handlers four hundred lines down --
+#: five hand-maintained lists that had to agree, in a file nobody adding a verb
+#: should have to open. NN-3: if adding one more verb requires editing source
+#: and shipping a build, the design is wrong.
+#:
+#: They are now four views of one thing: the manifests in harness/verbs/, read
+#: by harness/verb_registry.py. These module-level names are kept because they
+#: are what the expander and the tests already ask for, and a rename would be a
+#: change to everything that consumes the vocabulary rather than to the
+#: vocabulary itself.
+REGISTRY = verb_registry.load()
+
+VERBS = REGISTRY.names
 
 #: Assertion verbs, and whether a match is what we want or what we forbid.
-EXPECT_VERBS = ("wait_uart", "expect_can", "expect_symbol")
-FORBID_VERBS = ("expect_no_can",)
+EXPECT_VERBS = REGISTRY.of_polarity(verb_registry.POLARITY_EXPECT)
+FORBID_VERBS = REGISTRY.of_polarity(verb_registry.POLARITY_FORBID)
 
 #: A monitor argument is a bare word to the emulator's parser, so identifiers
 #: that reach it must be safe to write unquoted. Text arguments avoid the
@@ -210,6 +212,7 @@ def _test_console(name: str) -> str:
 #: would be describing a run that no longer exists (NN-4).
 ENGINE_FILES = (
     "run_scenarios.py",
+    "verb_registry.py",
     "network.py",
     "catalog.py",
     "yaml_strict.py",
@@ -541,26 +544,18 @@ class Step:
 # its label still claimed the stronger check had been made.
 #
 # A verification tool must never silently test less than the author wrote.
-STEP_KEYS = {
-    "mark":          {"text"},       # also accepted as a bare string
-    "run_for":       {"ms"},
-    "wait_uart":     {"node", "text", "timeout_ms", "label"},
-    "write_symbol":  {"node", "symbol", "value", "size"},
-    "expect_symbol": {"node", "symbol", "equals", "size", "label"},
-    "expect_can":    {"id", "signals", "within_ms", "label"},
-    "expect_no_can": {"id", "signals", "for_ms", "label"},
-    "can_send":      {"node", "id", "signals", "data_hex"},
-    "flood":         {"node", "id", "count", "data_hex", "signals"},
-    "node_signal":   {"node", "id", "signals"},
-    "node_silence":  {"node", "silence"},
-    "node_freeze":   {"node"},
-    "node_resume":   {"node"},
-}
+#
+# It used to be a dictionary written out by hand beside the verb tuple, and the
+# first version of it omitted `label` from wait_uart -- so the guard meant to
+# catch a mistyped key rejected three correct ones instead. It is now each
+# verb's own declared arguments, which cannot drift from the verb because it is
+# the same file.
+STEP_KEYS = REGISTRY.step_keys
 
 
-def _check_step_keys(step) -> None:
+def _check_step_keys(step, registry=None) -> None:
     """Refuse any key a verb does not recognise, naming the near miss."""
-    allowed = STEP_KEYS.get(step.verb)
+    allowed = (registry or REGISTRY).step_keys.get(step.verb)
     if allowed is None:
         return
     unknown = step.unknown_keys(allowed)
@@ -586,7 +581,8 @@ def _check_step_keys(step) -> None:
 class Scenario:
     """One scenario file: what to do, and what to expect while doing it."""
 
-    def __init__(self, doc, path: Path):
+    def __init__(self, doc, path: Path, registry=None):
+        self.registry = registry or REGISTRY
         self.path = Path(path)
         self.source = str(self.path)
         if not isinstance(doc, dict):
@@ -622,15 +618,15 @@ class Scenario:
                 )
             verb = next(iter(entry))
             params = entry[verb]
-            if verb not in VERBS:
+            if verb not in self.registry:
                 raise CompileError(
                     "%s: %r is not one of the verbs: %s"
-                    % (where, verb, ", ".join(VERBS))
+                    % (where, verb, ", ".join(self.registry.names))
                 )
             self.steps.append(Step(index, verb, params, "%s (%s)" % (where, verb)))
 
     @classmethod
-    def load(cls, path: Path) -> "Scenario":
+    def load(cls, path: Path, registry=None) -> "Scenario":
         target = Path(path)
         try:
             text = target.read_text(encoding="utf-8")
@@ -644,7 +640,7 @@ class Scenario:
             raise CompileError("%s is not valid YAML: %s" % (target, exc)) from None
         if doc is None:
             raise CompileError("%s is empty" % target)
-        return cls(doc, target)
+        return cls(doc, target, registry)
 
 
 # ---------------------------------------------------------------------------
@@ -711,7 +707,7 @@ class Compiler:
     """Turns the four input files into one emulator command script."""
 
     def __init__(self, net, cat, boards, scenario, out_dir, translate,
-                 trace_execution=False, project_root=None):
+                 trace_execution=False, project_root=None, registry=None):
         # Where this project's binaries and platform files are. Resolved once,
         # here, rather than read from a global: two compilations in one process
         # may belong to two different projects.
@@ -733,8 +729,32 @@ class Compiler:
         self._traced = []
         # (node, message id) -> the payload a frame player is currently sending.
         self._painted = {}
+        # The vocabulary. Taken from the scenario when it has one, so a scenario
+        # loaded against a particular registry cannot be compiled against a
+        # different one -- two answers to "what does this verb mean" is exactly
+        # what the registry exists to prevent.
+        self.registry = registry or getattr(scenario, "registry", None) or REGISTRY
 
     # -- plumbing ---------------------------------------------------------
+
+    def _refuse(self, step, condition, **values):
+        """Raise the refusal this verb declares for this condition.
+
+        THE WORDS LIVE IN THE MANIFEST, not here. That is most of what the verb
+        registry is for: a refusal message names the fix, and a message spelled
+        in Python is one an operator cannot read without a checkout, cannot
+        translate, and cannot correct without a release.
+
+        The exit code comes from the manifest too, because "we could not run
+        this" and "we will not run this" are different answers to a caller.
+        Never returns.
+        """
+        verb = self.registry[step.verb]
+        refusal = verb.refusal(condition)
+        text = "%s: %s" % (step.where, refusal.render(**values))
+        if refusal.exit_code == EXIT_REFUSED:
+            raise Refusal(text)
+        raise CompileError(text)
 
     def _emit(self, line=""):
         self.result.lines.append(line)
@@ -1183,7 +1203,7 @@ class Compiler:
     def _verb_mark(self, step):
         text = step.params if isinstance(step.params, str) else step.get("text")
         if text is None:
-            raise CompileError("%s: needs the text to record" % step.where)
+            self._refuse(step, "text_missing")
         self._emit("bench_mark \"%s\"" % self._text_arg(text, step.where))
 
     def _verb_run_for(self, step):
@@ -1195,10 +1215,7 @@ class Compiler:
         where = step.where
         node = self._node(step.need("node"), where)
         if not node.is_real():
-            raise CompileError(
-                "%s: node %r has no firmware behind it, so it has no console to "
-                "wait on" % (where, node.id)
-            )
+            self._refuse(step, "node_is_scripted", node=node.id)
         text = str(step.need("text"))
         window = _as_window_ms(step.need("timeout_ms"), "%s: timeout_ms" % where)
         label = step.get("label") or ("console: %s" % text)
@@ -1223,10 +1240,7 @@ class Compiler:
         where = step.where
         node = self._node(step.need("node"), where)
         if not node.is_real():
-            raise CompileError(
-                "%s: node %r has no firmware behind it, so it has no memory to "
-                "write into. This verb is for executed nodes only" % (where, node.id)
-            )
+            self._refuse(step, "node_is_scripted", node=node.id)
         symbol = _safe_name(step.need("symbol"), "%s: symbol" % where)
         value = _as_int(step.need("value"), "%s: value" % where)
         size = _as_int(step.get("size", 0), "%s: size" % where)
@@ -1242,10 +1256,7 @@ class Compiler:
         where = step.where
         node = self._node(step.need("node"), where)
         if not node.is_real():
-            raise CompileError(
-                "%s: node %r has no firmware behind it, so it has no memory to "
-                "read" % (where, node.id)
-            )
+            self._refuse(step, "node_is_scripted", node=node.id)
         symbol = _safe_name(step.need("symbol"), "%s: symbol" % where)
         wanted = _as_int(step.need("equals"), "%s: equals" % where)
         size = _as_int(step.get("size", 0), "%s: size" % where)
@@ -1335,7 +1346,7 @@ class Compiler:
         )
         count = _as_int(step.need("count"), "%s: count" % where)
         if count <= 0:
-            raise CompileError("%s: count must be positive, got %d" % (where, count))
+            self._refuse(step, "count_not_positive", count=count)
         data = self._payload_for_send(step, message, msg_id)
         node = self._sender_of(message, step, msg_id)
         self._emit(
@@ -1357,27 +1368,19 @@ class Compiler:
         message, msg_id = self._message_for(step.need("id"), where, need_contract=True)
         signals = step.get("signals")
         if not isinstance(signals, dict) or not signals:
-            raise CompileError("%s: needs 'signals' with at least one entry" % where)
+            self._refuse(step, "signals_missing")
 
         if node.is_real():
             # Executed node: write the globals behind those signals. The binding
             # is project data, so the topology states it.
             bindings = node.raw.get("signal_symbols")
             if not isinstance(bindings, dict):
-                raise CompileError(
-                    "%s: node %r is executed as firmware, so this verb writes the "
-                    "globals behind those signals, and the topology binds none.\n"
-                    "  Add   signal_symbols: { <signal>: <symbol>, ... }   to that "
-                    "node in the topology file.\n"
-                    "  Nothing in the scenario changes." % (where, node.id)
-                )
+                self._refuse(step, "no_signal_symbols", node=node.id)
             for name, value in signals.items():
                 symbol = bindings.get(name)
                 if symbol is None:
-                    raise CompileError(
-                        "%s: node %r binds no symbol for signal %r. Bound "
-                        "signals: %s" % (where, node.id, name, ", ".join(sorted(bindings)))
-                    )
+                    self._refuse(step, "signal_not_bound", node=node.id,
+                                 signal=name, bound=", ".join(sorted(bindings)))
                 signal = message.signal(name)
                 try:
                     raw = self.cat.resolve_enum(signal.name, value)
@@ -1399,10 +1402,8 @@ class Compiler:
         # the schedule does not shift when a scenario changes what a node says.
         key = (node.id, message.id)
         if key not in self._painted:
-            raise CompileError(
-                "%s: node %r does not emit 0x%X, so there is no payload to "
-                "change" % (where, node.id, message.id)
-            )
+            self._refuse(step, "node_does_not_emit", node=node.id,
+                         message_id=message.id)
         value, mask = self._encode(message, signals, where)
         merged = bytearray(self._painted[key])
         for index in range(message.dlc):
@@ -1471,30 +1472,13 @@ class Compiler:
         # core is a node that stopped doing everything, including servicing the
         # peripheral that would have acknowledged a frame.
         if not node.is_real():
-            raise CompileError(
-                "%s: node %r is a frame player, and %r halts a core that is "
-                "executing firmware. There is no core behind a player to "
-                "halt.\n"
-                "  To take this node off the bus, use   node_silence: "
-                "{ node: %s, silence: true }   which works on either kind of "
-                "node.\n"
-                "  To model a hung ECU here, give the node firmware "
-                "(type: real) in the topology file. No scenario changes."
-                % (where, node.id, step.verb, node.id)
-            )
+            self._refuse(step, "node_is_scripted", node=node.id, verb=step.verb)
 
         board = self.boards.board(node.board, where)
         core = board.get("cpu_peripheral")
         if not core:
-            raise CompileError(
-                "%s: board %r does not name the core, so there is nothing to "
-                "halt.\n"
-                "  Add   cpu_peripheral: <name>   to that board in %s.\n"
-                "  The engine must not guess what a core is called on a "
-                "customer's part: a guess that resolved to nothing would halt "
-                "nothing, and the scenario would still report PASS."
-                % (where, node.board, self.boards.source)
-            )
+            self._refuse(step, "board_names_no_core", board=node.board,
+                         boards_file=self.boards.source)
 
         self._emit(
             'bench_freeze "%s" "%s" "%d"'
@@ -1521,21 +1505,91 @@ class Compiler:
         return count
 
     def _handlers(self) -> dict:
-        return {
-            "mark": self._verb_mark,
-            "run_for": self._verb_run_for,
-            "wait_uart": self._verb_wait_uart,
-            "write_symbol": self._verb_write_symbol,
-            "expect_symbol": self._verb_expect_symbol,
-            "expect_can": self._verb_expect_can,
-            "expect_no_can": self._verb_expect_no_can,
-            "can_send": self._verb_can_send,
-            "flood": self._verb_flood,
-            "node_signal": self._verb_node_signal,
-            "node_silence": self._verb_node_silence,
-            "node_freeze": self._verb_node_freeze,
-            "node_resume": self._verb_node_resume,
-        }
+        """What compiles each verb, taken from the registry rather than listed.
+
+        This was a dictionary of thirteen names written out by hand. It had to
+        agree with the verb tuple, with the allowed-key table, and with the two
+        polarity tuples, and nothing checked that it did -- a verb present in
+        one and missing from another failed at the moment a scenario used it.
+
+        A manifest declares exactly one of:
+
+            handler:   a method on this class. The ~40% with real logic
+            template:  a substitution producing monitor lines. The rest, and
+                       the only case where adding a verb is genuinely a file
+                       and no source change at all
+        """
+        built = {}
+        for name in self.registry.names:
+            verb = self.registry[name]
+            if verb.handler:
+                method = getattr(self, "_verb_%s" % verb.handler, None)
+                if method is None:
+                    raise CompileError(
+                        "%s declares handler %r and this engine has no "
+                        "_verb_%s to call. A manifest naming a handler that "
+                        "does not exist would fail at the moment a scenario "
+                        "used the verb, which is the worst time to find out."
+                        % (verb.source, verb.handler, verb.handler))
+                built[name] = method
+            else:
+                built[name] = self._templated(verb)
+        return built
+
+    #: How a template argument becomes text the emulator can be handed. The
+    #: coercions are the engine's own parsers -- a template path with its own
+    #: idea of what an integer is would be a second answer to a question the
+    #: rest of the compiler already answers.
+    def _templated(self, verb):
+        """A compile step for a verb that is a manifest and nothing else."""
+
+        def compile_step(step):
+            values = {}
+            for name, arg in verb.args.items():
+                raw = step.params if (verb.bare_arg == name
+                                      and not isinstance(step.params, dict)) \
+                    else step.get(name, arg.default)
+                if raw is None:
+                    if arg.required:
+                        raise CompileError("%s: %r needs %r"
+                                           % (step.where, step.verb, name))
+                    continue
+                values[name] = self._template_value(step, arg, raw)
+            self._emit(verb.template.strip().format(**values))
+
+        return compile_step
+
+    def _template_value(self, step, arg, raw):
+        where = "%s: %s" % (step.where, arg.name)
+        kind = arg.type
+        if kind == "node_ref":
+            node = self._node(raw, where)
+            if arg.must_be == verb_registry.KIND_REAL and not node.is_real():
+                self._refuse(step, "node_is_scripted", node=node.id,
+                             verb=step.verb)
+            return _safe_name(node.id, where)
+        if kind in ("injectable_symbol", "label"):
+            return _safe_name(raw, where)
+        if kind == "integer":
+            return _as_int(raw, where)
+        if kind == "duration_ms":
+            return _as_ms(raw, where)
+        if kind == "window_ms":
+            return _as_window_ms(raw, where)
+        if kind == "message_id":
+            return self._message_for(raw, where, need_contract=False)[1]
+        if kind == "text":
+            return self._text_arg(str(raw), where)
+        if kind == "boolean":
+            return 1 if (raw is True or (not isinstance(raw, bool)
+                                         and _as_int(raw, where) != 0)) else 0
+        if kind == "hex_bytes":
+            return _clean_hex(raw, where)
+        raise CompileError(
+            "%s: a template cannot carry an argument of type %r. %r needs a "
+            "handler: signal values are encoded through the contract, and a "
+            "substitution has nowhere to do that."
+            % (where, kind, step.verb))
 
     def compile_snapshot(self, prefix_log: Path, suffix_log: Path,
                          state_file: Path, snapshot_file: Path) -> Compilation:
@@ -2421,6 +2475,13 @@ def parse_args(argv):
     parser.add_argument("--topology", default=None, help="override the topology file")
     parser.add_argument("--contract", default=None, help="override the contract file")
     parser.add_argument("--boards", default=None, help="override the board file")
+    parser.add_argument(
+        "--verbs", default=None, metavar="DIR",
+        help="the verb registry to read (default: $%s, else the shipped "
+             "harness/verbs). An explicit directory REPLACES the shipped "
+             "vocabulary rather than adding to it, so a caller comparing two "
+             "vocabularies gets exactly the one it named"
+             % verb_registry.REGISTRY_ENV)
     project.add_argument(parser)
     parser.add_argument("--wsl-distro", default=None,
                         help="which compatibility-layer distribution hosts the emulator")
@@ -2632,7 +2693,7 @@ def run_from_snapshot(emulator, prefix_resc, suffix_resc, console_log,
 
 
 def collect_inputs(scenario, net, cat, boards, resc, compiled, project_root,
-                   snapshot=False, worker=False) -> dict:
+                   snapshot=False, worker=False, registry=None) -> dict:
     """Every input that shaped this run, hashed by content.
 
     PULLED OUT OF main() SO THAT THERE IS EXACTLY ONE OF IT. The result cache
@@ -2703,6 +2764,21 @@ def collect_inputs(scenario, net, cat, boards, resc, compiled, project_root,
         target = (_HERE / name).resolve()
         if target.is_file():
             inputs[_repo_relative(target)] = _sha256(target)
+
+    # THE VERB MANIFESTS ARE ENGINE FILES. They carry the refusals, the
+    # templates and the argument rules, so editing one changes what a run does
+    # -- or what it refuses to do -- with every .py file byte for byte the
+    # same. Provenance that did not notice would be describing a run made by an
+    # engine that no longer exists (NN-4), which is the same hole the platform
+    # files had before they were hashed.
+    #
+    # Every manifest in the loaded vocabulary, not the shipped directory: a run
+    # against a project-local or an overridden registry must record the verbs
+    # it actually used.
+    for verb in sorted((registry or REGISTRY).verbs.values(),
+                       key=lambda v: v.name):
+        if verb.source.is_file():
+            inputs[_repo_relative(verb.source)] = _sha256(verb.source)
     if worker:
         target = (_HERE / "pool.py").resolve()
         if target.is_file():
@@ -2726,7 +2802,11 @@ def main(argv=None):
         # An explicit --topology / --contract / --boards still wins: a caller
         # comparing two board files against one project must be able to say so.
         project_root = project.project_root(args.project)
-        scenario = Scenario.load(Path(args.scenario))
+        # The vocabulary, resolved once and handed to everything that has to
+        # agree about what a verb means. A project may add verbs of its own
+        # (section 10.4); an explicit --verbs replaces the lot.
+        registry = verb_registry.load(args.verbs, project_root=project_root)
+        scenario = Scenario.load(Path(args.scenario), registry)
         net = topology.load(project.network_path(args.topology, args.project))
         cat = contract.load(project.catalog_path(args.contract, args.project))
         net.validate_against(cat)
@@ -2735,7 +2815,7 @@ def main(argv=None):
         # $BENCH_CACHE refuses as usage rather than being read as "off".
         use_cache = cache_requested(args)
     except (topology.NetworkError, contract.CatalogError, CompileError,
-            project.ProjectError) as exc:
+            project.ProjectError, verb_registry.VerbError) as exc:
         print("\nERROR: %s\n" % exc, file=sys.stderr)
         return EXIT_USAGE
 
@@ -2787,7 +2867,7 @@ def main(argv=None):
                     if args.worker else Emulator(out_dir, args.wsl_distro))
         compiler = Compiler(net, cat, boards, scenario, out_dir,
                             emulator.behind_layer, coverage_requested(args),
-                            project_root=project_root)
+                            project_root=project_root, registry=registry)
         if args.snapshot:
             # Two scripts and two processes. The event log the judge reads is
             # assembled from both, and must come out byte-identical to a cold
@@ -2850,7 +2930,7 @@ def main(argv=None):
     # -----------------------------------------------------------------
     inputs = collect_inputs(scenario, net, cat, boards, resc, compiled,
                             project_root, snapshot=args.snapshot,
-                            worker=bool(args.worker))
+                            worker=bool(args.worker), registry=registry)
     mode = execution_mode(args)
     store = digest = key_doc = None
     if use_cache:

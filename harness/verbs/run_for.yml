@@ -1,0 +1,19 @@
+# run_for -- PROJECT-V2 section 10.2. This file IS the verb: its arguments,
+# its refusals and their exact words, and its documentation.
+verb: run_for
+class: time
+summary: Advance virtual time by exactly this much
+args:
+  ms: { type: duration_ms, required: true, doc: how long to run - whole milliseconds }
+bare_arg: ms
+applies_to: [real, scripted]
+handler: run_for
+doc: |
+  Runs the emulation forward. The duration is VIRTUAL time and has nothing to
+  do with how long the host takes, which is what makes a latency measured
+  under load identical to one measured idle.
+
+  Fractions of a millisecond are refused rather than rounded by the shared
+  duration parser: a silently rounded window is a silently different deadline,
+  and the deadline is the thing under test.
+refusals: []

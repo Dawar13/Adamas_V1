@@ -1182,6 +1182,210 @@ has NOT been run* rather than folded into a tick: the divergence gate has not
 been executed against a tier, and the `standard` tier has never been run as a
 suite.
 
+## Phase 3 §3.1 — the verb registry ✓
+
+2026-09-01, branch `v2-phase1`. PROJECT-V2 §10. A verb was a branch in Python;
+it is now a manifest file plus, usually, a handler.
+
+### What a verb is now
+
+`harness/verbs/*.yml`, one per verb, loaded by `harness/verb_registry.py`. Each
+manifest carries everything §10.2 asks for: name, class, argument names and
+types, defaults, required capabilities, which node kinds it applies to, what it
+writes to the event log, **its refusal conditions with their exact messages**,
+and its documentation.
+
+Five hand-maintained lists in `run_scenarios.py` became four views of that one
+thing:
+
+| Was | Is |
+|---|---|
+| `VERBS`, a tuple of 13 | `REGISTRY.names` |
+| `STEP_KEYS`, a dict of allowed keys | each verb's own declared arguments |
+| `EXPECT_VERBS` / `FORBID_VERBS` | `class` + `polarity` |
+| `_handlers()`, a dict of 13 methods | `handler:` or `template:`, per manifest |
+
+Nothing checked that those five agreed. The first `STEP_KEYS` omitted `label`
+from `wait_uart` and three shipped scenarios stopped compiling — the guard meant
+to catch a mistyped key rejected correct ones instead. They cannot drift now
+because they are the same file.
+
+`--verbs DIR` and `$BENCH_VERBS` select a different vocabulary, with the same
+resolution discipline as `--project`. A project may add verbs of its own in
+`projects/<name>/verbs/`, marked `scope: project`.
+
+### The refusal messages moved into data, and it is provable that they did
+
+This is the part of §10.2 that matters most, and the part easiest to fake by
+declaring refusals in YAML while the handlers go on raising their own strings.
+
+**The wording was captured before anything was migrated.** Each of the thirteen
+verb-specific refusals was provoked through the pre-registry compiler and its
+exact text recorded in `harness/tests/data/verb-refusals.json`. The generator
+that wrote the manifests refused to write a single file until every templated
+message re-rendered to the captured string byte for byte. Re-provoking all
+thirteen through the migrated engine: **identical, all thirteen**.
+
+Two tests hold it there. One greps `run_scenarios.py` for any migrated message
+and fails if the engine still spells one. The other checks the opposite
+direction — every declared condition must be raised somewhere, because a
+refusal nothing raises is a message no one has ever read.
+
+The line NN-3 draws was applied rather than assumed. In data: the vocabulary,
+the arguments, the shape rules, the refusals, the documentation. Still in code:
+the handlers with real logic, and the *shared* mechanism — parsing an integer,
+resolving a message from the contract, binding a symbol from the topology.
+Those refusals belong to the mechanism and are raised by it; moving one into a
+verb's manifest would put knowledge shared by nine verbs into one of their
+files.
+
+### Guard 4's verb dimension now runs, and passes
+
+It had been skipping since it was written, with a detector that would fail the
+moment a registry appeared. It appeared, it failed, and it is now the check it
+was waiting for — same before/after shape as the pattern probe:
+
+```
+the copied registry reproduces the shipped vocabulary      fixture is honest
+the probe is not in the shipped registry                   nothing pre-exists
+a new manifest widens the vocabulary by exactly one verb   +1, and -0
+a scenario using it compiles, and the templated line
+  reaches the .resc                                        it compiled, not just loaded
+without the manifest the same scenario is refused          NN-9, the other direction
+no engine file names the probe verb                        no source change
+```
+
+The probe is a **template-only** verb, and that is the point rather than a
+convenience: a verb with a handler still needs a method on the compiler, so for
+those the manifest removes four of the five edits and not the fifth. Only a verb
+that is a manifest and nothing else makes NN-3's sentence literally true.
+
+The **rule-pack** dimension still skips, correctly. Nothing was created under
+its probe paths; rule packs are not this task.
+
+### Template-only: 0 of 13, and that is the honest number
+
+§10.1 budgets ~60% of the full 45-verb set for verbs needing no handler. The
+thirteen V1 built are not a sample of that set — they are the ones with masked
+matching, window arithmetic, token bookkeeping and payload merging in them,
+which is why V1 built them first.
+
+So the template path is built, and is exercised end to end by Guard 4's probe,
+and **has no shipped user**. Pushing `mark` or `run_for` through it would have
+meant moving their escaping and their bare-argument handling into the template
+engine to make a number look better. A test asserts the count is zero and says
+to update it, rather than leaving a stale claim behind.
+
+### Equivalence: proved cheaply throughout, confirmed expensively once
+
+**Stage A — the compiled script, 20 seconds, run after every step.**
+`scripts/compiled-snapshot.py` compiles all 90 tests with `--dry-run` and
+normalises the one thing that legitimately varies: the output directory the
+script embeds. If the emulator is handed the same commands it cannot behave
+differently, so this is not a proxy for comparing runs — it is a stronger and
+much cheaper statement about the same thing.
+
+    the full suite, cold        ~17m 30s
+    every test compiled           ~18s
+
+Its own negative control first: one extra space in one emitted command, and it
+named 71 of 90 with the exact line. Then, after every migration step and at the
+end: **all 90 compiled scripts byte-for-byte identical.**
+
+**Stage B — the full suite, once, at the end.**
+
+```
+before, at 37c5017    90 of 90 passed in 17m 27s
+after                 90 of 90 passed in 17m 31s
+```
+
+All 90 pairs compared by `scripts/compare-suites.py`, which drives the one
+comparison the cache and the snapshot mode already use:
+
+```
+90 agreed, 0 differed, 0 could not be compared
+SAME ANSWER: every event log byte-identical, every results.json
+identical outside the entries named above.
+```
+
+### The one difference that had to be there, cut narrowly and printed
+
+`provenance.inputs_sha256` hashes the engine, and the engine changed — so those
+entries **must** move. Provenance that had not noticed would describe a run made
+by an engine that no longer exists (NN-4). The manifests are hashed too: a
+changed refusal or a changed template changes what a run refuses to do with
+every `.py` file byte for byte the same.
+
+Since *a narrower comparison reading as a clean one* is already recorded scar
+tissue here, the exemption is explicit rather than implicit.
+`harness/equivalence.py --engine-changed` excuses the `harness/` entries and
+**prints every one of them**; nothing else is excused. It refuses outright if
+there is no engine entry to excuse, because claiming to excuse the engine while
+excusing nothing is that same failure wearing a flag.
+
+The fifteen that moved, identically for all 90 tests:
+
+```
+harness/run_scenarios.py · harness/verb_registry.py · the 13 manifests
+```
+
+And what did **not** move, out of the 18 provenance entries the two runs share:
+`can_toolkit.py`, every firmware binary, every platform file, the scenario, the
+contract and the board file. The toolkit one matters most — it is the check that
+the migration did not quietly edit the emulator-side half.
+
+The negative control on that instrument, because a flag that excuses everything
+would pass every test above: run without `--engine-changed` and the same two
+directories report **0 agreed, 90 differed**, each naming the fifteen entries.
+
+### Two things this opened, and closed
+
+**The purity guard did not read the manifests.** The migration moved a large
+amount of the engine's prose — summaries, documentation, the exact words of
+every refusal — out of Python and into YAML, and the whole-engine guard scanned
+only `harness/*.py`. It would have gone on reporting a clean engine while the
+one place the vocabulary now lives went unchecked. It scans `harness/verbs/*.yml`
+now. It found nothing, which is the point: the hole was in the guard, not in the
+manifests.
+
+**The purity guard fired again anyway**, for the eighteenth time and the
+eighteenth time not on logic: `verb_registry.py` said "THEY DO NOT YET DRIVE
+PARSING", and `DRIVE` is an enum value in the example project's contract. Prose.
+
+**Two import paths, two exception classes.** The engine puts `harness/` on
+`sys.path` and imports its siblings as top-level modules, so a test doing
+`from harness import verb_registry` got a *second* module object with a second
+`VerbError` — and `assertRaises` did not catch the one the engine raises. It
+read as the refusal not happening. NN-5 in miniature; the test reaches the
+module through the engine now, and says why.
+
+### §10.3's consumers: what is fed, and what is not
+
+| Consumer | State |
+|---|---|
+| Compiler | **derived** — dispatches from the registry |
+| Validator | **partly** — the unknown-key check is the manifests' own argument lists. Full type-checking is not wired: the parsers are shared mechanism called by the handlers, and moving parsing into the registry would change behaviour, which this migration was required not to do |
+| Docs page | **derived** — `docs/VERBS.md`, generated by `scripts/verb-docs.py`, and `--check` is run by a test so it cannot go stale |
+| Capability check | **declared only** — every verb names the capabilities it needs, and no board declares what it provides, so nothing is greyed out yet. The refusals enforce it today; the boards do not |
+| UI form builder | not built. The argument types are there for it |
+| AI vocabulary | not built |
+
+`docs/PROJECT.md` and `docs/PHASE-1.md` still carry their hand-written verb
+tables, now marked as overviews that are not the source of truth, pointing at
+the generated page.
+
+### Observed
+
+```
+harness/tests, every module                       878 tests   OK (3 skipped)
+scripts/compiled-snapshot.py --diff before after  90 of 90 identical
+scripts/compare-suites.py --engine-changed        90 agreed, 0 differed
+run_suite.py --tier full                          90 of 90 passed, 17m 31s
+```
+
+The three skips are the rule-pack dimension of Guard 4 and two that predate this
+work.
+
 ## Known findings
 
 Open defects, observed rather than theorised. Each names what was seen, what it costs,

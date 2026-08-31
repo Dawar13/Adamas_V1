@@ -1,0 +1,25 @@
+# expect_symbol -- PROJECT-V2 section 10.2. This file IS the verb: its arguments,
+# its refusals and their exact words, and its documentation.
+verb: expect_symbol
+class: assert
+polarity: expect
+summary: Demand that a variable holds a value
+args:
+  node:   { type: node_ref, required: true, must_be: real }
+  symbol: { type: injectable_symbol, required: true }
+  equals: { type: integer, required: true }
+  size:   { type: integer, default: 0 }
+  label:  { type: label }
+applies_to: [real]
+requires_capabilities: [symbol_read]
+emits: EXPECT_ARM
+handler: expect_symbol
+doc: |
+  Reads a global out of the emulated machine at this instant and compares it.
+  Unlike the CAN assertions this one is instantaneous: it is a statement about
+  now, not about a window, so it arms and resolves in the same breath.
+refusals:
+  - if: node_is_scripted
+    exit: 2
+    message: |-
+        node {node!r} has no firmware behind it, so it has no memory to read

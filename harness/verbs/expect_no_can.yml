@@ -1,0 +1,20 @@
+# expect_no_can -- PROJECT-V2 section 10.2. This file IS the verb: its arguments,
+# its refusals and their exact words, and its documentation.
+verb: expect_no_can
+class: assert
+polarity: forbid
+summary: Demand the absence of a frame for a whole window
+args:
+  id:      { type: message_id, required: true }
+  signals: { type: signals, doc: narrows the prohibition to matching frames }
+  for_ms:  { type: window_ms, required: true, doc: how long it must not appear }
+  label:   { type: label }
+emits: FORBID_ARM
+handler: expect_no_can
+doc: |
+  The prohibition half of the pair. It is what proves a fault did NOT fire
+  early, which is most of what a safety deadline actually asserts.
+
+  A prohibition that was never armed must never be reported as "never
+  violated", so an absent FORBID_ARM in the log fails the run.
+refusals: []

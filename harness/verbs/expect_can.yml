@@ -1,0 +1,22 @@
+# expect_can -- PROJECT-V2 section 10.2. This file IS the verb: its arguments,
+# its refusals and their exact words, and its documentation.
+verb: expect_can
+class: assert
+polarity: expect
+summary: Demand a frame, with signal values, within a deadline
+args:
+  id:        { type: message_id, required: true }
+  signals:   { type: signals, doc: the signal values the frame must carry }
+  within_ms: { type: window_ms, required: true, doc: the deadline }
+  label:     { type: label }
+emits: EXPECT_ARM
+handler: expect_can
+doc: |
+  Arms a masked matcher and runs the whole window. Nothing is compared
+  unmasked: expectations carry a (value, mask) pair from the contract's own
+  encoder, because messages carry rolling counters that change on every
+  transmission and an unmasked comparison would be intermittently wrong for
+  reasons that have nothing to do with the firmware.
+
+  An assertion armed and never resolved is a FAILURE, not a pass.
+refusals: []

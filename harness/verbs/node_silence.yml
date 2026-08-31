@@ -1,0 +1,20 @@
+# node_silence -- PROJECT-V2 section 10.2. This file IS the verb: its arguments,
+# its refusals and their exact words, and its documentation.
+verb: node_silence
+class: stimulus
+summary: Stop a node transmitting, or let it transmit again
+args:
+  node:    { type: node_ref, required: true }
+  silence: { type: boolean, required: true, doc: true to go quiet - false to resume }
+applies_to: [real, scripted]
+emits: STIM
+handler: node_silence
+doc: |
+  Works on either kind of node, which is why a scenario about a peer going
+  quiet does not have to know what that peer is made of. On a real node it
+  writes the transmit-enable global the topology binds; on a player it stops
+  the player.
+
+  A muted node and a hung node look identical to the device under test, which
+  can only see the absence of frames - see node_freeze for the other one.
+refusals: []

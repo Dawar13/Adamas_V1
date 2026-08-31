@@ -28,7 +28,8 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from harness import expand  # noqa: E402
-from harness import run_scenarios as engine  # noqa: E402
+from harness import run_scenarios as engine
+from harness import verb_registry  # noqa: E402
 from harness import project as project_paths  # noqa: E402
 
 # The PROJECT under test, resolved the way the engine resolves it, so a test
@@ -704,40 +705,51 @@ class TestTheShippedSuiteAgreesAboutTheStartingPICTURE(unittest.TestCase):
     #: Verbs that do something TO the device or the bus. Everything after the
     #: first of these is a reaction to what the test did, and two tests may
     #: legitimately differ there.
-    STIMULUS_VERBS = frozenset({
-        "write_symbol", "node_signal", "node_silence", "can_send", "flood",
-        # Halting a core and letting it run again are things done TO the
-        # device, so a claim made after either is a reaction to the test and
-        # not part of the starting picture.
-        "node_freeze", "node_resume",
-    })
+    #:
+    #: DERIVED FROM THE REGISTRY, not listed. This was two frozensets written
+    #: out by hand, and the test below existed to notice when they went stale --
+    #: which is a guard against a list, not a reason to keep one. A verb's class
+    #: is declared in its own manifest now, so `class: stimulus` puts it on this
+    #: side of the line at the moment it is written and never afterwards.
+    STIMULUS_VERBS = frozenset(
+        engine.REGISTRY.of_class(verb_registry.CLASS_STIMULUS,
+                                 verb_registry.CLASS_POWER))
 
-    #: And the verb that deliberately lets virtual time pass. A claim made after
-    #: it is a claim about a later instant, not about the starting picture, so
+    #: And the verbs that deliberately let virtual time pass. A claim made after
+    #: one is a claim about a later instant, not about the starting picture, so
     #: the window closes here too -- this is exactly what lets a moment sweep
     #: witness three different conditions without contradicting anybody.
-    TIME_VERBS = frozenset({"run_for"})
+    TIME_VERBS = frozenset(engine.REGISTRY.of_class(verb_registry.CLASS_TIME))
 
     @classmethod
     def setUpClass(cls):
         cls.plan = expand.build_plan(project_root=PROJECT_ROOT)
 
-    def test_the_verbs_named_here_are_the_engines_own(self):
-        # Derived, so a verb renamed later fails this check rather than leaving
-        # it reading a stale list and quietly widening the window it inspects.
+    def test_every_verb_falls_on_one_side_of_the_starting_picture(self):
+        """A verb this check has never heard of would sit inside the window it
+        inspects, and would widen it in silence.
+
+        The two sets above are derived from each verb's declared class, so this
+        is no longer a check that a hand-written list is current. It is the
+        check that the CLASSES still partition the vocabulary: a manifest
+        declaring a class this test does not place -- a seventh one, or an
+        existing one used for something new -- fails here rather than quietly
+        landing on the permissive side.
+        """
         known = set(engine.VERBS)
-        named = self.STIMULUS_VERBS | self.TIME_VERBS
-        self.assertTrue(named <= known, sorted(named - known))
-        # And every verb the engine has is accounted for: either it acts, or it
-        # advances time, or it is an assertion or a note. A verb this check has
-        # never heard of would sit inside the window it inspects.
-        remaining = known - named
+        acts = self.STIMULUS_VERBS | self.TIME_VERBS
+        self.assertTrue(acts <= known, sorted(acts - known))
+
+        # Everything else observes, asserts or annotates: it makes a claim
+        # about the picture rather than changing it.
+        watches = set(engine.REGISTRY.of_class(
+            verb_registry.CLASS_ASSERT, verb_registry.CLASS_OBSERVE,
+            verb_registry.CLASS_BOOK))
         self.assertEqual(
-            sorted(remaining),
-            sorted(set(engine.EXPECT_VERBS) | set(engine.FORBID_VERBS)
-                   | {"mark"}),
-            "the engine's verb list changed; decide which side of the starting "
-            "picture the new verb falls on")
+            sorted(known - acts), sorted(watches),
+            "a verb's class does not place it on either side of the starting "
+            "picture; decide which side it falls on in its manifest")
+        self.assertEqual(acts & watches, set())
 
     def starting_claims(self):
         """(id, signal) -> {value: [test, ...]} for claims made before any

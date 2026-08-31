@@ -1,0 +1,27 @@
+# write_symbol -- PROJECT-V2 section 10.2. This file IS the verb: its arguments,
+# its refusals and their exact words, and its documentation.
+verb: write_symbol
+class: stimulus
+summary: Write a value into a running node's memory
+args:
+  node:   { type: node_ref, required: true, must_be: real }
+  symbol: { type: injectable_symbol, required: true, doc: a global in that node's binary }
+  value:  { type: integer, required: true }
+  size:   { type: integer, default: 0, doc: width in bytes; 0 means the symbol's own }
+applies_to: [real]
+requires_capabilities: [symbol_injection]
+emits: STIM
+handler: write_symbol
+doc: |
+  Software-implemented fault injection: reach into the emulated machine and set
+  a variable, the way no bench harness can. This is how a scenario stages a
+  sensor reading that would need a real over-temperature to produce.
+
+  The symbol must survive the link. A global nothing reads is removed by
+  --gc-sections and the write then lands nowhere while the scenario still
+  reports PASS, which is why the build asserts every injectable is retained.
+refusals:
+  - if: node_is_scripted
+    exit: 2
+    message: |-
+        node {node!r} has no firmware behind it, so it has no memory to write into. This verb is for executed nodes only

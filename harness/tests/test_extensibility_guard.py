@@ -59,6 +59,7 @@ if str(REPO_ROOT) not in sys.path:
 from harness import expand  # noqa: E402
 from harness import run_scenarios as engine  # noqa: E402
 from harness import project as project_paths  # noqa: E402
+from harness import verb_registry  # noqa: E402
 
 # The PROJECT under test, resolved the way the engine resolves it, so a test
 # and the code it exercises can never disagree about which project they mean.
@@ -271,12 +272,16 @@ class TestANewChipIsPickedUpFromData(ExtensibilityGuard):
 
 
 class TestTheDimensionsPhase3Owes(ExtensibilityGuard):
-    """The two Guard 4 dimensions V1 cannot answer yet.
+    """The Guard 4 dimension V1 still cannot answer.
 
-    These DETECT and then skip. When the registry or the rule engine lands, the
-    check activates by itself and fails until someone writes it, because a skip
-    that goes on being quiet after its subject exists is worse than no check:
-    the suite would stay green while the property went untested.
+    It DETECTS and then skips. When the rule engine lands, the check activates
+    by itself and fails until someone writes it, because a skip that goes on
+    being quiet after its subject exists is worse than no check: the suite
+    would stay green while the property went untested.
+
+    The verb dimension used to be here and is not any more. It is answered
+    below, by TestANewVerbIsPickedUpFromAFile, which is what this skip was
+    waiting for.
     """
 
     #: Where a verb registry would be. §10.2 puts manifests in a directory of
@@ -291,25 +296,6 @@ class TestTheDimensionsPhase3Owes(ExtensibilityGuard):
                 return path
         return None
 
-    def test_a_new_verb_is_picked_up_from_a_file(self):
-        found = self._first_existing(self.VERB_HOMES)
-        if found is None:
-            # V1 keeps its vocabulary in source, which is exactly what NN-3
-            # forbids and what Phase 3 exists to fix. Pinned here so that
-            # dropping manifests in beside a still-hardcoded tuple trips this.
-            self.assertIsInstance(engine.VERBS, tuple)
-            self.skipTest(
-                "verb registry not yet built -- will be tested in Phase 3. "
-                "The engine's %d verbs are a tuple in run_scenarios.py, so "
-                "adding one is a source change today." % len(engine.VERBS)
-            )
-        self.fail(
-            "a verb registry now exists at %s, so this check must stop skipping: "
-            "write a manifest into a temp registry directory and assert the "
-            "engine's vocabulary picks it up with no source change. Guard 4 is "
-            "the reason the registry is being built (PROJECT-V2 §25.2)." % found
-        )
-
     def test_a_new_rule_pack_is_picked_up_from_a_file(self):
         found = self._first_existing(self.RULE_HOMES)
         if found is None:
@@ -323,6 +309,159 @@ class TestTheDimensionsPhase3Owes(ExtensibilityGuard):
             "it produces change with no source change." % found
         )
 
+
+class TestANewVerbIsPickedUpFromAFile(ExtensibilityGuard):
+    """A new VERB, added as a file. No source change, no rebuild.
+
+    THE DIMENSION THIS GUARD WAS WAITING FOR. Until Phase 3 the engine kept its
+    vocabulary in a tuple in `run_scenarios.py`, beside a table of allowed keys,
+    beside two tuples of polarity, beside a dictionary of handlers -- five
+    hand-maintained lists that had to agree. Adding a verb meant editing source
+    and shipping a build, which is the sentence NN-3 forbids.
+
+    The probe is a TEMPLATE-ONLY verb, and that is the whole point rather than a
+    convenience. A verb with a handler still needs a method on the compiler, so
+    for those the manifest removes four of the five edits and not the fifth.
+    Only a verb that is a manifest and nothing else makes NN-3's claim literally
+    true, so that is the case checked here.
+
+    Same before/after method as the pattern probe: the vocabulary is pinned
+    without the file, the file is added to a COPY of the registry, and the
+    difference must be exactly the one verb. A fixture that silently loaded the
+    shipped directory instead would make the probe look new when it was not.
+
+    NOTHING IS WRITTEN INSIDE THE REPOSITORY. A manifest left in harness/verbs/
+    would widen the engine's vocabulary for every later test.
+    """
+
+    #: A verb the shipped vocabulary does not have, that needs no logic: it
+    #: annotates the log, which is a substitution and nothing more.
+    PROBE = "guard4-note"
+    MANIFEST = """
+verb: guard4-note
+class: book
+summary: A probe verb that exists only inside this test
+args:
+  text:
+    type: text
+    required: true
+    doc: what to write
+bare_arg: text
+applies_to: [real, scripted]
+emits: MARK
+template: |
+  bench_mark "{text}"
+doc: |
+  Added by Guard 4 to prove a verb can arrive as a file. It compiles through
+  the same template path any verb with no logic uses.
+"""
+
+    def registry_copy(self):
+        """A copy of the shipped registry in a directory that will not survive."""
+        tmp = Path(tempfile.mkdtemp(prefix="guard4-verbs-"))
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        shutil.copytree(REPO_ROOT / "harness" / "verbs", tmp / "verbs")
+        return tmp / "verbs"
+
+    def vocabulary_of(self, directory):
+        verb_registry.forget()
+        self.addCleanup(verb_registry.forget)
+        return set(verb_registry.load(str(directory)).names)
+
+    def scenario_using_the_probe(self, directory):
+        path = directory.parent / "guard4-probe-scenario.yml"
+        path.write_text(
+            "id: guard4-probe\n"
+            "steps:\n"
+            "  - %s: a note from a verb that is only a file\n" % self.PROBE,
+            encoding="utf-8", newline="\n")
+        return path
+
+    def compile_with(self, registry_dir, scenario):
+        out = registry_dir.parent / "out"
+        return subprocess.run(
+            [sys.executable, str(REPO_ROOT / "harness" / "run_scenarios.py"),
+             str(scenario), "--dry-run", "--quiet",
+             "--verbs", str(registry_dir), "--out", str(out)],
+            cwd=str(REPO_ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            timeout=300,
+        ), out
+
+    # -- the fixture must be honest first ---------------------------------
+
+    def test_the_copied_registry_reproduces_the_shipped_vocabulary(self):
+        self.assertEqual(self.vocabulary_of(self.registry_copy()),
+                         set(engine.VERBS))
+
+    def test_the_probe_is_not_in_the_shipped_registry(self):
+        self.assertNotIn(self.PROBE, engine.VERBS)
+        self.assertFalse(
+            (REPO_ROOT / "harness" / "verbs" / (self.PROBE + ".yml")).exists())
+
+    # -- the check ---------------------------------------------------------
+
+    def test_a_new_manifest_widens_the_vocabulary_by_exactly_one_verb(self):
+        registry = self.registry_copy()
+        before = self.vocabulary_of(registry)
+        (registry / (self.PROBE + ".yml")).write_text(
+            self.MANIFEST.lstrip("\n"), encoding="utf-8", newline="\n")
+        after = self.vocabulary_of(registry)
+        self.assertEqual(after - before, {self.PROBE})
+        self.assertEqual(before - after, set())
+
+    def test_a_scenario_using_it_compiles_and_the_template_reaches_the_script(self):
+        """Located is not enough: the verb must actually compile to something.
+
+        The generated script is read and the templated line looked for, so a
+        registry that accepted the manifest and emitted nothing would fail here
+        rather than pass as "the vocabulary grew".
+        """
+        registry = self.registry_copy()
+        (registry / (self.PROBE + ".yml")).write_text(
+            self.MANIFEST.lstrip("\n"), encoding="utf-8", newline="\n")
+        scenario = self.scenario_using_the_probe(registry)
+
+        done, out = self.compile_with(registry, scenario)
+        self.assertEqual(done.returncode, engine.EXIT_DRY_RUN,
+                         done.stdout.decode("utf-8", "replace"))
+        scripts = list(out.glob("*.resc"))
+        self.assertEqual(len(scripts), 1, scripts)
+        script = scripts[0].read_text(encoding="utf-8")
+
+        # HEX, NOT THE PLAIN TEXT, and that is the check being made. A template
+        # argument is not pasted into a monitor command: it goes through the
+        # engine's own text escaping, because a monitor argument is a bare word
+        # to the emulator's parser and text that happened to contain a quote
+        # would otherwise change the command. A template path that interpolated
+        # raw would pass a looser assertion than this one.
+        note = "a note from a verb that is only a file"
+        self.assertIn('bench_mark "hex:%s"' % note.encode("utf-8").hex(), script)
+        self.assertNotIn('bench_mark "%s"' % note, script)
+
+    def test_without_the_manifest_the_same_scenario_is_refused(self):
+        """The other direction (NN-9).
+
+        Without this, "the scenario compiled" could mean the engine accepts any
+        verb at all, and the manifest would be proving nothing.
+        """
+        registry = self.registry_copy()
+        scenario = self.scenario_using_the_probe(registry)
+        done, _ = self.compile_with(registry, scenario)
+        message = done.stdout.decode("utf-8", "replace")
+        self.assertEqual(done.returncode, engine.EXIT_USAGE, message)
+        self.assertIn(self.PROBE, message)
+        self.assertIn("is not one of the verbs", message)
+
+    def test_the_engine_was_not_edited_to_make_this_work(self):
+        """NN-3 in its own words: no source change, no rebuild.
+
+        The probe verb's name appears in this test file and nowhere in the
+        engine. A migration that had quietly special-cased it would pass every
+        check above.
+        """
+        for path in sorted((REPO_ROOT / "harness").glob("*.py")):
+            self.assertNotIn(self.PROBE, path.read_text(encoding="utf-8"),
+                             "%s names the probe verb" % path.name)
 
 if __name__ == "__main__":
     unittest.main()

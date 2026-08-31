@@ -1,0 +1,22 @@
+# can_send -- PROJECT-V2 section 10.2. This file IS the verb: its arguments,
+# its refusals and their exact words, and its documentation.
+verb: can_send
+class: stimulus
+summary: Put one frame on a bus
+args:
+  node:     { type: node_ref, doc: who the frame is attributed to; defaults to the contract's sender }
+  id:       { type: message_id, required: true }
+  signals:  { type: signals, doc: encoded through the contract }
+  data_hex: { type: hex_bytes, doc: a raw payload instead of signals }
+applies_to: [real, scripted]
+emits: INJ
+handler: can_send
+doc: |
+  Injects a frame as though a node had transmitted it. Either give signals, and
+  the contract encodes them, or give data_hex and take responsibility for the
+  bytes.
+
+  The sender matters because the judge never measures a reaction against a
+  frame the harness injected: measuring against our own injection would be
+  measuring the tool's echo.
+refusals: []

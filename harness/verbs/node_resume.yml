@@ -1,0 +1,28 @@
+# node_resume -- PROJECT-V2 section 10.2. This file IS the verb: its arguments,
+# its refusals and their exact words, and its documentation.
+verb: node_resume
+class: stimulus
+summary: Let a frozen core execute again
+args:
+  node: { type: node_ref, required: true, must_be: real }
+applies_to: [real]
+requires_capabilities: [core_halt]
+emits: STIM
+handler: node_resume
+doc: |
+  The other half of node_freeze. Both halves refuse the same things for the
+  same reasons: a pair of verbs where only one half refuses is a hole with a
+  symmetric name.
+refusals:
+  - if: board_names_no_core
+    exit: 2
+    message: |-
+        board {board!r} does not name the core, so there is nothing to halt.
+          Add   cpu_peripheral: <name>   to that board in {boards_file}.
+          The engine must not guess what a core is called on a customer's part: a guess that resolved to nothing would halt nothing, and the scenario would still report PASS.
+  - if: node_is_scripted
+    exit: 2
+    message: |-
+        node {node!r} is a frame player, and {verb!r} halts a core that is executing firmware. There is no core behind a player to halt.
+          To take this node off the bus, use   node_silence: {{ node: {node}, silence: true }}   which works on either kind of node.
+          To model a hung ECU here, give the node firmware (type: real) in the topology file. No scenario changes.

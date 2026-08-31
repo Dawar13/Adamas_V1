@@ -1,0 +1,22 @@
+# flood -- PROJECT-V2 section 10.2. This file IS the verb: its arguments,
+# its refusals and their exact words, and its documentation.
+verb: flood
+class: stimulus
+summary: Put many frames on a bus in one tick, to load it or exhaust buffers
+args:
+  node:     { type: node_ref, doc: who the frames are attributed to }
+  id:       { type: message_id, required: true }
+  count:    { type: integer, required: true, doc: how many frames }
+  data_hex: { type: hex_bytes }
+  signals:  { type: signals }
+applies_to: [real, scripted]
+emits: INJ
+handler: flood
+doc: |
+  The bus-saturation stimulus: critical traffic must survive a flooded bus, and
+  this is what floods it. Count is the number of frames delivered in one go.
+refusals:
+  - if: count_not_positive
+    exit: 2
+    message: |-
+        count must be positive, got {count}

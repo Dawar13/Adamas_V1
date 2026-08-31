@@ -106,6 +106,10 @@ SCRIPT_SUFFIX = ".resc"
 SHIM_NAME = "snapshot_shim.py"
 PROVENANCE_INPUTS = ("provenance", "inputs_sha256")
 
+#: What counts as an ENGINE file for --engine-changed. Provenance records these
+#: as repository-relative paths, so the prefix is the whole test.
+ENGINE_PREFIX = "harness/"
+
 EXIT_EQUIVALENT = 0
 EXIT_DIFFERENT = 1
 EXIT_CANNOT_COMPARE = 2
@@ -225,6 +229,7 @@ class Comparison:
         self.script = {}
         self.same_script = False
         self.shim = (False, False)
+        self.engine_entries = ({}, {})
 
     def say(self, line=""):
         self.report.append(line)
@@ -233,7 +238,51 @@ class Comparison:
         return "\n".join(self.report)
 
 
-def compare(a_dir, b_dir, label_a="A", label_b="B") -> Comparison:
+def take_engine_entries(results: dict, label: str) -> dict:
+    """Remove the engine's own provenance entries, and return them.
+
+    ONLY FOR --engine-changed, and only ever for comparing a run made by one
+    engine with a run made by another. Every other use of this module compares
+    two runs of ONE engine, where these entries must match and do.
+
+    This is a deliberately narrow hole in the safety bar, so it is cut narrowly
+    and reported loudly rather than left implicit. What it excuses:
+
+        harness/*            the compiler, the toolkit, the loaders, and the
+                             verb manifests -- the files whose hashes MUST move
+                             when the engine changes, because provenance that
+                             did not notice would be describing a run made by
+                             an engine that no longer exists
+
+    What it does NOT excuse, and what a caller passing this flag is still held
+    to: the firmware, the scenario, the topology, the contract, the board file
+    and every platform file. If one of those moved, the two runs are not about
+    the same system and no amount of "the engine changed" explains it.
+
+    Removed from a COPY: nothing here rewrites what the engine wrote.
+    """
+    node = results
+    for key in PROVENANCE_INPUTS:
+        node = node.get(key) if isinstance(node, dict) else None
+        if node is None:
+            raise CannotCompare(
+                "%s: results.json has no %s" % (label, ".".join(PROVENANCE_INPUTS)))
+    taken = {}
+    for key in [k for k in node if str(k).startswith(ENGINE_PREFIX)]:
+        taken[key] = node.pop(key)
+    if not taken:
+        raise CannotCompare(
+            "%s: no provenance entry begins with %r, so there is nothing this "
+            "flag could be excusing. Either the run predates the engine being "
+            "hashed at all, or this is not a run this tool understands -- and "
+            "excusing nothing while claiming to excuse the engine would be the "
+            "narrower comparison reading as a clean one."
+            % (label, ENGINE_PREFIX))
+    return taken
+
+
+def compare(a_dir, b_dir, label_a="A", label_b="B",
+            engine_changed=False) -> Comparison:
     """The one definition of "these two runs produced the same answer".
 
     Raises CannotCompare rather than returning a verdict about inputs it could
@@ -244,8 +293,11 @@ def compare(a_dir, b_dir, label_a="A", label_b="B") -> Comparison:
     b = load_run(Path(b_dir), label_b)
     a_key, a_hash, a_shim = take_script_entry(a["results"], label_a)
     b_key, b_hash, b_shim = take_script_entry(b["results"], label_b)
+    a_engine = take_engine_entries(a["results"], label_a) if engine_changed else {}
+    b_engine = take_engine_entries(b["results"], label_b) if engine_changed else {}
 
     out = Comparison()
+    out.engine_entries = (a_engine, b_engine)
     out.event_bytes = (len(a["events"]), len(b["events"]))
     out.script = {label_a: (a_key, a_hash), label_b: (b_key, b_hash)}
     out.same_script = (a_hash == b_hash and a_key == b_key)
@@ -277,7 +329,23 @@ def compare(a_dir, b_dir, label_a="A", label_b="B") -> Comparison:
         if len(diffs) > 20:
             out.say("             ... and %d more" % (len(diffs) - 20))
 
-    # 3. The difference that must be there.
+    # 3. The engine, when the caller said it changed. Reported, always: a hole
+    #    in the safety bar that is not printed is a hole nobody knows is open.
+    if engine_changed:
+        moved = sorted(k for k in set(a_engine) | set(b_engine)
+                       if a_engine.get(k) != b_engine.get(k))
+        out.say("  excused  %d engine entries in provenance, %d of them moved"
+                % (len(set(a_engine) | set(b_engine)), len(moved)))
+        for key in moved[:12]:
+            out.say("             %s" % key)
+        if len(moved) > 12:
+            out.say("             ... and %d more" % (len(moved) - 12))
+        out.say("           Nothing else is excused: the firmware, the scenario,")
+        out.say("           the contract, the board file and every platform file")
+        out.say("           are still compared exactly, and differ above if they")
+        out.say("           moved.")
+
+    # 4. The difference that must be there.
     if a_shim != b_shim:
         which = label_b if b_shim else label_a
         out.say("  expected only %s records the snapshot shim in its provenance,"
@@ -309,10 +377,18 @@ def main(argv=None) -> int:
     parser.add_argument("--b", required=True, help="the second run directory")
     parser.add_argument("--label-a", default="A")
     parser.add_argument("--label-b", default="B")
+    parser.add_argument(
+        "--engine-changed", action="store_true",
+        help="compare a run made by ONE engine with a run made by ANOTHER: "
+             "excuse the harness/ entries in provenance, which must move when "
+             "the engine changes, and report exactly which ones did. Nothing "
+             "else is excused -- the firmware, the scenario, the contract, the "
+             "board file and the platform files are still compared exactly")
     args = parser.parse_args(argv)
 
     try:
-        result = compare(args.a, args.b, args.label_a, args.label_b)
+        result = compare(args.a, args.b, args.label_a, args.label_b,
+                         engine_changed=args.engine_changed)
     except CannotCompare as exc:
         print("\nCANNOT COMPARE: %s\n" % exc, file=sys.stderr)
         return EXIT_CANNOT_COMPARE

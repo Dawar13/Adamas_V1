@@ -1,0 +1,41 @@
+# node_signal -- PROJECT-V2 section 10.2. This file IS the verb: its arguments,
+# its refusals and their exact words, and its documentation.
+verb: node_signal
+class: stimulus
+summary: Make a node say a particular signal value
+args:
+  node:    { type: node_ref, required: true }
+  id:      { type: message_id, required: true }
+  signals: { type: signals, required: true }
+applies_to: [real, scripted]
+emits: STIM
+handler: node_signal
+doc: |
+  THE VERB THAT MAKES PROMOTION A ZERO-EDIT CHANGE. A scenario never says which
+  kind of node it is talking to. Against a node executing firmware this writes
+  the globals behind those signals; against a frame player it repaints the
+  payload the player is already sending, so the schedule does not shift when a
+  scenario changes what a node says.
+
+  Giving a real node its bindings is a topology edit, not a scenario edit -
+  which is the whole point: promoting a scripted node to a real one changes no
+  scenario at all.
+refusals:
+  - if: no_signal_symbols
+    exit: 2
+    message: |-
+        node {node!r} is executed as firmware, so this verb writes the globals behind those signals, and the topology binds none.
+          Add   signal_symbols: {{ <signal>: <symbol>, ... }}   to that node in the topology file.
+          Nothing in the scenario changes.
+  - if: node_does_not_emit
+    exit: 2
+    message: |-
+        node {node!r} does not emit 0x{message_id:X}, so there is no payload to change
+  - if: signal_not_bound
+    exit: 2
+    message: |-
+        node {node!r} binds no symbol for signal {signal!r}. Bound signals: {bound}
+  - if: signals_missing
+    exit: 2
+    message: |-
+        needs 'signals' with at least one entry
