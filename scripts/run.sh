@@ -16,6 +16,9 @@
 #     2  the inputs are unusable, so nothing ran
 #     3  refused: definable, but no execution path exists. No verdict is
 #        produced for something that cannot be executed.
+#     6  --cache-audit found that a stored answer was not what a fresh run
+#        produced. A statement about the cache, not about the firmware, so it
+#        carries no verdict either way.
 set -u
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -36,6 +39,9 @@ usage() {
 	    --project DIR which project to read (default: \$BENCH_PROJECT, else
 	                  projects/demo-ev)
 	    --dry-run     compile and write the emulator script; run nothing
+	    --cache       serve a stored result when nothing that could change the
+	                  answer changed. Nothing executes on a hit
+	    --cache-audit run for real AND require the stored answer to match it
 	    --out DIR     where this run's files are written
 	    --quiet       no human report; results are still written
 

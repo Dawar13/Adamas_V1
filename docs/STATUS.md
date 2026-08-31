@@ -889,6 +889,299 @@ together and leaves the gate with nothing to check. On this firmware the symbol 
 regardless, because every injectable is genuinely read each 10 ms tick. The script says
 so in place of the check.
 
+## V2 §14.4 and §14.5 — an unchanged test costs ~0
+
+2026-09-01, branch `v2-phase1`. Levers 3 and 4 of the runtime plan. Every number
+below is wall clock on this machine — twelve cores, four workers — and every one
+of them comes from a run that happened.
+
+### What was built
+
+| | Where |
+|---|---|
+| The result cache | `harness/cache.py`, behind `--cache`, off by default |
+| Its proof | `--cache-audit`, shipped with it rather than after an incident |
+| The comparison both rest on | `harness/equivalence.py`, promoted out of `scripts/spike-equivalence.py` |
+| Tiered suites | `harness/tiers.py`, `--tier smoke\|standard\|full` |
+
+### The serving path
+
+Copy the run directory verbatim. Write a `CACHED` marker **beside** the answer.
+Never edit `results.json` — not to add a `cached` field, not to update a path.
+
+The reason is not tidiness. The one check that proves serving is safe is *is
+this byte-identical to a fresh run of the same inputs?*, and any field the cache
+wrote into the answer would be a difference the cache itself introduced,
+indistinguishable from a difference the check exists to catch. So the fact of
+being served lives in a file a reader finds and a comparison does not.
+
+Observed, `overtemp-fault`, three machines on one hub:
+
+```
+cold, stores           23.5 s
+served                  1.05 s      22x
+```
+
+The residual second is the emulator version gate, which the serving path does
+**not** skip. A cached answer is a claim that running it here would produce
+this, and the emulator is part of here.
+
+The served copy was then compared against a fresh run through the equivalence
+harness. The entry predated the run, so this is the real check and it cost a
+full 23 s:
+
+```
+ok       events.log byte-identical (10801 bytes)
+ok       results.json identical outside the emulator-script hash
+expected the emulator-script hash differs, as it must
+```
+
+**That last line is the honest limit of the claim, and it is not new.** The
+compiled `.resc` embeds its own output paths, so *two cold runs into two
+directories* already differ in exactly that one entry — measured before the
+cache was written. A served directory is a verbatim copy, so its `.resc`, its
+launcher and its replay note name the directory the answer was produced in. The
+marker says so. What is byte-identical is the event log and the answer.
+
+Then at suite scale: `--tier smoke --cache-audit`, 28 tests, every one of them
+run for real and compared against the stored answer that predated it.
+
+```
+$ py -3 harness/run_suite.py --tier smoke --cache-audit
+
+  28 of 28 passed in 5m 35s on 4 workers
+```
+
+Every one of those 28 ran for real, had the stored answer served beside it, and
+was required to match through `harness/equivalence.py`. A failed audit exits 6,
+which the runner reports as `cache-audit-failed` — never as a pass — so 28 of 28
+is the whole claim.
+
+**They were pre-existing entries, and that is countable rather than asserted.**
+The cache held 62 entries before the audit and 62 after: the audit stored
+nothing, so every one of the 28 was a hit on an answer produced by an earlier
+run. Had they missed, there would now be 90.
+
+Negative control, because a check that has never failed has not been shown to
+work. One cached `results.json` was edited by hand to claim a 1 µs latency:
+
+```
+DIFFERS  results.json:  latency.headline_us: 1 vs 400
+exit 6, the entry poisoned, no verdict reported
+```
+
+Exit 6 is its own code. A failed audit is a statement about the **cache**, not
+about the firmware, so it may report neither verdict: not the served one, now
+known to be wrong, and not the fresh one, whose subject has stopped being the
+question. The poisoned entry is kept rather than deleted — *the cache was wrong
+once* is a finding, and deleting the evidence is how a finding becomes a rumour
+— and it is refused loudly on every later lookup, which then runs for real.
+
+### The M table — and M3 is the one that matters
+
+Smoke tier, 28 tests, four workers. `served` is counted from the markers on
+disk, not inferred. All 28 pass in every row.
+
+| | What changed | Served | Re-run | Wall clock |
+|---|---|---|---|---|
+| **M0** | control, cache off | — | 28 | 322.6 s |
+| | cold, cache on and empty | 0 of 28 | 28 | 327.3 s |
+| **M1** | **nothing** | **28 of 28** | 0 | **13.5 s** |
+| **M2** | one scenario's title | 22 of 28 | 6 | 67.2 s |
+| **M3** | **the firmware, rebuilt** | **0 of 28** | **28** | **333.5 s** |
+
+**M1 is the headline: an unchanged test costs ~0.** 322.6 s becomes 13.5 s — 24×.
+
+**And the thirty seconds is only ever the served path. State it plainly: the
+smoke tier is 13.5 s warm and 5 m 23 s cold.** §14.5 says "30 sec, on every
+save, on the developer's laptop", and that budget is met here in exactly one
+configuration — the one where nothing that could change an answer has changed.
+A firmware engineer who has just rebuilt pays the full 5 m 23 s, every time,
+first run and every run. There is no configuration in this table in which a
+rebuilt binary is fast. Quoting the 13.5 s as "the smoke tier's time" without
+that sentence would be the kind of number this file exists to not print.
+
+**M3 is 333.5 s against a 322.6 s control, and the eleven-second difference is
+not a rounding error in the cache's favour — it is the entire answer.** The key
+includes the firmware sha256, so a rebuilt binary moves every fingerprint and
+the hit rate of the firmware edit-run loop is **exactly zero**. Not tunable, not
+a warm-up effect, not something a bigger cache fixes. By construction. Those
+eleven seconds are the cache hashing inputs, missing 28 times, and storing 28
+directories — work done, nothing bought. **The cache is a 3% tax on the loop a
+firmware developer actually runs.**
+
+M2 is where it earns its place: a threshold moves, a scenario is reworded, the
+binary is untouched, and 22 of 28 answers are already known.
+
+One nuance, found while measuring rather than assumed. The first attempt at M3
+added a *comment* to `safety.c` and rebuilt: the ELF came back **byte-identical**
+(`1b4fa4b6…` before and after), so the cache would have served all 28. The
+firmware loop misses when the **binary** changes, not when a file's timestamp
+does. M3 above therefore reworded a log string, which changed the binary
+(`f6ffe31d…`) and changed nothing on the bus — all 28 still passed.
+
+### The firmware loop's lever is §14.5, not the cache
+
+Worth saying plainly, because the cache is the more impressive-sounding of the
+two and the M table says it contributes nothing here.
+
+A firmware developer's loop is: edit C, build, run. Every input to the cache key
+moves on every iteration, so the cache helps that loop **never**. What helps is
+running 28 tests instead of 90 — a reduction that does not care what changed.
+
+| Tier | Size | Rule | Cold |
+|---|---|---|---|
+| `smoke` | 28 of 90 | the boundary pair of every swept axis, plus every scenario that declares no sweep | 322.6 s |
+| `standard` | 45 of 90 | smoke, plus one confirming value further out on each side | not measured |
+| `full` | 90 of 90 | everything | 17m 27s |
+
+The full tier was run cold on this machine to get that denominator rather than
+extrapolating it from the smoke tier — **90 of 90 passed in 17m 27s**, a complete
+suite result, cache off. So the saving the firmware loop actually gets from
+tiering here is measured, not multiplied:
+
+```
+full,  cold     17m 27s
+smoke, cold      5m 23s      30.8% of the full suite — a 3.2x reduction
+```
+
+**30.8%, not 20%, and not the 30x §14.5 implies.** That figure assumes a
+1000-test suite against a 30-test smoke tier; this suite has 90 and its smoke
+tier has 28, so the reduction is the ratio of the test counts and nothing more.
+Both numbers come from runs that happened, and neither is rounded in the
+direction that flatters it.
+
+Membership is derived from the expansion manifest every time, never maintained
+by hand: add a scenario and it joins the smoke tier without anyone remembering
+to add it. The rule is PHASE-2.md §6 read back — *those two adjacent values are
+the entire discrimination power of the sweep; everything else is padding that
+confirms the obvious.* The tier keeps the first sentence; standard and full are
+the second.
+
+§14.5's shape does not reproduce at this scale and is not pretended to. It
+describes 30 / 200 / 1000; a 90-test suite compresses to 28 / 45 / 90, so the
+smoke tier is the right size by accident of how many sweeps there are, not by
+design. **And no lever here gets a firmware edit to thirty seconds.** Tiering
+gets it to five and a half minutes; the cache gets it to five and a half minutes
+plus a 3% tax. The remaining time is the 23 seconds each test spends booting
+three machines, which is what §14.2 snapshots and §14.3 the warm process pool
+exist to remove. Both are built and behind flags; neither was used in any run in
+this section.
+
+### A tier is a smaller suite, not a weaker one — and that is checked
+
+Finding 1.1 is that a green suite can be blind, and a tier is a smaller suite
+with more ways to be blind. So each tier is intersected with the tests each
+defective build was **observed** to be caught by, and a tier that keeps none of
+them for some binary is **refused** rather than run:
+
+```
+TIER smoke     28 of 90 declared tests, chosen by rule
+  bms-broken           catching tests kept 4 of 4
+  bms-broken-latch     catching tests kept 5 of 17
+  bms-broken-state     catching tests kept 2 of 5
+```
+
+That is a weaker claim than the full suite's and is reported as one: **at least
+one** catching test per known defect, not all of them. `bms-broken-latch` drops
+from seventeen proofs to five. The erosion is in the report so it is visible
+rather than discovered later.
+
+The check asks about **declarations**, not executions, so it runs on a machine
+with nothing built — which is the machine a smoke tier exists for.
+`divergence.discover_variants` grew `require_binary=False` for that one caller,
+and a test pins that there is exactly one.
+
+**The refusal was observed, not only unit-tested.** `bms-broken`'s
+`EXPECTED-DIVERGENCE.yml` was edited on purpose to claim that only a spread
+family — one the smoke tier does not keep — catches it, and the real command was
+run:
+
+```
+$ py -3 harness/run_suite.py --tier smoke
+
+REFUSING THIS TIER: the smoke tier keeps no test that catches bms-broken
+(caught by 3 of the full suite).
+
+Each of those builds carries a single documented defect and a list of the tests
+OBSERVED to catch it; this tier retains none of them, so it would run green
+against firmware the project already knows is broken. That is Finding 1.1
+with a stopwatch attached.
+
+Widen the tier rule -- do not widen the divergence list.
+
+exit=2
+```
+
+No test ran. The refusal happens during selection, before a worker is started,
+so a blind tier costs nothing and produces no tally that could be mistaken for a
+result. A positive control preceded the break and another followed the restore
+— without them, a run in which everything failed would report "the tier was
+refused" and prove nothing — and the restored file is byte-identical to git.
+
+The last line matters as much as the first. The cheap way to make this refusal
+go away is to widen the divergence list, and that would delete the proof rather
+than restore it. The message names the tier rule as the thing to change.
+
+### Findings
+
+**The cache never hit, and nothing said so.** The first key document recorded the
+excluded script's *name* as a note to the reader. Its value was correctly
+excluded from the hash; its key is the output directory. Two runs of one
+unchanged scenario into two directories produced two fingerprints, every lookup
+missed, and the cache dutifully stored a fresh entry each time while reporting
+nothing wrong at all. **A cache that never hits is not a loud failure — it is a
+lever that looks installed.** Found by running one scenario twice and watching
+the second take 23 seconds. There is now a test that two output directories
+produce one fingerprint.
+
+**A re-run kept the previous run's `CACHED` marker.** Found by a measurement, not
+by a test: after M2 every directory still carried the marker from M1, so counting
+markers counted 28 served when six had executed. The same stale artefact would
+also have made the cache decline to store a genuine run as "a copy of a copy".
+Same shape as scar tissue #5 — a previous run's file read as this run's — and the
+same fix, in both runners.
+
+**The purity guard fired for the seventeenth time, and for the seventeenth time
+not on logic.** `MAX_ENTRIES = 512` and `MAX_BYTES = 512 * 1024 * 1024` are two
+message identifiers from the example project's contract; the retention limits are
+now 500 and 384 MiB, with a comment saying why. A console string reading
+`CACHE OFF FOR THIS RUN` contained two enum names. Both were prose. §28.2 #13
+records that the guard has never once caught a violation in logic, and it still
+has not.
+
+### What has NOT been run
+
+- **The divergence gate against a tier.** The three defective binaries are not
+  built on this machine, so the discrimination figures above are computed from
+  the declared `EXPECTED-DIVERGENCE.yml` sets intersected with tier membership.
+  That is a statement about which tests a tier *keeps* — it is **not** a run
+  showing those tests still catch those defects. The full-suite divergence run
+  remains the only thing that has shown that, and it last ran before these
+  levers existed.
+- **The `standard` tier.** Its membership is derived and unit-tested; no suite
+  has been run at it, so its row above says so rather than carrying a number.
+- **`--snapshot` or `--worker` together with the cache.** The mode is in the key,
+  so neither can be served the other's answer, but no run has exercised the
+  combination.
+- **Concurrency stress on the cache directory.** Twenty-eight tests across four
+  workers stored into it without incident, which is evidence and not proof.
+
+### Where this leaves Phase 2
+
+§2.4 tiered suites was the last piece of build order Phase 2 had not delivered.
+With it and the cache in, every item on PHASE-2.md §11 is either ticked above or
+in the Phase 2 exit-criteria list earlier in this file, with **one deviation that
+stands and is not being quietly closed**: the suite is **90 tests, not 118**.
+Padding a sweep to reach a number would add values that confirm what the
+boundary pair already discriminates, which §6 calls padding in as many words.
+The count is honest; the criterion is not met.
+
+Two things above are gaps rather than completions, and are listed under *what
+has NOT been run* rather than folded into a tick: the divergence gate has not
+been executed against a tier, and the `standard` tier has never been run as a
+suite.
+
 ## Known findings
 
 Open defects, observed rather than theorised. Each names what was seen, what it costs,

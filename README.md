@@ -17,7 +17,18 @@ rig. SIL catches logic and integration bugs before they burn a slot in the HIL q
 ./scripts/boot-check.sh   # build the BMS firmware and boot it in Renode
 
 ./scripts/run.sh projects/demo-ev/scenarios/heartbeat-loss.yml   # one scenario, one verdict
+
+py -3 harness/run_suite.py --tier smoke     # the fast tier: the boundary of every
+                                            # sweep, plus every unswept scenario
+py -3 harness/run_suite.py --tier smoke --cache        # serve what cannot have changed
+py -3 harness/run_suite.py --tier smoke --cache-audit  # and prove every served answer
 ```
+
+`--tier` and `--cache` are two different savings and they help in different
+places. The cache serves a stored result when nothing that could change the
+answer changed, so it is worth having when a threshold or a scenario moved. It
+is keyed on the firmware's sha256, so it is worth nothing at all in a loop that
+rebuilds the firmware — that loop's saving is `--tier`.
 
 `boot-check.sh` exits 0 when real firmware boots on an emulated STM32H743 and prints its banner over
 an emulated UART. That is the Phase 0 proof everything else stands on.
@@ -28,7 +39,8 @@ The **engine** is `harness/`, the **tooling** is `scripts/`, and the **studio** 
 them holds project data.
 
 A **project** is a directory of one customer's answers — `network.yml`, `catalog.yml`, `boards.yml`,
-`patterns/`, `scenarios/`, `platforms/`, `firmware/` and its stored `runs/`. This repository ships
+`patterns/`, `scenarios/`, `platforms/`, `firmware/`, its stored `runs/` and a
+disposable `cache/`. This repository ships
 one worked example, `projects/demo-ev/`, and everything defaults to it. Point the tools at another
 with `--project <dir>` or by exporting `BENCH_PROJECT`.
 

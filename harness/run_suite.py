@@ -467,7 +467,10 @@ def main(argv=None) -> int:
         findings = ()
         if args.tier != tiers.TIER_FULL:
             root = project.project_root()
-            net = topology.load(project.network_path())
+            # --topology if one was given: a divergence run points the suite at
+            # a repointed copy, and reading the default here would check the
+            # tier against a different system than the one about to run.
+            net = topology.load(project.network_path(args.topology))
             dut = net.dut()
             if not dut.elf:
                 raise SuiteError(
