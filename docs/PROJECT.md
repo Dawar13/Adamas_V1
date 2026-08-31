@@ -336,9 +336,9 @@ enums:
 
 The loader must **warn loudly on stderr** for any enum table not referenced by a signal of the same name.
 
-Every CAN company already has this as a **DBC file** — the automotive standard read by SavvyCAN, PCAN, canutils. Import theirs; generate `dbc/system.dbc` from `catalog.yml` so report decoding and their tools cannot drift.
+Every CAN company already has this as a **DBC file** — the automotive standard read by SavvyCAN, PCAN, canutils. Import theirs; generate the project's `dbc/system.dbc` from `catalog.yml` so report decoding and their tools cannot drift.
 
-### `scenarios/*.yml` — the thirteen verbs
+### `<project>/scenarios/*.yml` — the thirteen verbs
 
 The entire authoring surface. A user must never need to know Renode, Robot Framework, or Python.
 
@@ -438,7 +438,7 @@ Scenarios are independent — each boots fresh firmware, runs, writes a verdict,
 |---|---|---|---|
 | `network.yml` | the canvas | the compiler | which nodes, real or scripted, which board |
 | `catalog.yml` | DBC import | the compiler | what CAN messages mean |
-| `scenarios/*.yml` | test picker / human / AI | the compiler | what to do, what to expect |
+| `<project>/scenarios/*.yml` | test picker / human / AI | the compiler | what to do, what to expect |
 | `*.repl` | once, per board | **Renode** | what chip to simulate |
 | `firmware.elf` | their compiler or ours | **Renode** | machine code + symbol table |
 | Renode script | the compiler, per run | **Renode** | `mach create`, `LoadELF`, `Connect`, `start` |

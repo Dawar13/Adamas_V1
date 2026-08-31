@@ -8,7 +8,7 @@
 | Spec said | Reality | Action |
 |---|---|---|
 | Start from Renode's `nucleo_h743zi.repl` | Renode 1.16.1 ships none | Built as a `using` composition of `cpus/stm32h743.repl` + `boards/nucleo_h753zi.repl`. Keep the inheritance so Renode upgrades surface as a diff |
-| CAN peripheral is `can0` | It is `fdcan1` on STM32H7, `flexcan0` on S32K | Resolve the peripheral name **per board**, from `harness/boards.yml`. Never hardcode it |
+| CAN peripheral is `can0` | It is `fdcan1` on STM32H7, `flexcan0` on S32K | Resolve the peripheral name **per board**, from `<project>/boards.yml`. Never hardcode it |
 | `volatile` keeps symbols in the ELF | `--gc-sections` drops them at link time regardless | Symbol retention is a permanent invariant. See §0 |
 | — | Board DTS sets CAN `bus-speed = <125000>`; `network.yml` wants 500000 | Devicetree overlay per firmware, with a build-time consistency check |
 | — | Rootless toolchain under `$HOME` in WSL2; Ubuntu 24.04 has no `pip`/`ensurepip` | `setup.sh` bootstraps a venv via `get-pip.py`. **Every script must use the venv Python, never bare `python3`** |
@@ -32,7 +32,7 @@ Point 3 generalises to customer firmware and must never be softened.
 ## What Phase 1 delivers
 
 ```bash
-$ ./scripts/run.sh scenarios/overtemp-fault.yml
+$ ./scripts/run.sh projects/demo-ev/scenarios/overtemp-fault.yml
 
   booting 3 machines on canHub ............ ok
   running overtemp-fault ..................
@@ -80,7 +80,7 @@ Choose in this order:
 
 Record the decision and the evidence in `docs/STATUS.md`. **Do not discard a working target speculatively.** If S32K bring-up stalls, fall back and note why.
 
-`harness/boards.yml` holds the per-board detail:
+`<project>/boards.yml` holds the per-board detail:
 
 ```yaml
 bms_s32k:
@@ -135,7 +135,7 @@ Model a real EV two-wheeler powertrain — roughly 16 messages, 38 signals, 8 en
 
 ### `harness/gen_dbc.py`
 
-Generates `dbc/system.dbc` from `catalog.yml`. Byte-aligned subset only; **list unsupported constructs explicitly** rather than dropping them silently. Report decoding and the DBC share a source, so they cannot drift.
+Generates the project's `dbc/system.dbc` from its `catalog.yml`. Byte-aligned subset only; **list unsupported constructs explicitly** rather than dropping them silently. Report decoding and the DBC share a source, so they cannot drift.
 
 ---
 
@@ -284,7 +284,7 @@ Headline latency is the gap from the last stimulus to the matching assertion. **
 
 ### Step exit
 
-`./scripts/run.sh scenarios/overtemp-fault.yml` produces a real PASS with a measured latency. **Run it twice — the latency must be identical to the microsecond.**
+`./scripts/run.sh projects/demo-ev/scenarios/overtemp-fault.yml` produces a real PASS with a measured latency. **Run it twice — the latency must be identical to the microsecond.**
 
 ---
 

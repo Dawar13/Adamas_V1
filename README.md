@@ -15,10 +15,22 @@ rig. SIL catches logic and integration bugs before they burn a slot in the HIL q
 ```bash
 ./scripts/setup.sh        # install and verify the pinned toolchain
 ./scripts/boot-check.sh   # build the BMS firmware and boot it in Renode
+
+./scripts/run.sh projects/demo-ev/scenarios/heartbeat-loss.yml   # one scenario, one verdict
 ```
 
 `boot-check.sh` exits 0 when real firmware boots on an emulated STM32H743 and prints its banner over
 an emulated UART. That is the Phase 0 proof everything else stands on.
+
+## Where things live
+
+The **engine** is `harness/`, the **tooling** is `scripts/`, and the **studio** is `app/`. None of
+them holds project data.
+
+A **project** is a directory of one customer's answers — `network.yml`, `catalog.yml`, `boards.yml`,
+`patterns/`, `scenarios/`, `platforms/`, `firmware/` and its stored `runs/`. This repository ships
+one worked example, `projects/demo-ev/`, and everything defaults to it. Point the tools at another
+with `--project <dir>` or by exporting `BENCH_PROJECT`.
 
 See [docs/STATUS.md](docs/STATUS.md) for what is actually built and verified today,
 [docs/PROJECT.md](docs/PROJECT.md) for the full specification, and
