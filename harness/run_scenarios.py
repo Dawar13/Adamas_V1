@@ -196,6 +196,68 @@ def _test_console(name: str) -> str:
     return "%s-test.%s" % (stem, suffix) if stem else "%s-test" % name
 
 
+#: The engine's own files that shape what a run does. Hashed into every run's
+#: provenance, because a compiler change alters the answer while every project
+#: file stays byte for byte the same -- and provenance that did not notice
+#: would be describing a run that no longer exists (NN-4).
+ENGINE_FILES = (
+    "run_scenarios.py",
+    "network.py",
+    "catalog.py",
+    "yaml_strict.py",
+    "can_toolkit.py",
+)
+
+#: `using "..."` in a platform file pulls in another one. Matched loosely on
+#: purpose: a quote and a path is the whole of the syntax we depend on, and a
+#: stricter pattern that missed a form would silently stop hashing an input.
+_REPL_USING = re.compile(r'^\s*using\s+"([^"]+)"', re.M)
+
+
+def platform_chain(repl: Path, project_root: Path, seen=None) -> list:
+    """A platform file and every project file it inherits, in a fixed order.
+
+    THIS WAS A HOLE IN PROVENANCE, not a cache detail. The board file names a
+    platform file and nothing hashed its CONTENTS, so editing that file -- or
+    the one it inherits -- produced a different machine with identical recorded
+    inputs. A run could not be told apart from one made against different
+    silicon.
+
+    (The first draft of this docstring named a board from the example project,
+    and the purity guard caught it. Fifteen times before, that guard has fired
+    on a comment rather than on logic; this is sixteen.)
+
+    Files that resolve inside the project are hashed. A `using` that resolves
+    to the emulator's own library is NOT ours to hash: it belongs to the
+    emulator, whose version is recorded separately and pinned. It is listed
+    anyway, marked, so a reader sees the dependency exists rather than assuming
+    the chain ended.
+    """
+    if seen is None:
+        seen = []
+    repl = Path(repl)
+    resolved = repl.resolve()
+    if resolved in [item[1] for item in seen if item[1] is not None]:
+        return seen
+    seen.append((_repo_relative(resolved), resolved))
+
+    try:
+        text = resolved.read_text(encoding="utf-8")
+    except OSError:
+        return seen
+
+    for reference in _REPL_USING.findall(text):
+        for candidate in (resolved.parent / reference, project_root / reference):
+            if candidate.is_file():
+                platform_chain(candidate, project_root, seen)
+                break
+        else:
+            marker = "emulator-library:%s" % reference
+            if marker not in [item[0] for item in seen]:
+                seen.append((marker, None))
+    return seen
+
+
 def _repo_relative(path) -> str:
     """A path as the repository sees it, so the results file is machine-neutral."""
     resolved = Path(path).resolve()
@@ -2674,6 +2736,35 @@ def main(argv=None):
         elf = (project_root / str(node.elf)).resolve()
         key = "firmware:%s" % node.id
         inputs[key] = _sha256(elf) if elf.is_file() else "MISSING:%s" % node.elf
+
+    # THE PLATFORM FILES. boards.yml names them; until now nothing hashed what
+    # was in them, so an edited .repl gave a different machine and identical
+    # provenance. Each machine's chain is followed, in machine order, so the
+    # ordering is a property of the topology rather than of a filesystem walk.
+    for entry in compiled.machines:
+        repl = (project_root / str(entry["platform"])).resolve() \
+            if not Path(entry["platform"]).is_absolute() else Path(entry["platform"])
+        if not repl.is_file():
+            repl = (REPO_ROOT / str(entry["platform"])).resolve()
+        for label, path in platform_chain(repl, project_root):
+            if label in inputs:
+                continue
+            inputs[label] = (
+                _sha256(path) if path is not None
+                else "not-hashed:belongs to the emulator, whose version is recorded"
+            )
+
+    # THE ENGINE. A compiler change alters the answer with every project file
+    # unchanged, and a run that cannot say which engine produced it cannot be
+    # compared with one made by another.
+    for name in ENGINE_FILES:
+        target = (_HERE / name).resolve()
+        if target.is_file():
+            inputs[_repo_relative(target)] = _sha256(target)
+    if args.worker:
+        target = (_HERE / "pool.py").resolve()
+        if target.is_file():
+            inputs[_repo_relative(target)] = _sha256(target)
     observed = {"emulator": banner or "unknown"}
     write_replay(
         replay_file, scenario, emulator.command_text(launcher),

@@ -503,6 +503,47 @@ if [ "$QUICK" -eq 0 ]; then
 	fi
 fi
 
+# --- 2b: a platform file edited in a way nothing refuses -----------------------
+# NOT a refusal check, and it is here because this script walked past the hole.
+# Break 2 edits a .repl and asks whether the boot fails. An edit that does NOT
+# stop the boot -- a changed peripheral property, a different interrupt -- is a
+# DIFFERENT MACHINE, and until the platform files were hashed the run recorded
+# byte-identical provenance for it. Nothing refuses such an edit, and nothing
+# should: it is a legitimate change. What must happen is that the record
+# NOTICES.
+step "break 2b: a platform file is edited, and provenance must notice"
+fingerprint() { # what provenance would record for the device under test
+	"$PY" - "$BOARD_REPL" "$BENCH_PROJECT" <<'PYEOF'
+import sys
+from pathlib import Path
+
+sys.path.insert(0, "harness")
+import run_scenarios as engine
+
+repl, project = Path(sys.argv[1]), Path(sys.argv[2])
+for label, path in engine.platform_chain(repl, project):
+    print("%s %s" % (label, engine._sha256(path) if path else "not-hashed"))
+PYEOF
+}
+
+before_edit="$(fingerprint)"
+printf '\n// verify-refusals.sh: a harmless-looking edit, restored by that script.\n' \
+	>>"$BOARD_REPL"
+after_edit="$(fingerprint)"
+restore_all
+
+if [ -z "$before_edit" ] || [ -z "$after_edit" ]; then
+	record incomplete "platform edit is recorded" "the engine would not report a chain"
+elif [ "$before_edit" = "$after_edit" ]; then
+	record FINDING "platform edit is recorded" \
+		"TOLERATED: the platform file changed and provenance did not"
+	say "             A different machine with identical recorded inputs is a run"
+	say "             nobody can tell apart from one made on other silicon."
+else
+	record ok "platform edit is recorded" "the recorded inputs changed with the file"
+	say "             chain: $(printf '%s' "$before_edit" | grep -c .) file(s), including what it inherits"
+fi
+
 # --- 3: a bitrate that disagrees with the firmware ------------------------------
 step "break 3: the bus bitrate disagrees with the board"
 NEW_BITRATE=$(( BUS_BITRATE / 2 ))

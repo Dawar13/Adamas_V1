@@ -6,6 +6,7 @@ imported from Python 3 at all -- it is IronPython 2 and uses statement-form
 scripts/check-negative.sh instead.
 """
 
+import shutil
 import sys
 import unittest
 from pathlib import Path
@@ -409,6 +410,101 @@ class TestTheSnapshotShimIsPartOfWhatRan(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertNotIn("snapshot", toolkit.lower())
+
+
+class TestAnEditedPlatformFileChangesTheRecord(unittest.TestCase):
+    """A live hole in provenance until it was closed (NN-4).
+
+    boards.yml names a platform file; nothing hashed what was IN it. Editing
+    bms_ecu.repl -- or the board file it inherits -- produced a different
+    machine with byte-identical recorded inputs, so a run could not be told
+    apart from one made against different silicon. The engine's own refusal
+    spike walked past this: it edited a .repl and only ever asked whether the
+    boot failed.
+    """
+
+    def platform(self, body: str, name: str = "board.repl") -> Path:
+        import tempfile
+        root = Path(tempfile.mkdtemp(prefix="repl-unit-"))
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        path = root / name
+        path.write_text(body, encoding="utf-8", newline="\n")
+        return path
+
+    def labels(self, chain):
+        return [label for label, _path in chain]
+
+    def fingerprint(self, chain):
+        """What provenance would record for this chain."""
+        return [(label, rs._sha256(path) if path else None) for label, path in chain]
+
+    def test_the_named_file_is_in_the_chain(self):
+        board = self.platform("// a board\n")
+        chain = rs.platform_chain(board, board.parent)
+        self.assertEqual(len(chain), 1)
+        self.assertTrue(self.labels(chain)[0].endswith("board.repl"))
+
+    def test_an_inherited_project_file_is_in_the_chain(self):
+        board = self.platform('using "cpu.repl"\n')
+        (board.parent / "cpu.repl").write_text("// a chip\n", encoding="utf-8")
+        chain = rs.platform_chain(board, board.parent)
+        self.assertEqual(len(chain), 2)
+        self.assertTrue(any(label.endswith("cpu.repl") for label in self.labels(chain)))
+
+    def test_editing_the_inherited_file_changes_what_is_recorded(self):
+        # The whole point. The board file is untouched; the machine is not.
+        board = self.platform('using "cpu.repl"\n')
+        cpu = board.parent / "cpu.repl"
+        cpu.write_text("// a chip\n", encoding="utf-8")
+        before = self.fingerprint(rs.platform_chain(board, board.parent))
+
+        cpu.write_text("// a chip, with one peripheral moved\n", encoding="utf-8")
+        after = self.fingerprint(rs.platform_chain(board, board.parent))
+
+        self.assertNotEqual(before, after)
+        # And specifically in the inherited file, not by accident elsewhere.
+        changed = [a[0] for a, b in zip(after, before) if a != b]
+        self.assertEqual(len(changed), 1)
+        self.assertTrue(changed[0].endswith("cpu.repl"))
+
+    def test_a_file_from_the_emulators_library_is_marked_not_dropped(self):
+        # It is not ours to hash -- the emulator's version covers it -- but a
+        # chain that simply ended would read as "nothing else was involved".
+        board = self.platform('using "platforms/cpus/something.repl"\n')
+        chain = rs.platform_chain(board, board.parent)
+        marked = [label for label, path in chain if path is None]
+        self.assertEqual(len(marked), 1)
+        self.assertIn("emulator-library:", marked[0])
+
+    def test_a_cycle_does_not_hang_the_walk(self):
+        board = self.platform('using "other.repl"\n')
+        (board.parent / "other.repl").write_text(
+            'using "board.repl"\n', encoding="utf-8")
+        chain = rs.platform_chain(board, board.parent)
+        self.assertEqual(len(chain), 2)
+
+
+class TestTheEngineIsAnInputToItsOwnRuns(unittest.TestCase):
+    """A compiler change alters the answer with every project file unchanged."""
+
+    def test_the_files_that_shape_a_run_are_listed(self):
+        for name in ("run_scenarios.py", "network.py", "catalog.py",
+                     "can_toolkit.py"):
+            self.assertIn(name, rs.ENGINE_FILES)
+
+    def test_every_listed_file_exists(self):
+        # A list naming a file that is not there would hash nothing and say
+        # nothing, which is the failure mode this list exists to prevent.
+        for name in rs.ENGINE_FILES:
+            self.assertTrue((REPO_ROOT / "harness" / name).is_file(), name)
+
+    def test_provenance_records_both_the_platforms_and_the_engine(self):
+        source = (REPO_ROOT / "harness" / "run_scenarios.py").read_text(
+            encoding="utf-8")
+        start = source.index("inputs = {}")
+        block = source[start:start + 3000]
+        self.assertIn("platform_chain(", block)
+        self.assertIn("ENGINE_FILES", block)
 
 
 if __name__ == "__main__":
