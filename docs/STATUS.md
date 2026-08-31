@@ -843,3 +843,100 @@ authoritative. The run reports that itself.
 - No V2 phase is complete. Two of the four Phase 0 spikes remain — the external control
   API, and one component (an I2C temperature sensor) end to end — and §27.1 items 4, 5
   and 6 (guard 4, the project refactor, one chip by hand) are not started.
+
+### Read and break ✓ — §27.1 item 1, and the refusals are real
+
+`scripts/verify-refusals.sh`. It breaks the project on purpose and asserts the engine
+**refuses** rather than producing a verdict. The complement of
+`scripts/check-negative.sh`: that one proves a *scenario* cannot talk the engine into a
+false PASS, this one proves the *build and load gates* do not let a broken project reach
+a verdict at all.
+
+Every break is preceded by a positive control — the same commands against the unbroken
+project must succeed — and followed by a restore that is verified against git. Without
+the control, a script in which every command failed would report "every break was
+refused" and prove nothing.
+
+```
+baseline    build+boot bms exit 0 · compile a scenario exit 4
+ok          undefined injectable          refused, exit 1   caught by the ELF assertion
+ok          wrong binary                  refused, exit 1   named all 3 missing symbols
+FINDING     another node's application    TOLERATED, exit 0
+ok          console at a bad address      refused, exit 1   merged silently, boot gate caught it
+ok          bitrate, at build             refused, exit 1
+ok          bitrate, at compile           refused, exit 3
+ok          unknown node                  refused, exit 2
+restore     every touched file byte-identical to git · rebuild exit 0
+```
+
+Two of these are worth stating precisely, because a gate that fires for the wrong reason
+is not the gate anyone thinks it is:
+
+- **The retention gate reads the binary, and it was shown doing so.** With the device
+  under test's ELF overwritten by another node's, the build died naming
+  `g_cell_temp_dC g_pack_mv g_pack_ma`. The script also checks its own premise: if an
+  incremental relink had handed the gate the correct binary, it reports `incomplete`
+  rather than crediting a refusal that had nothing to refuse.
+- **The `.repl` merge is exactly as silent as §28.1 says.** Re-registering the console at
+  an unmapped address was accepted without a word — last value wins — and it was the
+  boot gate that caught it, not the platform loader.
+
+The break the task originally asked for — *delete a line from `injectables.txt`* — is
+**tolerated by design**, and asserting a refusal from it would have manufactured a false
+finding. That one file is read twice, by the CMake function emitting `-Wl,--undefined`
+and by the build's own assertion, so deleting a line removes the belt and the braces
+together and leaves the gate with nothing to check. On this firmware the symbol survives
+regardless, because every injectable is genuinely read each 10 ms tick. The script says
+so in place of the check.
+
+## Known findings
+
+Open defects, observed rather than theorised. Each names what was seen, what it costs,
+and where the fix belongs. **Nothing here is scheduled as done.**
+
+### KF-1 — `elf:` is a node's identity, and nothing cross-checks it
+
+**Observed** 2026-08-31 by `scripts/verify-refusals.sh`, break 1c.
+
+Point a node's `elf:` at another node's binary in `network.yml` and
+`./scripts/build-firmware.sh bms` compiles **vcu's** application, checks **vcu's**
+injectable symbols — `g_tx_enable`, `g_drive_state`, two retained where bms declares
+four — and prints:
+
+```
+OK: bms
+```
+
+Every gate green, under the wrong node's name. The cause is one line: the application
+directory is derived from the ELF path (`app = dirname³(elf)`), so the path **is** the
+identity and there is nothing left to disagree with it.
+
+**What it costs.** A scenario would then execute vcu's firmware while every artefact
+says bms. Downstream accidents would probably catch it — `wait_uart` waits for
+`"BMS ready"` and would see `"VCU ready"`, and `write_symbol` on `g_cell_temp_dC` would
+fail to resolve — but those are properties of the scenarios we happen to ship, not a
+gate. A scenario that neither waits on a banner nor injects a symbol would silently test
+the wrong firmware and report PASS. That is the flattering direction (§28.3).
+
+**Not fixed, deliberately.** The right fix is a cross-check between the ELF path and the
+node's own injectables list, and it belongs with the verb registry in Phase 3 rather than
+as a patch to a shell script — the same knowledge is needed by the capability
+introspection the registry already has to do. Until then this is a known gap, not a
+solved problem, and `verify-refusals.sh` fails while it stands.
+
+### KF-2 — the boot check can hang instead of failing
+
+**Observed once** on 2026-08-31, during a `verify-refusals.sh` run with break 2 in place;
+**not reproduced** on two later runs of the same break, which failed cleanly in about two
+seconds of virtual time.
+
+`scripts/build-firmware.sh` runs the emulator for its boot check with no timeout. On that
+one run the emulator never returned, so the check neither passed nor failed, and because
+the verification script only restores on exit, **the working tree stayed broken until the
+process was killed by hand**.
+
+`verify-refusals.sh` now runs every case under `timeout` (420 s, `VR_CASE_TIMEOUT`) and
+reports a timeout as `incomplete` — never as a refusal, because a hang is not an answer.
+That protects the tree; it does not fix `build-firmware.sh`, which still has no bound on
+the emulator. Worth a bound there too: §28.2 #14 is the same shape, a long job killed by
+the host and reported as something else.

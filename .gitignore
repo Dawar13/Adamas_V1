@@ -45,3 +45,4 @@ harness/out/
 suite-run.log
 project/spike-snapshot/
 project/runs/
+project/verify-refusals/
