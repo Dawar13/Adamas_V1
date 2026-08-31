@@ -2757,6 +2757,7 @@ def main(argv=None):
     trace_file = out_dir / ("trace_%s.log" % scenario.id)
     replay_file = out_dir / "replay.txt"
     incomplete_marker = out_dir / "INCOMPLETE"
+    cached_marker = out_dir / result_cache.MARKER_NAME
 
     # A run directory must never carry a previous run's answer.
     #
@@ -2770,7 +2771,14 @@ def main(argv=None):
     # good run died in post-processing and left a directory holding an event log
     # and a trace but no results.json -- and a measurement script then read the
     # missing file as "a different answer" rather than "no answer at all".
-    for stale in (results_file, replay_file, incomplete_marker):
+    # The CACHED marker is in this list for the same reason, and it was NOT
+    # there until a measurement caught it. A directory that had been served
+    # once and was then re-run for real kept its marker beside a freshly
+    # computed results.json, so it claimed nothing had executed when something
+    # had -- and `cache.refuse_reason` would then have declined to store a
+    # perfectly good run because it looked like a copy of a copy. Same shape as
+    # the stale results.json above; same fix.
+    for stale in (results_file, replay_file, incomplete_marker, cached_marker):
         if stale.exists():
             stale.unlink()
 

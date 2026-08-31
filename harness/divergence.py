@@ -440,12 +440,26 @@ def _ancestors_within(path: Path, root: Path):
         yield parent
 
 
-def discover_variants(baseline_binary: Path, repo_root: Path = None) -> list:
+def discover_variants(baseline_binary: Path, repo_root: Path = None,
+                      require_binary: bool = True) -> list:
     """Every declared defective sibling of the device under test's own build.
 
     The level at which variants live is derived from where the markers are, not
     from a naming convention. Markers at two levels are an ambiguity and are
     refused: resolving it by preference would silently drop one set of proofs.
+
+    `require_binary` is true for anything that will EXECUTE these builds, and
+    that is not a default to reach past casually: an unbuilt variant refused
+    here is
+    a proof that would otherwise quietly stop happening.
+
+    It is FALSE for the one caller that asks a question about DECLARATIONS
+    rather than executions -- harness/tiers.py, checking that a tier still
+    keeps a test that catches each documented defect. That answer comes from
+    the marker alone, so a tier can be checked on a machine with nothing built,
+    and no comparison is made or implied. A caller that passed False and then
+    ran something would be doing exactly what the refusal above prevents; it is
+    passed in one place, and a test pins that.
     """
     repo_root = Path(repo_root) if repo_root else REPO_ROOT
     baseline_binary = Path(baseline_binary)
@@ -499,6 +513,13 @@ def discover_variants(baseline_binary: Path, repo_root: Path = None) -> list:
     for root in roots:
         expectation = Expectation.load(root / MARKER_NAME)
         binary = root / inner
+        if not binary.is_file() and not require_binary:
+            # Declared, not built, and nothing here will run it. The expectation
+            # is the whole of what this caller asked for; the sha256 is left
+            # empty rather than faked, so anything that later tries to compare
+            # bytes has nothing to compare and cannot silently succeed.
+            variants.append(Variant(root.name, root, binary, "", expectation))
+            continue
         if not binary.is_file():
             raise NoExecutionPath(
                 "%s declares itself a defective build but has no binary at %s.\n\n"
@@ -527,6 +548,11 @@ def discover_variants(baseline_binary: Path, repo_root: Path = None) -> list:
     # the discrimination table would claim breadth the run does not have.
     by_bytes = {}
     for variant in variants:
+        if not variant.sha256:
+            # Not built, and this caller said it will not run it. Two unhashed
+            # variants are not two identical binaries; treating them as twins
+            # would refuse a perfectly good declaration.
+            continue
         by_bytes.setdefault(variant.sha256, []).append(variant.name)
     twins = {sha: names for sha, names in by_bytes.items() if len(names) > 1}
     if twins:

@@ -304,6 +304,25 @@ class TestServing(Temp):
         self.assertIn("events.log", served)
 
 
+class TestTheMarkerIsNotLeftBehind(unittest.TestCase):
+    """A directory served once and then re-run for real must not still claim
+    it was served.
+
+    Found by a measurement, not by a test: the smoke tier was re-run after one
+    scenario changed, and every directory still carried the marker from the
+    previous all-served run -- so counting markers counted 28 served when six
+    had executed. The same stale artefact would also have made
+    `refuse_reason` decline to store a genuine run as "a copy of a copy".
+    """
+
+    def test_both_runners_clear_it_before_launching(self):
+        engine = (HARNESS / "run_scenarios.py").read_text(encoding="utf-8")
+        runner = (HARNESS / "run_suite.py").read_text(encoding="utf-8")
+        self.assertIn("cached_marker", engine)
+        self.assertIn("incomplete_marker, cached_marker", engine)
+        self.assertIn('out_dir / "CACHED"', runner)
+
+
 class TestLookupRefusesLoudly(Temp):
 
     def setUp(self):

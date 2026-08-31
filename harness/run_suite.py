@@ -100,6 +100,8 @@ REPO_ROOT = HERE.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from harness import project, tiers                      # noqa: E402
+from harness import network as topology                 # noqa: E402
 from harness.divergence import DivergenceError, Suite   # noqa: E402
 
 ENGINE = HERE / "run_scenarios.py"
@@ -116,6 +118,10 @@ ENGINE_DRY_RUN = 4
 #: never be countable as a verdict -- see EXIT_CRASHED in run_scenarios.py for
 #: what it cost to learn that Python gives an unhandled exception FAIL's code.
 ENGINE_CRASHED = 5
+#: --cache-audit found a served answer was not what a fresh run produced. A
+#: statement about the CACHE, not about the firmware, so it gets an outcome of
+#: its own and is never countable as a verdict.
+ENGINE_CACHE_AUDIT = 6
 
 OUTCOME_FOR_CODE = {
     ENGINE_PASS: "pass",
@@ -124,6 +130,7 @@ OUTCOME_FOR_CODE = {
     ENGINE_REFUSED: "refused",
     ENGINE_DRY_RUN: "dry-run",
     ENGINE_CRASHED: "crashed",
+    ENGINE_CACHE_AUDIT: "cache-audit-failed",
 }
 
 #: The stored verdict that must accompany each exit code that means "a run
@@ -267,12 +274,19 @@ def shard_of(tests, shard: int, of: int):
 
 
 def run_one(python, test: Path, out_root: Path, timeout_s: int,
-            topology, coverage=False) -> dict:
+            topology_file, coverage=False, cache=None) -> dict:
     """Run one test in its own directory, and never lose it from the tally."""
     out_dir = out_root / test.stem
     command = python + [str(ENGINE), str(test), "--quiet", "--out", str(out_dir)]
-    if topology:
-        command += ["--topology", topology]
+    if topology_file:
+        command += ["--topology", topology_file]
+    if cache:
+        # One flag, passed straight through. The runner does not decide what a
+        # cache hit is, does not read the CACHED marker, and does not count a
+        # served test differently: a served result IS the result, and a tally
+        # that treated it as a special kind of pass would be inventing a
+        # distinction the engine deliberately does not make.
+        command += [cache]
     if coverage:
         # Coverage has to be measured while the tests run; it cannot be added
         # to a finished run. Without this the whole suite could never be
@@ -309,7 +323,10 @@ def run_one(python, test: Path, out_root: Path, timeout_s: int,
     # provenance named a DIFFERENT FIRMWARE, which made the merge refuse an
     # entire sharded run of 89 tests. Two guards caught it, from two unrelated
     # directions, and neither of them was this one.
-    for previous in (out_dir / "results.json", out_dir / "replay.txt"):
+    # CACHED is here for the same reason as the other two: this runner is the
+    # only party that knows the directory before the process starts.
+    for previous in (out_dir / "results.json", out_dir / "replay.txt",
+                     out_dir / "CACHED"):
         try:
             previous.unlink()
         except FileNotFoundError:
@@ -405,6 +422,19 @@ def main(argv=None) -> int:
                         help="run only this shard, numbered from 1")
     parser.add_argument("--of", type=int, default=None,
                         help="how many shards the suite is split into")
+    parser.add_argument(
+        "--tier", default=tiers.TIER_FULL, choices=list(tiers.TIERS),
+        help="which tier to run (PROJECT-V2 section 14.5). smoke is the "
+             "boundary pair of every sweep plus every unswept scenario; "
+             "standard adds one confirming value each side; full is everything")
+    parser.add_argument(
+        "--cache", action="store_true",
+        help="let each test serve a stored result when nothing that could "
+             "change its answer changed (PROJECT-V2 section 14.4)")
+    parser.add_argument(
+        "--cache-audit", action="store_true",
+        help="run every test for real AND require the stored answer to match "
+             "it. Slower than no cache at all; this is the proof, not the lever")
     parser.add_argument("--coverage", action="store_true",
                         help="record which instructions each machine executed, "
                              "so harness/coverage.py can attribute them. Costs "
@@ -427,7 +457,32 @@ def main(argv=None) -> int:
         if not args.no_expand:
             expand(python, tests_dir, say)
         every = declared(tests_dir)
-        tests = select(every, args.filter)
+
+        # THE TIER IS TAKEN BEFORE THE FILTER, and is reported separately from
+        # it. A tier is a declared subset with a rule behind it; a filter is
+        # whatever the caller typed. Collapsing the two into one "selected"
+        # number would make a hand-typed slice indistinguishable from a tier.
+        manifest = tiers.load_manifest(tests_dir / "manifest.json")
+        membership = tiers.select(manifest, args.tier)
+        findings = ()
+        if args.tier != tiers.TIER_FULL:
+            root = project.project_root()
+            net = topology.load(project.network_path())
+            dut = net.dut()
+            if not dut.elf:
+                raise SuiteError(
+                    "the device under test declares no binary, so a tier "
+                    "cannot be checked against the defective builds.")
+            findings = tiers.discrimination(
+                membership, tiers.declared_defects(root / str(dut.elf), root))
+            # A tier that keeps no test able to catch a defect the project
+            # already documents is not a fast suite. It is Finding 1.1 with a
+            # stopwatch attached, so it refuses rather than running green.
+            tiers.refuse_if_blind(membership, findings)
+
+        in_tier = set(membership.ids)
+        every_in_tier = [path for path in every if path.stem in in_tier]
+        tests = select(every_in_tier, args.filter)
         if (args.shard is None) != (args.of is None):
             raise SuiteError(
                 "--shard and --of go together. One without the other would run "
@@ -439,12 +494,18 @@ def main(argv=None) -> int:
                     "shard %d of %d is empty: there are only %d tests to "
                     "divide. An empty shard exiting 0 would read as a shard "
                     "that passed." % (args.shard, args.of, len(every)))
+    except tiers.TierError as exc:
+        print("\nREFUSING THIS TIER: %s\n" % exc, file=sys.stderr)
+        return 2
     except SuiteError as exc:
         print("\nERROR: %s\n" % exc, file=sys.stderr)
         return 2
 
     out_root.mkdir(parents=True, exist_ok=True)
     complete = len(tests) == len(every) and args.shard is None
+    say("")
+    for line in tiers.report(membership, findings):
+        say(line)
     say("\n  running %d of the %d declared tests on %d workers ...\n"
         % (len(tests), len(every), workers))
 
@@ -452,9 +513,11 @@ def main(argv=None) -> int:
     started = time.time()
     records = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        cache_flag = ("--cache-audit" if args.cache_audit
+                      else "--cache" if args.cache else None)
         futures = {
             pool.submit(run_one, python, test, out_root, args.timeout,
-                        args.topology, args.coverage): test
+                        args.topology, args.coverage, cache_flag): test
             for test in tests
         }
         for future in concurrent.futures.as_completed(futures):
@@ -473,6 +536,18 @@ def main(argv=None) -> int:
     say("")
     say("  %d of %d passed in %dm %02ds on %d workers"
         % (passed, len(records), int(elapsed) // 60, int(elapsed) % 60, workers))
+
+    # THE BUDGET IS REPORTED, NEVER ENFORCED. A tier that overran is a finding
+    # about this machine and about which levers are on -- not about the
+    # firmware -- and the two must never arrive as one number. Saying nothing
+    # would be worse: a 30-second tier that takes four minutes is the thing
+    # that stops it being run on every save, and it would be invisible.
+    budget = tiers.BUDGET_S.get(args.tier)
+    if budget:
+        say("  %-8s budget %ds, took %ds  %s"
+            % (args.tier, budget, int(elapsed),
+               "within" if elapsed <= budget else "OVER by %ds"
+               % int(elapsed - budget)))
     if not complete:
         # Said every time, not only in the file. A partial tally quoted as a
         # suite result is the shape of the defect this guard exists for.
@@ -495,6 +570,18 @@ def main(argv=None) -> int:
         # to be quoted as a verified one.
         "declared": len(every),
         "selected": len(tests),
+        "tier": args.tier,
+        "tier_size": len(membership),
+        "tier_budget_s": tiers.BUDGET_S.get(args.tier),
+        "tier_within_budget": (
+            None if not tiers.BUDGET_S.get(args.tier)
+            else elapsed <= tiers.BUDGET_S[args.tier]),
+        "discrimination": [
+            {"variant": item.name, "expected": len(item.expected),
+             "kept": len(item.kept), "kept_tests": list(item.kept)}
+            for item in findings
+        ],
+        "cache": ("audit" if args.cache_audit else "on" if args.cache else "off"),
         "complete": complete,
         "filter": args.filter,
         "shard": args.shard,
