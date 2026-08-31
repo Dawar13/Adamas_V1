@@ -51,3 +51,8 @@ projects/*/verify-refusals/
 # commit because the ignore rule named the two spikes that existed that day.
 projects/*/spike-*/
 projects/*/runs/
+
+# The result cache and the snapshots beside it (PROJECT-V2 8.1). Derived from
+# files that are hashed into its own keys, so it is disposable by construction:
+# deleting it costs time and nothing else.
+projects/*/cache/

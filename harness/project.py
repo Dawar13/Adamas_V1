@@ -17,7 +17,7 @@ confused with it:
                         file is machine-neutral.
 
     project root        network.yml, catalog.yml, boards.yml, patterns/,
-                        scenarios/, platforms/, firmware/, dbc/, runs/.
+                        scenarios/, platforms/, firmware/, dbc/, runs/, cache/.
                         Everything that is one customer's answer rather than
                         the tool's mechanism.
 
@@ -58,6 +58,10 @@ BOARDS_FILE = "boards.yml"
 PATTERN_DIR = "patterns"
 SCENARIO_DIR = "scenarios"
 RUNS_DIR = "runs"
+#: Snapshots and the result cache (PROJECT-V2 8.1). Disposable by definition:
+#: everything in it is derived from files that are hashed into its own keys, so
+#: deleting it costs time and nothing else.
+CACHE_DIR = "cache"
 
 
 class ProjectError(Exception):
@@ -113,6 +117,10 @@ def scenarios_dir(explicit=None, project=None) -> Path:
 
 def runs_dir(explicit=None, project=None) -> Path:
     return Path(explicit) if explicit else project_root(project) / RUNS_DIR
+
+
+def cache_dir(explicit=None, project=None) -> Path:
+    return Path(explicit) if explicit else project_root(project) / CACHE_DIR
 
 
 def add_argument(parser) -> None:

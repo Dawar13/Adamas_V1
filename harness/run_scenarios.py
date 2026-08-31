@@ -82,6 +82,7 @@ _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
+import cache as result_cache        # noqa: E402  stored answers, served
 import catalog as contract          # noqa: E402  the CAN contract loader
 import project                      # noqa: E402  where the project is
 import pool                         # noqa: E402  live emulator processes
@@ -146,6 +147,13 @@ EXIT_REFUSED = 3
 #: -- the contract scripts/run.sh advertises -- could not otherwise distinguish
 #: "the firmware passed" from "nothing ran".
 EXIT_DRY_RUN = 4
+#: A --cache-audit found that a served answer was NOT what a fresh run of the
+#: same inputs produced. It gets a code of its own because it is a statement
+#: about the CACHE, not about the firmware: neither the served verdict (now
+#: known to be wrong) nor the fresh one (whose subject has stopped being the
+#: firmware) may be reported, so this must not be readable as PASS, as FAIL, or
+#: as the engine having crashed.
+EXIT_CACHE_AUDIT = 6
 #: An unexpected exception. It must not share FAIL's code.
 #:
 #: OBSERVED, AND IT COST AN ENTIRE 89-TEST SUITE. An unhandled exception makes Python
@@ -2309,7 +2317,7 @@ def write_replay(path: Path, scenario, command, resc, versions, observed, inputs
             "",
             "That standalone command is NOT what ran; it is what reproduces",
             "what ran. The two are required to produce byte-identical event",
-            "logs, and that is checked (scripts/spike-equivalence.py), not",
+            "logs, and that is checked (harness/equivalence.py), not",
             "assumed.",
             "",
         ]
@@ -2425,13 +2433,27 @@ def parse_args(argv):
         help="EXPERIMENTAL, off by default: run this scenario on a live emulator "
              "already listening for Monitor commands, instead of starting one. "
              "Must produce a byte-identical event log to a run that starts its "
-             "own; compare with scripts/spike-equivalence.py")
+             "own; compare with harness/equivalence.py")
     parser.add_argument(
         "--snapshot", action="store_true",
         help="EXPERIMENTAL, off by default: boot and settle once, snapshot, and "
              "run the rest of the scenario from the restored state. Must produce "
              "a byte-identical event log to a cold run; compare with "
-             "scripts/spike-equivalence.py before trusting it")
+             "harness/equivalence.py before trusting it")
+    parser.add_argument(
+        "--cache", action="store_true",
+        help="EXPERIMENTAL, off by default: serve a stored result when every "
+             "input that could change the answer is unchanged (PROJECT-V2 "
+             "section 14.4). Nothing executes on a hit")
+    parser.add_argument(
+        "--no-cache", action="store_true",
+        help="run for real even if $BENCH_CACHE asks for the cache")
+    parser.add_argument(
+        "--cache-audit", action="store_true",
+        help="turn the cache on AND prove it: run the scenario for real, serve "
+             "the stored answer beside it, and require the two to be the same "
+             "answer through harness/equivalence.py. A mismatch poisons the "
+             "entry and reports no verdict")
     parser.add_argument("--coverage", action="store_true",
                         help="also record which instructions each machine "
                              "executed, for harness/coverage.py to attribute")
@@ -2470,6 +2492,93 @@ def coverage_requested(args, environ=None) -> bool:
         "executed." % (COVERAGE_ENV, raw, ", ".join(_COVERAGE_ON),
                        ", ".join(v for v in _COVERAGE_OFF if v))
     )
+
+
+#: How the environment spells the cache switch, with the same discipline as
+#: the coverage one: a misspelt value is refused rather than read as "off".
+CACHE_ENV = "BENCH_CACHE"
+
+
+def cache_requested(args, environ=None) -> bool:
+    """Is the result cache on? Off by default, and never ambiguous.
+
+    --no-cache wins over everything, because it is the escape hatch the CACHED
+    marker tells a reader to use, and an escape hatch that can be overridden by
+    an environment variable is not one.
+    """
+    if getattr(args, "no_cache", False):
+        return False
+    if getattr(args, "cache", False) or getattr(args, "cache_audit", False):
+        return True
+    raw = (environ if environ is not None else os.environ).get(CACHE_ENV, "")
+    value = str(raw).strip().lower()
+    if value in _COVERAGE_ON:
+        return True
+    if value in _COVERAGE_OFF:
+        return False
+    raise CompileError(
+        "%s=%r is neither on nor off. Use one of %s to enable it, or one of %s "
+        "to disable it. It is not read as \"off\": a cache that silently did "
+        "not engage and a cache that silently served the wrong thing are both "
+        "invisible, and the switch must not be the reason either happens."
+        % (CACHE_ENV, raw, ", ".join(_COVERAGE_ON),
+           ", ".join(v for v in _COVERAGE_OFF if v))
+    )
+
+
+def execution_mode(args) -> str:
+    """Which of the three ways of running this the caller asked for.
+
+    Part of the cache key. The three are SUPPOSED to agree, and that is checked
+    by comparison rather than assumed; keying on the mode means the cache can
+    never answer one mode's question with another mode's run and hide the
+    disagreement.
+    """
+    if getattr(args, "snapshot", False):
+        return result_cache.MODE_SNAPSHOT
+    if getattr(args, "worker", None):
+        return result_cache.MODE_WORKER
+    return result_cache.MODE_COLD
+
+
+def invocation(args) -> str:
+    """The command that would produce this run again, as a reader would type it.
+
+    Written into the CACHED marker, because a marker that says "nothing ran"
+    without saying how to make it run is half an answer.
+    """
+    parts = ["py -3 harness/run_scenarios.py", str(args.scenario)]
+    if args.project:
+        parts += ["--project", str(args.project)]
+    if args.out:
+        parts += ["--out", str(args.out)]
+    if getattr(args, "snapshot", False):
+        parts.append("--snapshot")
+    if getattr(args, "coverage", False):
+        parts.append("--coverage")
+    return " ".join(parts)
+
+
+def report_served(say, quiet, marker, results_path, entry_root):
+    """What a served run says for itself. Never report_human().
+
+    report_human describes something that happened. Nothing happened here, and
+    a served answer printed in the same words as a measured one is the whole
+    failure class this cache is most able to cause.
+    """
+    answer = json.loads(Path(results_path).read_text(encoding="utf-8"))
+    latency = (answer.get("latency") or {}).get("headline_us")
+    say("")
+    say("  CACHED  %-20s %s"
+        % (answer.get("scenario", {}).get("id", "?"), answer.get("verdict", "?")))
+    if latency is not None:
+        say("          reaction %s ms, as the run this was copied from measured it"
+            % _fmt_ms(latency))
+    say("          nothing executed. This answer was produced by an earlier run")
+    say("          and every input to it is byte for byte unchanged.")
+    say("          entry   %s" % entry_root)
+    say("          why     %s" % marker)
+    say("")
 
 
 def run_from_snapshot(emulator, prefix_resc, suffix_resc, console_log,
@@ -2522,6 +2631,85 @@ def run_from_snapshot(emulator, prefix_resc, suffix_resc, console_log,
     return test_code, boot_text + test_text, test_launcher
 
 
+def collect_inputs(scenario, net, cat, boards, resc, compiled, project_root,
+                   snapshot=False, worker=False) -> dict:
+    """Every input that shaped this run, hashed by content.
+
+    PULLED OUT OF main() SO THAT THERE IS EXACTLY ONE OF IT. The result cache
+    keys on this dictionary (PROJECT-V2 section 14.4), and a cache that decided
+    for itself what an input is would be a second, quieter answer to the
+    question provenance exists to answer. The two would drift, and the drift
+    would look like a cache hit.
+
+    Computable before the emulator runs, and now called there: nothing in it
+    depends on what the run did.
+    """
+    inputs = {}
+    for target in (
+        scenario.path,
+        Path(net.source),
+        Path(cat.source),
+        boards.source,
+        _HERE / "can_toolkit.py",
+        resc,
+    ):
+        inputs[_repo_relative(target)] = _sha256(target)
+
+    # THE FIRMWARE IS THE MOST IMPORTANT INPUT AND WAS MISSING.
+    #
+    # Every other input was hashed, but not the binaries under test, so two
+    # different firmwares at the same path produced byte-identical provenance and
+    # a byte-identical reproduction note. The one thing a reader most needs to
+    # pin down -- WHICH BUILD produced this verdict -- was the one thing not
+    # recorded, and PROJECT.md §11 names it explicitly.
+    #
+    # It is also what makes the good-versus-broken comparison legible after the
+    # fact: the two runs differ in exactly one hash, and the results say so.
+    #
+    # Hashed by content, not by path, because the path is identical in the case
+    # that matters.
+    if snapshot:
+        # It changes what executes, so it is an input (NN-4). A snapshot run
+        # whose provenance named only the toolkit would be describing a run
+        # that did not happen.
+        shim = (_HERE / "snapshot_shim.py").resolve()
+        inputs[_repo_relative(shim)] = _sha256(shim)
+    for node in net.real_nodes():
+        elf = (project_root / str(node.elf)).resolve()
+        key = "firmware:%s" % node.id
+        inputs[key] = _sha256(elf) if elf.is_file() else "MISSING:%s" % node.elf
+
+    # THE PLATFORM FILES. boards.yml names them; until now nothing hashed what
+    # was in them, so an edited .repl gave a different machine and identical
+    # provenance. Each machine's chain is followed, in machine order, so the
+    # ordering is a property of the topology rather than of a filesystem walk.
+    for entry in compiled.machines:
+        repl = (project_root / str(entry["platform"])).resolve() \
+            if not Path(entry["platform"]).is_absolute() else Path(entry["platform"])
+        if not repl.is_file():
+            repl = (REPO_ROOT / str(entry["platform"])).resolve()
+        for label, path in platform_chain(repl, project_root):
+            if label in inputs:
+                continue
+            inputs[label] = (
+                _sha256(path) if path is not None
+                else "not-hashed:belongs to the emulator, whose version is recorded"
+            )
+
+    # THE ENGINE. A compiler change alters the answer with every project file
+    # unchanged, and a run that cannot say which engine produced it cannot be
+    # compared with one made by another.
+    for name in ENGINE_FILES:
+        target = (_HERE / name).resolve()
+        if target.is_file():
+            inputs[_repo_relative(target)] = _sha256(target)
+    if worker:
+        target = (_HERE / "pool.py").resolve()
+        if target.is_file():
+            inputs[_repo_relative(target)] = _sha256(target)
+    return inputs
+
+
 def main(argv=None):
     args = parse_args(argv if argv is not None else sys.argv[1:])
     # A console that cannot render a character in a label must not be able to
@@ -2543,6 +2731,9 @@ def main(argv=None):
         cat = contract.load(project.catalog_path(args.contract, args.project))
         net.validate_against(cat)
         boards = BoardBook.load(project.boards_path(args.boards, args.project))
+        # Resolved here, beside the other strict switch, so a misspelt
+        # $BENCH_CACHE refuses as usage rather than being read as "off".
+        use_cache = cache_requested(args)
     except (topology.NetworkError, contract.CatalogError, CompileError,
             project.ProjectError) as exc:
         print("\nERROR: %s\n" % exc, file=sys.stderr)
@@ -2636,6 +2827,63 @@ def main(argv=None):
             "be checked against the pinned one"
         )
 
+    # -----------------------------------------------------------------
+    # THE RESULT CACHE (PROJECT-V2 section 14.4)
+    #
+    # The inputs are collected HERE, before anything executes, because that is
+    # the whole point of the lever: on a hit, nothing executes.
+    #
+    # It is deliberately AFTER the emulator version gate. A cached answer is a
+    # claim that running this here would produce this, and the emulator is part
+    # of here -- so a machine whose emulator does not match the pin is refused
+    # on the serving path exactly as it is on the running one. That costs one
+    # `renode --version`, and it is the difference between a cache and a
+    # promise.
+    # -----------------------------------------------------------------
+    inputs = collect_inputs(scenario, net, cat, boards, resc, compiled,
+                            project_root, snapshot=args.snapshot,
+                            worker=bool(args.worker))
+    mode = execution_mode(args)
+    store = digest = key_doc = None
+    if use_cache:
+        try:
+            key_doc = result_cache.key_document(
+                inputs, versions, banner if observed else "", mode,
+                coverage_requested(args))
+            digest = result_cache.fingerprint(key_doc)
+            store = result_cache.Cache(project.cache_dir(project=args.project))
+        except result_cache.CacheError as exc:
+            # Loud, and recorded in the run's own warnings. A cache that
+            # quietly stops caching looks exactly like one that is working,
+            # which is how a lever comes to be believed in without being on.
+            print("\nCACHE DISABLED, THIS SCENARIO: %s\n" % exc, file=sys.stderr)
+            compiled.warnings.append("the result cache was not used: %s" % exc)
+            store = None
+
+    entry = None
+    if store is not None:
+        entry, note = store.lookup(digest)
+        if note:
+            print("\nCACHE: %s\n" % note, file=sys.stderr)
+    hit_before_run = entry is not None
+
+    if hit_before_run and not args.cache_audit:
+        try:
+            store.serve(entry, out_dir,
+                        result_cache.marker_text(
+                            digest, entry, banner or "unknown", pinned_emulator,
+                            mode, invocation(args), resc.name))
+        except result_cache.CacheError as exc:
+            # Could not copy. That is a reason to run, not a reason to fail.
+            print("\nCACHE: %s\n" % exc, file=sys.stderr)
+            entry = None
+            hit_before_run = False
+        else:
+            report_served(say, args.quiet, out_dir / result_cache.MARKER_NAME,
+                          results_file, entry.root)
+            served = json.loads(results_file.read_text(encoding="utf-8"))
+            return EXIT_PASS if served.get("verdict") == "PASS" else EXIT_FAIL
+
     for stale in (event_log, console_log, prefix_log, suffix_log,
                   state_file, snapshot_file):
         if stale.exists():
@@ -2702,69 +2950,6 @@ def main(argv=None):
     frames = log.frames()
     write_trace(trace_file, str(bus_name), frames)
 
-    inputs = {}
-    for target in (
-        scenario.path,
-        Path(net.source),
-        Path(cat.source),
-        boards.source,
-        _HERE / "can_toolkit.py",
-        resc,
-    ):
-        inputs[_repo_relative(target)] = _sha256(target)
-
-    # THE FIRMWARE IS THE MOST IMPORTANT INPUT AND WAS MISSING.
-    #
-    # Every other input was hashed, but not the binaries under test, so two
-    # different firmwares at the same path produced byte-identical provenance and
-    # a byte-identical reproduction note. The one thing a reader most needs to
-    # pin down -- WHICH BUILD produced this verdict -- was the one thing not
-    # recorded, and PROJECT.md §11 names it explicitly.
-    #
-    # It is also what makes the good-versus-broken comparison legible after the
-    # fact: the two runs differ in exactly one hash, and the results say so.
-    #
-    # Hashed by content, not by path, because the path is identical in the case
-    # that matters.
-    if args.snapshot:
-        # It changes what executes, so it is an input (NN-4). A snapshot run
-        # whose provenance named only the toolkit would be describing a run
-        # that did not happen.
-        shim = (_HERE / "snapshot_shim.py").resolve()
-        inputs[_repo_relative(shim)] = _sha256(shim)
-    for node in net.real_nodes():
-        elf = (project_root / str(node.elf)).resolve()
-        key = "firmware:%s" % node.id
-        inputs[key] = _sha256(elf) if elf.is_file() else "MISSING:%s" % node.elf
-
-    # THE PLATFORM FILES. boards.yml names them; until now nothing hashed what
-    # was in them, so an edited .repl gave a different machine and identical
-    # provenance. Each machine's chain is followed, in machine order, so the
-    # ordering is a property of the topology rather than of a filesystem walk.
-    for entry in compiled.machines:
-        repl = (project_root / str(entry["platform"])).resolve() \
-            if not Path(entry["platform"]).is_absolute() else Path(entry["platform"])
-        if not repl.is_file():
-            repl = (REPO_ROOT / str(entry["platform"])).resolve()
-        for label, path in platform_chain(repl, project_root):
-            if label in inputs:
-                continue
-            inputs[label] = (
-                _sha256(path) if path is not None
-                else "not-hashed:belongs to the emulator, whose version is recorded"
-            )
-
-    # THE ENGINE. A compiler change alters the answer with every project file
-    # unchanged, and a run that cannot say which engine produced it cannot be
-    # compared with one made by another.
-    for name in ENGINE_FILES:
-        target = (_HERE / name).resolve()
-        if target.is_file():
-            inputs[_repo_relative(target)] = _sha256(target)
-    if args.worker:
-        target = (_HERE / "pool.py").resolve()
-        if target.is_file():
-            inputs[_repo_relative(target)] = _sha256(target)
     observed = {"emulator": banner or "unknown"}
     write_replay(
         replay_file, scenario, emulator.command_text(launcher),
@@ -2846,6 +3031,58 @@ def main(argv=None):
         encoding="utf-8", newline="\n",
     )
 
+    # -----------------------------------------------------------------
+    # STORE, AND -- IF ASKED -- PROVE IT.
+    #
+    # The audit is the same comparison in both directions of the cache:
+    #
+    #   entry already existed  the served copy predates this run, so comparing
+    #                          it with what just happened is the real check,
+    #                          and it costs a full emulator run
+    #   entry just stored      serving it straight back and comparing costs no
+    #                          emulator time at all, and proves the store and
+    #                          serve round trip byte for byte on the FIRST run
+    #
+    # Both happen before the verdict is printed. A run whose audit failed must
+    # never show a verdict on its way out: the served one is now known to be
+    # wrong, and the fresh one is no longer the thing under discussion.
+    # -----------------------------------------------------------------
+    audited = None
+    if store is not None:
+        try:
+            entry = store.store(digest, out_dir, key_doc)
+        except result_cache.CacheError as exc:
+            print("\nCACHE: %s\n" % exc, file=sys.stderr)
+            entry = None
+        if entry is not None and args.cache_audit:
+            audit_dir = out_dir.parent / (out_dir.name + ".cache-audit")
+            try:
+                store.serve(entry, audit_dir,
+                            result_cache.marker_text(
+                                digest, entry, banner or "unknown",
+                                pinned_emulator, mode, invocation(args),
+                                resc.name))
+            except result_cache.CacheError as exc:
+                print("\nCACHE AUDIT COULD NOT BE MADE: %s\n\nThat is not the "
+                      "same as passing, so no verdict is reported.\n" % exc,
+                      file=sys.stderr)
+                return EXIT_CACHE_AUDIT
+            try:
+                audited = result_cache.audit(audit_dir, out_dir, digest)
+            except result_cache.AuditFailed as exc:
+                note = store.poison(
+                    entry,
+                    "%s\n\nThis entry will never be served again. It is kept "
+                    "rather than deleted:\n\"the cache was wrong once\" is a "
+                    "finding, and deleting the evidence is how a finding "
+                    "becomes a rumour.\n" % exc)
+                print("\nCACHE AUDIT FAILED\n\n%s\n\nThe entry is poisoned; "
+                      "the evidence is at\n  %s\n\nNo verdict is reported for "
+                      "this run. The served answer is known to be wrong, and "
+                      "the\nfresh one is no longer what is in question.\n"
+                      % (exc, note), file=sys.stderr)
+                return EXIT_CACHE_AUDIT
+
     report_human(
         say, args.quiet, scenario, compiled, boot, verdict, latency, assertions, hard,
         [str(results_file), trace_file.name, replay_file.name], compiled.tier,
@@ -2854,6 +3091,15 @@ def main(argv=None):
         # Always, even under --quiet: a hard failure is the class of thing a
         # caller must never be able to miss.
         print("hard failure: %s" % item, file=sys.stderr)
+
+    if audited is not None:
+        say("  CACHE AUDIT  %s" % (
+            "the stored answer predates this run, and is the answer it produced"
+            if hit_before_run else
+            "stored, served straight back, identical -- the round trip, not a hit"))
+        for line in audited.report:
+            say("  " + line)
+        say("")
     return EXIT_PASS if verdict == "PASS" else EXIT_FAIL
 
 

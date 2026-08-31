@@ -15,7 +15,7 @@ pool, because the contamination is invisible -- the verdict still looks like a
 verdict, and the only evidence is a log nobody is comparing.
 
 So `Clear` between tests, and the equivalence harness over the result. This
-module is the mechanism; scripts/spike-equivalence.py is the check, and neither
+module is the mechanism; harness/equivalence.py is the check, and neither
 is allowed to vouch for the other.
 
 -----------------------------------------------------------------------------
