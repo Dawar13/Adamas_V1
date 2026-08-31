@@ -246,7 +246,7 @@ showAnalyzer sysbus.lpuart0
 
 Peripheral names come from `boards.yml`, never from code.
 
-### The eleven verbs
+### The thirteen verbs
 
 ```
 wait_uart      { node, text, timeout_ms }
@@ -254,6 +254,8 @@ node_signal    { node, id, signals }      scripted → repaint payload
                                           real     → write the backing global
 node_silence   { node, silence }          scripted → stop player
                                           real     → g_tx_enable = 0
+node_freeze    { node }                   real only → cpu.IsHalted = true
+node_resume    { node }                   real only → cpu.IsHalted = false
 can_send       { node, id, signals | data_hex }
 flood          { id, count, data_hex }
 write_symbol   { node, symbol, value }    real nodes only

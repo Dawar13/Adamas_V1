@@ -708,3 +708,138 @@ most expensive place — in front of someone evaluating whether the tool tells t
 ## Phase 5 — Depth
 
 - [ ] Board library, AI drafting, change report, profiler
+
+---
+
+## V2 Phase 0 — spikes (in progress)
+
+2026-08-31. Work against `docs/PROJECT-V2.md` §27.1, on branch `v2-phase1`. Two of the
+four spikes are answered; the other two are not started.
+
+### The snapshot spike ✓ — answered, and the answer is yes
+
+`scripts/spike-snapshot.sh`. **A throwaway experiment, not engine code** — it imports
+nothing, nothing imports it, and it is meant to be deleted once this entry is written.
+Renode v1.16.1.16908.
+
+It boots `bms`, `vcu` and `charger` on one CAN hub, runs 500 ms of virtual time, `Save`s
+a snapshot, and `Load`s it in a **fresh** emulator process that has never seen the
+topology. All six of its conditions were met:
+
+```
+virtual time at Save                 500000 us
+virtual time after Load              500000 us
+virtual time after +200 ms           700000 us
+machines in the restored emulation   3: bms,vcu,charger
+frames after Load                    14  per node: vcu:6, charger:2, bms:6
+same window, uninterrupted control   14 frames
+```
+
+Liveness is an instruction-count delta per machine, not mere presence: `bms`
+153580→206798, `vcu` 41524→50012, `charger` 104327→141392. The control run — the same
+700 ms without a snapshot in the middle — carried the same 14 frames with the same
+instruction counts, so on this run the restored emulation was not merely alive, it was
+**the same run**. Snapshot 5,144,681 bytes.
+
+**This is what Phase 1's runtime plan rests on**, so it is worth being precise about what
+was shown: one topology, one snapshot, one restore, on `modelled` boards. It is not a
+claim about snapshots in general.
+
+### V2 Phase 0 finding — a Renode console log cannot be parsed as a record
+
+The spike's in-emulator probe both writes each report line to a file and prints it. The
+first version of the host parsed the printed console log, and on one run a report line
+came back cut in half by the emulator's own logger writing to the same stream from
+another thread:
+
+```
+spike: REP21:58:43.8820 [INFO] charger: Machine paused.
+ORT at700 us=700000 machines=3 ...
+```
+
+The run before it had parsed clean. **A verdict that depends on how two threads
+interleaved is not a verdict**, so the parse now reads the probe's own file, with the
+console log as a fallback for when no file was written. The engine already works this
+way — `harness/can_toolkit.py` writes the event log itself and the host never parses
+emulator stdout — which is the reason this has never bitten a real run.
+
+Two host-side parsing bugs in the spike are recorded because both flattered a broken
+answer into a specific, plausible-looking failure: a field pattern that required a field
+*before* the key never matched `us=`, the first key on every line, and reported it as
+"the run never reported its virtual time"; and a CRLF on the last field made
+`[ "$a" -le "$b" ]` abort with `integer expression expected`, which **records no failure
+and skips the check** — a liveness assertion silently did not run while the script
+printed PASS. *An erroring check passes.* Worth a guard when this becomes real code.
+
+### The freeze fix ✓ — `node_freeze` / `node_resume`, in the V1 engine
+
+§27.1 item 3. Two verbs, one shared handler, one Monitor command — the shape
+`node_silence` already has:
+
+| Layer | What |
+|---|---|
+| `harness/run_scenarios.py` | `VERBS`, `STEP_KEYS`, `_verb_node_freeze` / `_verb_node_resume` → `_halt_core` |
+| `harness/can_toolkit.py` | `mc_bench_freeze` — sets `cpu.IsHalted`, **reads it back**, writes `STIM node_freeze <node>=1\|0` |
+| `harness/tests/test_run_scenarios.py` | the refusals, in both directions, and the halt-not-pause guard |
+| `harness/tests/test_expand.py` | the pair declared as stimulus verbs |
+| `docs/PROJECT.md`, `docs/PHASE-1.md` | the verb lists said eleven; they now say thirteen |
+
+**`IsHalted`, never `Pause`** (PROJECT-V2 §3.6, §28.1). Pausing a machine stops it
+reporting to the time barrier, virtual time stops for every machine, and the run
+deadlocks rather than failing — so a pause produces no verdict at all, which is a worse
+outcome than a wrong one. Because §28.2 #13 records that the purity guard was violated
+fifteen times and was **always in a comment, never in logic**, this rule is in logic in
+three places: the toolkit reads the halt back and fails loudly (`halt-did-not-take`) if a
+model accepted the write and ignored it; one test greps the toolkit for any `.Pause(`
+call; another greps the compiler for an emitted `machine Pause`.
+
+The core is named by `harness/boards.yml` (`cpu_peripheral`), like every other
+peripheral. Two refusals, each naming the fix rather than only the problem: a scripted
+node has no core to halt, and a board that names no core is refused rather than guessed —
+a guessed name resolves to nothing, halts nothing, and the scenario still reports PASS.
+
+### Observed
+
+```
+harness.tests.test_run_scenarios + harness.tests.test_expand    124 tests   OK
+./scripts/run.sh scenarios/heartbeat-freeze.yml                 PASS        MODELLED
+```
+
+`scenarios/heartbeat-freeze.yml` is the behavioural proof, and it is the one that
+matters: the unit tests assert that the engine *spells* the rule correctly, and only a
+run shows that it *behaves*. It is `heartbeat-loss` with one substitution — `node_silence`
+becomes `node_freeze` — because a hung peer and a muted peer must look identical to the
+device under test, which can only see the absence of frames.
+
+From its event log, in virtual microseconds:
+
+| Instant | Observed |
+|---|---|
+| 700000 | last VCU beat before the freeze |
+| **750000** | `STIM node_freeze vcu=1` |
+| 750300 → 1200400 | **15 BMS frames** and 4 charger frames, inside the frozen window |
+| 1000400 | `TX bms 604` HEARTBEAT_LOST, and `602` contactor OPEN |
+| **1250000** | `STIM node_freeze vcu=0` |
+| 1250100 | the VCU transmits again |
+
+The VCU's last frame is at 700000 and its next at 1250100 — a 550 ms hole that starts at
+the freeze and ends at the resume, so the halt took. HEARTBEAT_LOST arrived 250.4 ms
+after the freeze, after the 150 ms window that forbids an early fault, so the deadline
+was measured rather than assumed. **The 15 BMS frames inside the hole are the whole
+point:** virtual time went on flowing for every other machine while one core executed
+nothing. Under `machine Pause` the run would have stalled at that step and produced no
+verdict — a stalled run and a failing one are not the same answer.
+
+The boards are tier `modelled`, so this result is shown and is explicitly not
+authoritative. The run reports that itself.
+
+### What has NOT been run
+
+- **The full suite.** The 89-test figures elsewhere in this file describe runs that
+  happened and are unchanged; they are not restated here as though they covered this
+  work. The suite now expands to **90 tests** — `heartbeat-freeze` declares no sweep and
+  contributes exactly one, counted with `harness/expand.py --list`, not estimated.
+- The determinism, divergence and negative gates, and every other test module.
+- No V2 phase is complete. Two of the four Phase 0 spikes remain — the external control
+  API, and one component (an I2C temperature sensor) end to end — and §27.1 items 4, 5
+  and 6 (guard 4, the project refactor, one chip by hand) are not started.

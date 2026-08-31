@@ -43,3 +43,5 @@ harness/out/
 # generator unverifiable.
 .generated/
 suite-run.log
+project/spike-snapshot/
+project/runs/

@@ -338,7 +338,7 @@ The loader must **warn loudly on stderr** for any enum table not referenced by a
 
 Every CAN company already has this as a **DBC file** — the automotive standard read by SavvyCAN, PCAN, canutils. Import theirs; generate `dbc/system.dbc` from `catalog.yml` so report decoding and their tools cannot drift.
 
-### `scenarios/*.yml` — the eleven verbs
+### `scenarios/*.yml` — the thirteen verbs
 
 The entire authoring surface. A user must never need to know Renode, Robot Framework, or Python.
 
@@ -346,6 +346,8 @@ The entire authoring surface. A user must never need to know Renode, Robot Frame
 wait_uart      { node, text, timeout_ms }
 node_signal    { node, id, signals }
 node_silence   { node, silence }
+node_freeze    { node }                     real nodes only
+node_resume    { node }                     real nodes only
 can_send       { node, id, signals | data_hex }
 flood          { id, count, data_hex }
 write_symbol   { node, symbol, value }      real nodes only

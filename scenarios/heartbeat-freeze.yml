@@ -1,0 +1,163 @@
+# heartbeat-freeze — a hung vehicle controller, and time that keeps flowing.
+# =============================================================================
+# THIS FILE IS PROJECT DATA. Ids and signal names come from catalog.yml, node
+# names from network.yml, and the window and its qualifiers from the firmware.
+#
+# WHAT THIS ADDS OVER heartbeat-loss
+# -----------------------------------------------------------------------------
+# heartbeat-loss takes the vehicle controller off the bus with `node_silence`:
+# the node is alive and healthy and has simply stopped transmitting, because a
+# global in its firmware was written to zero. That models a bus fault or a
+# muted transmitter.
+#
+# This scenario models something different and worse: an ECU that has HUNG.
+# `node_freeze` halts the core. Nothing executes on that node any more — no
+# main loop, no timer callback, no interrupt handler, no CAN driver — and the
+# beats stop because the firmware producing them stopped, not because it chose
+# to stay quiet.
+#
+# THE CLAIM THIS SCENARIO EXISTS TO PROVE
+# -----------------------------------------------------------------------------
+# That virtual time kept flowing while one node's core was halted.
+#
+# It is asserted indirectly, and that is the point: the device under test has a
+# 300 ms deadline, and a deadline can only be measured by a clock that is still
+# running. If the frozen node had stopped the emulation's time barrier instead
+# of just its own core, every deadline below would be unreachable, the run
+# would stall rather than fail, and no verdict would come out at all.
+#
+#     `machine Pause`      the machine stops reporting to the barrier, virtual
+#                          time stops for EVERY machine, and this scenario
+#                          cannot reach step 8. That is a stalled run, not a
+#                          failing one.
+#     `cpu.IsHalted`       the machine stays in the barrier executing nothing.
+#                          The BMS keeps running, its 10 ms tick keeps counting,
+#                          and it notices the silence exactly on schedule.
+#
+# See PROJECT-V2 3.6 and 28.1. The unit tests assert that the engine spells it
+# the second way; only this scenario shows that the second way behaves.
+#
+# WHAT IT ASSERTS ABOUT THE FIRMWARE
+# -----------------------------------------------------------------------------
+# The same rule heartbeat-loss checks, because a hung peer and a muted peer must
+# look identical to the device under test — it can only see the absence of
+# frames, and firmware that distinguished the two would be reading something it
+# does not have:
+#
+#     firmware/bms/src/bms.h     #define BMS_VCU_TIMEOUT_MS 300U
+#     firmware/bms/src/safety.c  RUNNING only, latching, `>=` on the window
+#
+# BOTH EDGES, for the reason heartbeat-loss gives: requiring only that the fault
+# eventually arrives would pass against firmware that failed the vehicle on the
+# first missed beat.
+#
+# HOW THIS FAILS
+# -----------------------------------------------------------------------------
+# A frozen core that was not really frozen keeps beating, and step 8 finds no
+# fault frame. A freeze that stopped virtual time never reaches step 8 at all.
+# Neither one can report PASS.
+# =============================================================================
+
+id: heartbeat-freeze
+title: A vehicle controller whose core hangs while driving opens the contactor
+description: >
+  Bring HV up, then halt the vehicle controller's core so that its firmware
+  stops executing entirely. For the first 150 ms of silence no fault may be
+  raised. By 300 ms after the last beat the fault frame must carry
+  HEARTBEAT_LOST and the contactor must open — which can only be observed if
+  virtual time went on flowing for every other machine while that core was
+  halted. Letting the core run again must not clear the latched fault.
+
+steps:
+
+  # 1. Nothing is asserted until the device under test says it is up.
+  - wait_uart:
+      node: bms
+      text: "BMS ready"
+      timeout_ms: 100
+
+  - mark: "no charge session; the rider requests drive"
+
+  # 2. This rule only applies while driving, so the pack must genuinely be
+  #    driving: the charge port stays idle, and the vehicle asks for drive.
+  - node_signal:
+      node: charger
+      id: 0x300
+      signals:
+        charge_state: IDLE
+
+  - node_signal:
+      node: vcu
+      id: 0x200
+      signals:
+        drive_state: DRIVE
+
+  # 3. HV comes up. The state is read off the device under test's own console,
+  #    which names it outright.
+  - wait_uart:
+      node: bms
+      text: "bms state PRECHARGE -> RUNNING"
+      timeout_ms: 500
+      label: "the pack is running: the state this rule applies in"
+
+  # 4. The control. While the beats keep arriving there is no fault to see, so
+  #    a fault frame after the freeze can only be the one the freeze caused.
+  - expect_no_can:
+      id: 0x604
+      for_ms: 150
+      label: "no fault while the beats keep arriving"
+
+  - mark: "the vehicle controller's core hangs"
+
+  # 5. The stimulus. From here the vehicle controller executes no instruction:
+  #    not its main loop, not its timer callback, not its CAN driver. The
+  #    measured reaction below runs from this instant.
+  - node_freeze:
+      node: vcu
+
+  # 6. The near edge of the window: one or two missed beats are not a failure.
+  #    The last beat arrived at most 100 ms before the freeze, so the earliest
+  #    a correct firmware can fault is 200 ms after it — this window closes at
+  #    150 ms and cannot clip a correct reaction.
+  #
+  #    This step is also the first evidence that time did not stop: a stalled
+  #    emulation cannot complete a 150 ms observation window either.
+  - expect_no_can:
+      id: 0x604
+      for_ms: 150
+      label: "one or two missed beats do not fault the vehicle"
+
+  # 7. The far edge, and the whole point. The device under test measured a
+  #    300 ms deadline against a peer that was executing nothing, and it could
+  #    only do that because its own clock kept running. Only fault_code is
+  #    named, so the rolling fault_counter is outside the mask.
+  - expect_can:
+      id: 0x604
+      signals:
+        fault_code: HEARTBEAT_LOST
+      within_ms: 200
+      label: "a hung peer raises HEARTBEAT_LOST on the same deadline as a silent one"
+
+  # 8. The failsafe itself. The fault frame is how the decision is observed; the
+  #    contactor opening is the decision.
+  - expect_can:
+      id: 0x602
+      signals:
+        contactor_state: OPEN
+      within_ms: 150
+      label: "the contactor opens: torque is nobody's to command"
+
+  - mark: "the core runs again; the fault must not clear"
+
+  # 9. The other half of the verb, and the same latch heartbeat-loss checks.
+  #    A core that starts executing again resumes its beats, which is exactly
+  #    the condition that would clear a non-latching rule.
+  - node_resume:
+      node: vcu
+
+  - expect_can:
+      id: 0x604
+      signals:
+        fault_code: HEARTBEAT_LOST
+      within_ms: 600
+      label: "HEARTBEAT_LOST stays latched once the core runs again"

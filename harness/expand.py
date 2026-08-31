@@ -22,7 +22,7 @@ Tests are derived, ephemeral, and regenerated on every run, which is why the
 output directory is gitignored: committing them would create a second source of
 truth and make this generator unverifiable.
 
-Each emitted test is a plain scenario in the eleven verbs. The compiler runs it
+Each emitted test is a plain scenario in the engine's verbs. The compiler runs it
 with no knowledge that a generator produced it, and every test is validated
 through the compiler's own loader before it is written, so "runnable" is a check
 here rather than a claim.
@@ -197,7 +197,7 @@ class Duration:
         return self.us
 
     def milliseconds(self, where: str) -> int:
-        """The whole milliseconds the eleven verbs are written in."""
+        """The whole milliseconds the verbs are written in."""
         if self.us % _US_PER["ms"] != 0:
             raise ExpandError(
                 "%s: %s is not a whole number of milliseconds, and every window "
@@ -452,7 +452,7 @@ def _construct_names(steps) -> set:
 
     Stopping at the verb is the whole point rather than a detail. A walk that
     descended into a verb's parameters would read the ordinary parameter names of
-    the eleven verbs as blocks, so every pattern in the library would be refused
+    the engine's verbs as blocks, so every pattern in the library would be refused
     for naming a block it never wrote.
     """
     found = set()

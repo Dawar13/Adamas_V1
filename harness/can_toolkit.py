@@ -901,6 +901,60 @@ def mc_bench_silence(node, silence):
     _write(_now_us(), 'STIM', 'node_silence %s=%d' % (name, 1 if want else 0))
 
 
+def mc_bench_freeze(node, cpu_path, halted):
+    """bench_freeze "<node>" "<cpu path>" "1"|"0" -- halt or un-halt a core.
+
+    HALT, NEVER PAUSE. The difference is not a preference:
+
+        machine Pause    the machine stops reporting to the time barrier, so
+                         VIRTUAL TIME STOPS FOR EVERY MACHINE. Every deadline
+                         in the scenario becomes unreachable and the run
+                         deadlocks instead of producing a verdict.
+
+        cpu.IsHalted     the machine stays in the barrier and executes nothing.
+                         Virtual time keeps flowing for everyone, and the
+                         node's peers can observe that it went quiet -- which
+                         is the only reason this verb exists.
+
+    There is no Pause anywhere in this file, and a test asserts that there
+    never is one.
+
+    The core is named by the board file, like every other peripheral. This file
+    names nothing."""
+    name = _s(node)
+    want = _bool(halted, 'halted')
+    mach = _node(name, 'bench_freeze')['machine']
+
+    cp = _s(cpu_path)
+    if cp == '':
+        _fail('bench_freeze', 'no-cpu-named:' + name)
+    try:
+        cpu = mach[cp]
+    except Exception, e:
+        _fail('bench_freeze', 'no-such-peripheral:' + name + '/' + cp + ':' + str(e))
+    if cpu is None:
+        _fail('bench_freeze', 'no-such-peripheral:' + name + '/' + cp)
+
+    try:
+        cpu.IsHalted = want
+    except Exception, e:
+        _fail('bench_freeze', 'cannot-halt:' + name + '/' + cp + ':' + str(e))
+
+    # Read it back. A model that accepts the write and ignores it would leave
+    # the node running while the event log says it was frozen: a stimulus that
+    # never happened, sitting beside a PASS. That is the exact shape of the
+    # worst bug this engine has had (N2), so it is checked rather than assumed.
+    try:
+        got = bool(cpu.IsHalted)
+    except Exception, e:
+        _fail('bench_freeze', 'cannot-read-back:' + name + '/' + cp + ':' + str(e))
+    if got != want:
+        _fail('bench_freeze', 'halt-did-not-take:%s/%s want=%d got=%d'
+              % (name, cp, 1 if want else 0, 1 if got else 0))
+
+    _write(_now_us(), 'STIM', 'node_freeze %s=%d' % (name, 1 if want else 0))
+
+
 # --- symbols -----------------------------------------------------------------
 
 def _resolve(node, symbol, what):

@@ -105,6 +105,8 @@ VERBS = (
     "wait_uart",
     "node_signal",
     "node_silence",
+    "node_freeze",
+    "node_resume",
     "can_send",
     "flood",
     "write_symbol",
@@ -450,6 +452,8 @@ STEP_KEYS = {
     "flood":         {"node", "id", "count", "data_hex", "signals"},
     "node_signal":   {"node", "id", "signals"},
     "node_silence":  {"node", "silence"},
+    "node_freeze":   {"node"},
+    "node_resume":   {"node"},
 }
 
 
@@ -1326,6 +1330,68 @@ class Compiler:
             % (_safe_name(node.id, where), 1 if silence else 0)
         )
 
+    def _verb_node_freeze(self, step):
+        """Stop a node's core executing, leaving virtual time running."""
+        self._halt_core(step, True)
+
+    def _verb_node_resume(self, step):
+        """Let a frozen core execute again."""
+        self._halt_core(step, False)
+
+    def _halt_core(self, step, halt: bool):
+        """Halt or un-halt the core behind a node. HALT, NEVER PAUSE.
+
+        `machine Pause` stops that machine reporting to the time barrier, and
+        virtual time then stops for EVERY machine in the emulation: every
+        deadline in the scenario becomes unreachable and the run deadlocks
+        instead of producing a verdict. Halting the core leaves the machine in
+        the barrier executing nothing, so its peers keep running and can observe
+        that it went quiet -- which is the only reason this verb exists.
+
+        The emulator-side command is where that distinction is actually
+        enforceable, and it is asserted there too.
+        """
+        where = step.where
+        node = self._node(step.need("node"), where)
+
+        # A frame player has no core. This refuses rather than degrading to
+        # "stop the player", because the two are not the same experiment: a
+        # silenced player is a node that chose to stop talking, and a frozen
+        # core is a node that stopped doing everything, including servicing the
+        # peripheral that would have acknowledged a frame.
+        if not node.is_real():
+            raise CompileError(
+                "%s: node %r is a frame player, and %r halts a core that is "
+                "executing firmware. There is no core behind a player to "
+                "halt.\n"
+                "  To take this node off the bus, use   node_silence: "
+                "{ node: %s, silence: true }   which works on either kind of "
+                "node.\n"
+                "  To model a hung ECU here, give the node firmware "
+                "(type: real) in the topology file. No scenario changes."
+                % (where, node.id, step.verb, node.id)
+            )
+
+        board = self.boards.board(node.board, where)
+        core = board.get("cpu_peripheral")
+        if not core:
+            raise CompileError(
+                "%s: board %r does not name the core, so there is nothing to "
+                "halt.\n"
+                "  Add   cpu_peripheral: <name>   to that board in %s.\n"
+                "  The engine must not guess what a core is called on a "
+                "customer's part: a guess that resolved to nothing would halt "
+                "nothing, and the scenario would still report PASS."
+                % (where, node.board, self.boards.source)
+            )
+
+        self._emit(
+            'bench_freeze "%s" "%s" "%d"'
+            % (_safe_name(node.id, where),
+               _safe_name(core, "%s: cpu_peripheral" % where),
+               1 if halt else 0)
+        )
+
     # -- the whole script -------------------------------------------------
 
     def compile(self, event_log: Path) -> Compilation:
@@ -1354,6 +1420,8 @@ class Compiler:
             "flood": self._verb_flood,
             "node_signal": self._verb_node_signal,
             "node_silence": self._verb_node_silence,
+            "node_freeze": self._verb_node_freeze,
+            "node_resume": self._verb_node_resume,
         }
         for step in self.scenario.steps:
             _check_step_keys(step)

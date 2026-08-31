@@ -143,5 +143,158 @@ class TestStepKeysAcceptEveryShippedScenario(unittest.TestCase):
         self.assertEqual(sorted(rs.STEP_KEYS), sorted(rs.VERBS))
 
 
+class TestNodeFreezeRefusesWhatItCannotDo(unittest.TestCase):
+    """`node_freeze` halts a core, so it needs a core, and it needs it named.
+
+    Both refusals are checked in both directions (NN-9): a scripted node is
+    refused for freeze AND for resume, and a real node is accepted for freeze
+    AND for resume. A guard that refuses everything is not a guard, and a pair
+    of verbs where only one half refuses is a hole with a symmetric name.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        # Through the engine's own loaders, reached the way the engine reaches
+        # them. A second import path here would be a second definition of what
+        # a topology is (NN-5).
+        cls.net = rs.topology.load(None)
+        cls.cat = rs.contract.load(None)
+        cls.boards = rs.BoardBook.load(REPO_ROOT / "harness" / "boards.yml")
+        cls.real = cls.net.dut().id
+        scripted = [n.id for n in cls.net.scripted_nodes()]
+        assert scripted, "the topology has no scripted node, so this is vacuous"
+        cls.scripted = scripted[0]
+
+    def compiler(self, boards=None):
+        scenario = rs.Scenario(
+            {"id": "freeze-unit", "steps": [{"mark": "unit test"}]},
+            Path("test-scenario.yml"),
+        )
+        return rs.Compiler(
+            self.net, self.cat, boards or self.boards, scenario,
+            REPO_ROOT / "harness" / "out" / "freeze-unit", False,
+        )
+
+    def run_verb(self, verb, node, boards=None):
+        """Compile one step and return the emitted lines.
+
+        The handler is called directly rather than through compile(), so this
+        needs no built firmware: what is under test is the refusal, and a test
+        that only runs when three binaries happen to exist is a test that
+        quietly stops running.
+        """
+        compiler = self.compiler(boards)
+        step = rs.Step(0, verb, {"node": node}, "test-scenario.yml: step 1")
+        {"node_freeze": rs.Compiler._verb_node_freeze,
+         "node_resume": rs.Compiler._verb_node_resume}[verb](compiler, step)
+        return compiler.result.lines
+
+    def test_a_scripted_node_is_refused_by_both_halves(self):
+        for verb in ("node_freeze", "node_resume"):
+            with self.subTest(verb=verb):
+                with self.assertRaises(rs.CompileError) as ctx:
+                    self.run_verb(verb, self.scripted)
+                message = str(ctx.exception)
+                self.assertIn(self.scripted, message)
+                # It must say why, and name both ways forward: the verb that
+                # works on either kind of node, and the topology change that
+                # makes this one work here.
+                self.assertIn("frame player", message)
+                self.assertIn("node_silence", message)
+                self.assertIn("type: real", message)
+
+    def test_a_real_node_is_accepted_by_both_halves(self):
+        # The other direction. Without it, a refusal that fired on every node
+        # would pass the test above while making the verb unusable.
+        for verb, flag in (("node_freeze", "1"), ("node_resume", "0")):
+            with self.subTest(verb=verb):
+                lines = [line for line in self.run_verb(verb, self.real)
+                         if line.startswith("bench_freeze")]
+                self.assertEqual(len(lines), 1, lines)
+                self.assertIn('"%s"' % self.real, lines[0])
+                self.assertTrue(lines[0].endswith('"%s"' % flag), lines[0])
+                self.assertNotIn("Pause", lines[0])
+
+    def test_a_board_that_names_no_core_is_refused_not_guessed(self):
+        # A guessed peripheral name resolves to nothing, halts nothing, and the
+        # scenario still reports PASS.
+        stripped = {}
+        for key in self.boards.keys():
+            entry = dict(self.boards.board(key, "test"))
+            entry.pop("cpu_peripheral", None)
+            stripped[key] = entry
+        boards = rs.BoardBook(stripped, Path("test-boards.yml"))
+        board_key = self.net.node(self.real).board
+        for verb in ("node_freeze", "node_resume"):
+            with self.subTest(verb=verb):
+                with self.assertRaises(rs.CompileError) as ctx:
+                    self.run_verb(verb, self.real, boards=boards)
+                message = str(ctx.exception)
+                self.assertIn(board_key, message)
+                self.assertIn("cpu_peripheral", message)
+
+    def test_the_pair_is_registered_everywhere_it_has_to_be(self):
+        for verb in ("node_freeze", "node_resume"):
+            with self.subTest(verb=verb):
+                self.assertIn(verb, rs.VERBS)
+                self.assertIn(verb, rs.STEP_KEYS)
+
+
+class TestFreezeIsHaltNeverPause(unittest.TestCase):
+    """The one distinction this verb exists to get right (PROJECT-V2 3.6, 28.1).
+
+    `machine Pause` stops that machine reporting to the time barrier, virtual
+    time stops for EVERY machine, and every deadline in the run becomes
+    unreachable -- so the run deadlocks rather than failing, and a deadlocked
+    run produces no verdict at all.
+
+    can_toolkit.py is IronPython 2 and cannot be imported here, so this is
+    structural, like TestToolkitCannotBeForged above. The behavioural proof is a
+    scenario that freezes a node and watches its peers keep running.
+    """
+
+    def setUp(self):
+        self.source = (REPO_ROOT / "harness" / "can_toolkit.py").read_text(
+            encoding="utf-8"
+        )
+
+    def test_the_toolkit_halts_the_core(self):
+        self.assertIn("def mc_bench_freeze(", self.source)
+        start = self.source.index("def mc_bench_freeze(")
+        self.assertIn("cpu.IsHalted = want", self.source[start:start + 2600])
+
+    def test_the_toolkit_never_pauses_anything(self):
+        # Any pause of a machine or an emulation is this bug, whatever the call
+        # site calls it. Calls only -- the prose above deliberately names the
+        # thing it forbids, and a check that could not tell an explanation from
+        # an instruction would have to be deleted the first time someone
+        # documented the rule.
+        offenders = [
+            line.strip()
+            for line in self.source.splitlines()
+            if ".Pause(" in line or "Pause()" in line
+        ]
+        self.assertEqual(offenders, [], "; ".join(offenders))
+
+    def test_the_compiler_emits_no_pause_either(self):
+        # The other half of the same rule: the monitor spelling is `machine
+        # Pause`, and it would be emitted from the compiler, not from here.
+        engine = (REPO_ROOT / "harness" / "run_scenarios.py").read_text(
+            encoding="utf-8"
+        )
+        offenders = [
+            line.strip()
+            for line in engine.splitlines()
+            if "machine Pause" in line and "_emit" in line
+        ]
+        self.assertEqual(offenders, [], "; ".join(offenders))
+
+    def test_the_halt_is_read_back_rather_than_assumed(self):
+        # A model that accepts the write and ignores it would leave the node
+        # running while the event log says it was frozen.
+        start = self.source.index("def mc_bench_freeze(")
+        self.assertIn("halt-did-not-take", self.source[start:start + 2600])
+
+
 if __name__ == "__main__":
     unittest.main()

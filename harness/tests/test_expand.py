@@ -699,6 +699,10 @@ class TestTheShippedSuiteAgreesAboutTheStartingPICTURE(unittest.TestCase):
     #: legitimately differ there.
     STIMULUS_VERBS = frozenset({
         "write_symbol", "node_signal", "node_silence", "can_send", "flood",
+        # Halting a core and letting it run again are things done TO the
+        # device, so a claim made after either is a reaction to the test and
+        # not part of the starting picture.
+        "node_freeze", "node_resume",
     })
 
     #: And the verb that deliberately lets virtual time pass. A claim made after
