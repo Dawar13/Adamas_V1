@@ -84,6 +84,7 @@ if str(_HERE) not in sys.path:
 
 import catalog as contract          # noqa: E402  the CAN contract loader
 import project                      # noqa: E402  where the project is
+import pool                         # noqa: E402  live emulator processes
 import network as topology          # noqa: E402  the topology loader
 from yaml_strict import StrictBoolLoader  # noqa: E402
 
@@ -165,6 +166,23 @@ class CompileError(Exception):
 
 class Refusal(Exception):
     """We can define this run but cannot execute it, so we produce no verdict."""
+
+
+class WorkerLost(Exception):
+    """The emulator holding this run died, so the run did not happen.
+
+    DELIBERATELY NOT AN EMULATOR EXIT CODE. A non-zero exit from an emulator
+    that RAN is a hard failure of the run and the judge says so. A worker that
+    died is a different thing: there is nothing to judge, and calling the judge
+    anyway produces the one bug this codebase has already paid for --
+
+        scar tissue #5: a crash counted as a test failure. An unhandled
+        exception makes Python exit 1, which is exactly EXIT_FAIL, so a crash
+        and "the firmware did not do what the test asserted" arrived at the
+        caller as the same answer.
+
+    Our crash must never be reported as the customer's firmware failing.
+    """
 
 
 # ---------------------------------------------------------------------------
@@ -1668,6 +1686,86 @@ class Emulator:
         return done.returncode, text, launcher
 
 
+class WarmEmulator(Emulator):
+    """The same contract as Emulator, against a process that is already up.
+
+    `run_script` is the only seam the rest of the engine knows about: it takes a
+    compiled script and returns (exit code, console text, launcher). Everything
+    downstream -- the judge, the store, provenance -- cannot tell which side of
+    this seam a run came from, and that is the point. What it must never do is
+    produce a DIFFERENT run; that is checked by comparison, not by assertion.
+
+    The launcher it writes is the standalone command for the same script, and
+    it is honest: the .resc on disk still ends with `quit`, so running that
+    command reproduces this run in a fresh process. Only the text SENT to the
+    live worker has the quit removed.
+    """
+
+    def __init__(self, out_dir: Path, endpoint: str, distro: str = None):
+        super().__init__(out_dir, distro)
+        self.endpoint = endpoint
+        self.worker = None
+
+    def attach(self):
+        host, _, port = self.endpoint.partition(":")
+        if not port.isdigit():
+            raise Refusal(
+                "REFUSING TO EXECUTE: --worker %r is not host:port.\n\n"
+                "A worker is a live emulator listening for Monitor commands."
+                % self.endpoint
+            )
+        try:
+            self.worker = pool.Worker.attach_existing(host or "127.0.0.1", int(port))
+        except pool.WorkerError as exc:
+            raise Refusal(
+                "REFUSING TO EXECUTE: no emulator answered at %s.\n\n%s\n\n"
+                "A pooled run needs a live worker. Start one, or drop --worker "
+                "and let this run start its own emulator." % (self.endpoint, exc)
+            ) from None
+
+    def executed_by(self) -> dict:
+        """How this run was executed, for the reproduction note."""
+        return {
+            "endpoint": self.endpoint,
+            "command": "renode -P %s --disable-xwt --plain"
+                       % self.endpoint.partition(":")[2],
+        }
+
+    def run_script(self, resc: Path, log: Path, timeout: int):
+        if self.worker is None:
+            self.attach()
+        launcher = self._launcher(
+            "launch.sh",
+            "#!/usr/bin/env bash\n"
+            "# This run was executed by a warm worker. This is the standalone\n"
+            "# command for the same script, which reproduces it in a fresh\n"
+            "# process -- the two are byte-identical, and that is checked.\n"
+            "set -u\n"
+            '. "%s"\n'
+            'exec "$BENCH_RENODE" --console --disable-xwt --plain "%s"\n'
+            % (self.path(self.env_script), self.path(resc)),
+        )
+        try:
+            # BEFORE, not after: a worker whose previous borrower died without
+            # tidying up is exactly the worker this run would inherit. Making
+            # each run responsible for its own clean start means no run depends
+            # on the good behaviour of the one before it.
+            self.worker.ensure_state_probe(
+                self.out_dir / "worker_state.py",
+                as_seen_by_worker=self.path(self.out_dir / "worker_state.py"))
+            self.worker.reset()
+            text = self.worker.run_resc(resc, timeout)
+        except pool.WorkerError as exc:
+            # Raised, not returned: a returned exit code would flow into the
+            # judge, become a hard failure, and leave the caller holding a FAIL
+            # that reads as a statement about the firmware.
+            log.write_text("worker failure: %s\n" % exc, encoding="utf-8",
+                           newline="\n")
+            raise WorkerLost(str(exc)) from None
+        log.write_text(text, encoding="utf-8", newline="\n")
+        return 0, text, launcher
+
+
 # ---------------------------------------------------------------------------
 # the event log
 # ---------------------------------------------------------------------------
@@ -2091,7 +2189,7 @@ def _tier_note(tier: str) -> str:
 
 
 def write_replay(path: Path, scenario, command, resc, versions, observed, inputs,
-                 hub, tier, tier_note):
+                 hub, tier, tier_note, executed_by=None):
     # The tier belongs on every artefact that carries a verdict, not only on
     # the console (PROJECT.md 2.1). A reproduction note found on its own, months
     # later, must still say whether the result it reproduces was authoritative.
@@ -2105,18 +2203,56 @@ def write_replay(path: Path, scenario, command, resc, versions, observed, inputs
         "run tier   %s" % tier,
         "           %s" % tier_note,
         "",
-        "Run it again, from the repository root:",
-        "",
-        "    ./scripts/run.sh %s" % scenario.path,
-        "",
-        "That resolves to exactly this emulator invocation:",
-        "",
-        "    %s" % command,
-        "",
-        "which sources the pinned toolchain and runs:",
-        "",
-        "    $BENCH_RENODE --console --disable-xwt --plain %s" % resc,
-        "",
+    ]
+
+    if executed_by is None:
+        lines += [
+            "Run it again, from the repository root:",
+            "",
+            "    ./scripts/run.sh %s" % scenario.path,
+            "",
+            "That resolves to exactly this emulator invocation:",
+            "",
+            "    %s" % command,
+            "",
+            "which sources the pinned toolchain and runs:",
+            "",
+            "    $BENCH_RENODE --console --disable-xwt --plain %s" % resc,
+            "",
+        ]
+    else:
+        # WHAT EXECUTED AND WHAT REPRODUCES ARE DIFFERENT FACTS, and the note
+        # states both rather than letting one impersonate the other. Before
+        # this, a pooled run's note claimed a standalone command that had never
+        # been run -- true of a run that would produce the same answer, false
+        # about this one.
+        lines += [
+            "This run was executed by a WARM WORKER. The script below was sent",
+            "to an emulator that was already running, at %s, started as:"
+            % executed_by["endpoint"],
+            "",
+            "    %s" % executed_by["command"],
+            "",
+            "The worker was reset before the run and confirmed empty -- no",
+            "machines, virtual time zero -- so nothing from an earlier test was",
+            "inherited.",
+            "",
+            "To reproduce it in a fresh process, from the repository root:",
+            "",
+            "    ./scripts/run.sh %s" % scenario.path,
+            "",
+            "which sources the pinned toolchain and runs:",
+            "",
+            "    $BENCH_RENODE --console --disable-xwt --plain %s" % resc,
+            "",
+            "That standalone command is NOT what ran; it is what reproduces",
+            "what ran. The two are required to produce byte-identical event",
+            "logs, and that is checked (scripts/spike-equivalence.py), not",
+            "assumed.",
+            "",
+        ]
+
+    lines += [
         "Pinned tool versions (from scripts/toolchain-env.sh):",
     ]
     for key in sorted(versions):
@@ -2222,6 +2358,12 @@ def parse_args(argv):
                         help="host-side seconds before the run is abandoned")
     parser.add_argument("--dry-run", action="store_true",
                         help="compile and write the script, run nothing, judge nothing")
+    parser.add_argument(
+        "--worker", default=None, metavar="HOST:PORT",
+        help="EXPERIMENTAL, off by default: run this scenario on a live emulator "
+             "already listening for Monitor commands, instead of starting one. "
+             "Must produce a byte-identical event log to a run that starts its "
+             "own; compare with scripts/spike-equivalence.py")
     parser.add_argument(
         "--snapshot", action="store_true",
         help="EXPERIMENTAL, off by default: boot and settle once, snapshot, and "
@@ -2380,7 +2522,8 @@ def main(argv=None):
             stale.unlink()
 
     try:
-        emulator = Emulator(out_dir, args.wsl_distro)
+        emulator = (WarmEmulator(out_dir, args.worker, args.wsl_distro)
+                    if args.worker else Emulator(out_dir, args.wsl_distro))
         compiler = Compiler(net, cat, boards, scenario, out_dir,
                             emulator.behind_layer, coverage_requested(args),
                             project_root=project_root)
@@ -2456,6 +2599,19 @@ def main(argv=None):
     except Refusal as exc:
         print("\n%s\n" % exc, file=sys.stderr)
         return EXIT_REFUSED
+    except WorkerLost as exc:
+        # The run did not happen. It gets no verdict, no results file, and an
+        # exit code that cannot be read as a statement about the firmware. The
+        # marker is what stops a later reader taking this directory for a run.
+        incomplete_marker.write_text(
+            "This run did not happen: %s\n\n"
+            "The emulator holding it died. There is no verdict here, and the "
+            "absence is deliberate:\na crashed run and a failing test are "
+            "different answers.\n" % exc,
+            encoding="utf-8", newline="\n")
+        print("\nCRASHED: %s\n\nNo verdict is produced for a run that did not "
+              "complete.\n" % exc, file=sys.stderr)
+        return EXIT_CRASHED
 
     log = EventLog(event_log)
 
@@ -2523,6 +2679,8 @@ def main(argv=None):
         replay_file, scenario, emulator.command_text(launcher),
         emulator.path(resc), versions, observed, inputs, hub,
         compiled.tier, _tier_note(compiled.tier),
+        executed_by=(emulator.executed_by()
+                     if isinstance(emulator, WarmEmulator) else None),
     )
 
     results = {
