@@ -9,9 +9,10 @@
 # Nothing else. This script produces no verdict about firmware, no latency and
 # no scenario result. It is not part of the engine, nothing imports it, and it
 # is meant to be deleted once the answer is written down. It modifies no file
-# under harness/; it reads network.yml and harness/boards.yml only so that it
-# cannot become a second, silently diverging definition of this project's
-# topology.
+# under harness/; it reads the project's network.yml and boards.yml only so
+# that it cannot become a second, silently diverging definition of that
+# project's topology. Which project is $BENCH_PROJECT, the same answer the
+# engine uses.
 #
 # WHY THE ANSWER RESHAPES PHASE 1: the runtime plan (25 min -> 3 min) rests on
 # booting a topology once and restoring that state per test. If a snapshot of a
@@ -79,7 +80,7 @@ RUN_MS=500                       # virtual time before the snapshot
 POST_MS=200                      # virtual time after the restore
 TIMEOUT="${SPIKE_TIMEOUT:-900}"  # host seconds per emulator process
 
-WORK="${1:-$REPO/project/spike-snapshot/$(date +%Y-%m-%d-%H%M%S)}"
+WORK="${1:-$BENCH_PROJECT/spike-snapshot/$(date +%Y-%m-%d-%H%M%S)}"
 mkdir -p "$WORK" || exit 2
 
 say()  { printf '%s\n' "$*"; }
@@ -175,11 +176,12 @@ done
 [ -n "$PY" ] || bail "no Python 3 here can import pyyaml, so network.yml cannot be read."
 
 if ! "$PY" - "${NODES[@]}" >"$WORK/nodes.txt" 2>"$WORK/nodes.err" <<'PYEOF'
-import sys, yaml
+import os, sys, yaml
 
 want = sys.argv[1:]
-net = yaml.safe_load(open("network.yml", encoding="utf-8"))
-boards = yaml.safe_load(open("harness/boards.yml", encoding="utf-8"))
+project = os.environ["BENCH_PROJECT"]
+net = yaml.safe_load(open(os.path.join(project, "network.yml"), encoding="utf-8"))
+boards = yaml.safe_load(open(os.path.join(project, "boards.yml"), encoding="utf-8"))
 nodes = {n["id"]: n for n in net["nodes"]}
 buses = set()
 for nid in want:
@@ -194,7 +196,7 @@ for nid in want:
     buses.add(n["buses"][0])
     b = boards.get(n["board"])
     if b is None:
-        sys.exit("harness/boards.yml has no board %r" % n["board"])
+        sys.exit("the project boards.yml has no board %r" % n["board"])
     print("|".join(str(x) for x in (
         nid, n["elf"], b["repl"], b["can_peripheral"], b["uart_peripheral"])))
 if len(buses) != 1:
@@ -208,12 +210,12 @@ fi
 declare -A ELF REPL CAN UART
 while IFS='|' read -r id elf repl can uart; do
 	[ -n "$id" ] || continue
-	[ -f "$REPO/$elf" ] || bail "node '$id' has no binary at $elf.
+	[ -f "$BENCH_PROJECT/$elf" ] || bail "node '$id' has no binary at $elf.
 Build it first (./scripts/build-firmware.sh $id). An absent binary is not
 something to work around."
-	[ -f "$REPO/$repl" ] || bail "node '$id' names a platform file that does not exist: $repl"
-	ELF["$id"]="$REPO/$elf"
-	REPL["$id"]="$REPO/$repl"
+	[ -f "$BENCH_PROJECT/$repl" ] || bail "node '$id' names a platform file that does not exist: $repl"
+	ELF["$id"]="$BENCH_PROJECT/$elf"
+	REPL["$id"]="$BENCH_PROJECT/$repl"
 	CAN["$id"]="$can"
 	UART["$id"]="$uart"
 	say "  node       $id  $can on $HUB, console $uart"

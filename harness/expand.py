@@ -84,6 +84,7 @@ if str(_HERE) not in sys.path:
 
 import network as topology              # noqa: E402  the topology loader
 import run_scenarios as engine          # noqa: E402  the compiler, for validation
+import project                          # noqa: E402  where the project is
 from yaml_strict import load_document   # noqa: E402  one YAML policy, shared
 
 import yaml                             # noqa: E402
@@ -104,8 +105,14 @@ EXIT_OK = 0
 EXIT_REFUSED = 2
 EXIT_LISTED = 4
 
-DEFAULT_PATTERN_DIR = "patterns"
-DEFAULT_SCENARIO_DIR = "scenarios"
+# Inside the PROJECT, not the repository: shapes and tests belong to one
+# customer's answer, and harness/project.py is where that directory is decided.
+DEFAULT_PATTERN_DIR = project.PATTERN_DIR
+DEFAULT_SCENARIO_DIR = project.SCENARIO_DIR
+
+#: The repository, for quoting paths only -- see _relative(). Never for finding
+#: project data.
+REPO_ROOT = _HERE.parent
 DEFAULT_OUT_DIR = ".generated/tests"
 MANIFEST_NAME = "manifest.json"
 
@@ -1669,10 +1676,15 @@ class Plan:
         }
 
 
-def build_plan(repo_root=".", pattern_dir=None, scenario_dir=None,
+def build_plan(project_root=None, pattern_dir=None, scenario_dir=None,
                out_dir=DEFAULT_OUT_DIR, only=None, network_path=None) -> Plan:
-    """Read everything, expand everything, validate everything. Write nothing."""
-    root = Path(repo_root)
+    """Read everything, expand everything, validate everything. Write nothing.
+
+    `project_root` is the PROJECT the shapes and tests belong to; paths in the
+    plan are still quoted relative to the repository, so a manifest reads the
+    same on every machine.
+    """
+    root = project.project_root(project_root)
     patterns_at = Path(pattern_dir) if pattern_dir else root / DEFAULT_PATTERN_DIR
     scenarios_at = (Path(scenario_dir) if scenario_dir
                     else root / DEFAULT_SCENARIO_DIR)
@@ -1692,6 +1704,9 @@ def build_plan(repo_root=".", pattern_dir=None, scenario_dir=None,
     net = _Topology(root if network_path is None else None, network_path)
 
     expansions = [_expand_one(s, patterns, net) for s in scenarios]
+    # Quoted relative to the PROJECT: a manifest is a project artefact, and a
+    # derived file carrying an absolute path is a derived file that differs
+    # between two machines with identical inputs.
     plan = Plan(expansions, out_dir, patterns_at, scenarios_at, root)
 
     claimed = {}
@@ -2435,6 +2450,7 @@ def build_parser() -> argparse.ArgumentParser:
                         % DEFAULT_SCENARIO_DIR)
     parser.add_argument("--topology", default=None,
                         help="override the topology file")
+    project.add_argument(parser)
     return parser
 
 
@@ -2443,13 +2459,13 @@ def main(argv=None) -> int:
     # The inputs and the output are both repository artefacts, so both are
     # resolved against the repository rather than against wherever the caller
     # happened to be standing. `.generated/` is gitignored at that root.
-    root = _HERE.parent
+    root = REPO_ROOT
     out = Path(args.out)
     if not out.is_absolute():
         out = root / out
     try:
         plan = build_plan(
-            repo_root=root,
+            project_root=args.project,
             pattern_dir=args.patterns,
             scenario_dir=args.scenarios,
             out_dir=out,

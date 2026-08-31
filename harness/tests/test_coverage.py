@@ -26,10 +26,17 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from harness import coverage  # noqa: E402
+from harness import project as project_paths  # noqa: E402
+
+# The PROJECT under test, resolved the way the engine resolves it, so a test
+# and the code it exercises can never disagree about which project they mean.
+# PROJECT-V2 §8.1: project data lives in projects/<name>/, not at the root.
+PROJECT_ROOT = project_paths.project_root()
 from harness.yaml_strict import StrictBoolLoader  # noqa: E402
 
 
@@ -984,7 +991,7 @@ class TestTheEngineAsksForWhatThisReaderCanRead(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.script = None
-        scenarios = sorted((REPO_ROOT / "scenarios").glob("*.yml"))
+        scenarios = sorted((PROJECT_ROOT / "scenarios").glob("*.yml"))
         if not scenarios:
             return
         cls.tmp = tempfile.TemporaryDirectory()
@@ -1031,7 +1038,7 @@ class TestTheEngineAsksForWhatThisReaderCanRead(unittest.TestCase):
                          "trace understates coverage")
 
     def test_tracing_is_off_unless_it_is_asked_for(self):
-        scenarios = sorted((REPO_ROOT / "scenarios").glob("*.yml"))
+        scenarios = sorted((PROJECT_ROOT / "scenarios").glob("*.yml"))
         if not scenarios:
             self.skipTest("no scenario to compile")
         with tempfile.TemporaryDirectory() as name:
@@ -1084,7 +1091,7 @@ class TestR1CoverageHoldsNoProjectData(unittest.TestCase):
         spellings = set()        # identifier spellings: matched exactly
         cls.numbers = set()
 
-        catalog_path = REPO_ROOT / "catalog.yml"
+        catalog_path = PROJECT_ROOT / "catalog.yml"
         if catalog_path.is_file():
             from harness import catalog as catalog_module
             cat = catalog_module.load(catalog_path, warn_stream=io.StringIO())
@@ -1099,7 +1106,7 @@ class TestR1CoverageHoldsNoProjectData(unittest.TestCase):
                 spellings.update(cat.enum_for(key).names())
                 spellings.add(key)
 
-        network_path = REPO_ROOT / "network.yml"
+        network_path = PROJECT_ROOT / "network.yml"
         if network_path.is_file():
             from harness import network as network_module
             net = network_module.load(network_path)
@@ -1126,7 +1133,7 @@ class TestR1CoverageHoldsNoProjectData(unittest.TestCase):
             for bus in net.buses():
                 identifiers.add(str(bus.id))
 
-        boards_path = REPO_ROOT / "harness" / "boards.yml"
+        boards_path = PROJECT_ROOT / "boards.yml"
         if boards_path.is_file():
             boards = yaml.load(boards_path.read_text(encoding="utf-8"),
                                Loader=StrictBoolLoader)
@@ -1134,7 +1141,7 @@ class TestR1CoverageHoldsNoProjectData(unittest.TestCase):
                 identifiers.update(str(k) for k in boards)
                 spellings.update(cls._leaf_strings(boards))
 
-        for path in sorted((REPO_ROOT / "scenarios").glob("*.yml")):
+        for path in sorted((PROJECT_ROOT / "scenarios").glob("*.yml")):
             document = yaml.load(path.read_text(encoding="utf-8"),
                                  Loader=StrictBoolLoader)
             if isinstance(document, dict) and document.get("id"):

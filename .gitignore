@@ -43,6 +43,7 @@ harness/out/
 # generator unverifiable.
 .generated/
 suite-run.log
-project/spike-snapshot/
-project/runs/
-project/verify-refusals/
+# Evidence and results belong to the project directory now (PROJECT-V2 §8.1).
+projects/*/spike-snapshot/
+projects/*/verify-refusals/
+projects/*/runs/

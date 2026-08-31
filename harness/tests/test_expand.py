@@ -23,11 +23,18 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from harness import expand  # noqa: E402
 from harness import run_scenarios as engine  # noqa: E402
+from harness import project as project_paths  # noqa: E402
+
+# The PROJECT under test, resolved the way the engine resolves it, so a test
+# and the code it exercises can never disagree about which project they mean.
+# PROJECT-V2 §8.1: project data lives in projects/<name>/, not at the root.
+PROJECT_ROOT = project_paths.project_root()
 from harness.yaml_strict import load_document  # noqa: E402
 
 
@@ -196,7 +203,7 @@ PATTERN_YAML_NAME = r'"([A-Za-z0-9_./-]+\\.ya?ml)"'
 
 #: Words present in the project data files that are UNIVERSAL to the tool
 #: rather than particular to one vehicle. The tier names are the clear case:
-#: harness/boards.yml carries "tier: declared", so a greedy scrape of that
+#: The project's boards.yml carries "tier: declared", so a greedy scrape of that
 #: file treats a core engine concept as project data and forbids the engine
 #: from naming its own vocabulary.
 #:
@@ -237,7 +244,7 @@ class Workspace:
 
     def plan(self, **kwargs):
         return expand.build_plan(
-            repo_root=self.root,
+            project_root=self.root,
             pattern_dir=self.patterns,
             scenario_dir=self.scenarios,
             out_dir=self.out,
@@ -614,11 +621,11 @@ class TestShippedScenariosAreUnchanged(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.scenarios = REPO_ROOT / "scenarios"
+        cls.scenarios = PROJECT_ROOT / "scenarios"
         if not cls.scenarios.is_dir():
             raise unittest.SkipTest("no scenarios directory in this tree")
         cls.plan = expand.build_plan(
-            repo_root=REPO_ROOT,
+            project_root=PROJECT_ROOT,
             out_dir=REPO_ROOT / ".generated" / "tests",
         )
 
@@ -713,7 +720,7 @@ class TestTheShippedSuiteAgreesAboutTheStartingPICTURE(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.plan = expand.build_plan(repo_root=REPO_ROOT)
+        cls.plan = expand.build_plan(project_root=PROJECT_ROOT)
 
     def test_the_verbs_named_here_are_the_engines_own(self):
         # Derived, so a verb renamed later fails this check rather than leaving
@@ -1275,7 +1282,7 @@ class TestShippedPatternsLoad(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.directory = REPO_ROOT / "patterns"
+        cls.directory = PROJECT_ROOT / "patterns"
         if not cls.directory.is_dir():
             raise unittest.SkipTest("no patterns directory in this tree")
         cls.paths = sorted(cls.directory.glob("*.yml"))
@@ -1339,7 +1346,7 @@ class TestR1GeneratorHoldsNoProjectData(unittest.TestCase):
         cls.names = set()
         cls.numbers = set()
 
-        catalog_path = REPO_ROOT / "catalog.yml"
+        catalog_path = PROJECT_ROOT / "catalog.yml"
         if catalog_path.is_file():
             from harness import catalog as catalog_module
             cat = catalog_module.load(catalog_path, warn_stream=io.StringIO())
@@ -1354,7 +1361,7 @@ class TestR1GeneratorHoldsNoProjectData(unittest.TestCase):
                 cls.names.update(cat.enum_for(key).names())
                 cls.names.add(key)
 
-        network_path = REPO_ROOT / "network.yml"
+        network_path = PROJECT_ROOT / "network.yml"
         if network_path.is_file():
             from harness import network as network_module
             net = network_module.load(network_path)
@@ -1381,7 +1388,7 @@ class TestR1GeneratorHoldsNoProjectData(unittest.TestCase):
                                     or not token.islower()):
                                 cls.names.add(token)
 
-        boards_path = REPO_ROOT / "harness" / "boards.yml"
+        boards_path = PROJECT_ROOT / "boards.yml"
         if boards_path.is_file():
             boards = load_document(boards_path.read_text(encoding="utf-8"))
             cls.names.update(cls._board_vocabulary(boards))
@@ -1423,7 +1430,7 @@ class TestR1GeneratorHoldsNoProjectData(unittest.TestCase):
         self.assertEqual(
             hits, [],
             "project data leaked into the generator; it belongs in "
-            "catalog.yml, network.yml, harness/boards.yml or scenarios/:\n"
+            "the project's catalog.yml, network.yml, boards.yml or scenarios/:\n"
             + "\n".join(hits))
 
     def test_no_message_identifier_appears_in_the_generator(self):
@@ -1580,10 +1587,10 @@ class TestSweepSidesFollowTheRuleDirection(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        if not (REPO_ROOT / "scenarios").is_dir():
+        if not (PROJECT_ROOT / "scenarios").is_dir():
             raise unittest.SkipTest("no scenarios directory in this tree")
         cls.plan = expand.build_plan(
-            repo_root=REPO_ROOT,
+            project_root=PROJECT_ROOT,
             out_dir=REPO_ROOT / ".generated" / "tests",
         )
 

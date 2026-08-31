@@ -216,6 +216,7 @@ _HERE = Path(__file__).resolve().parent
 REPO_ROOT = _HERE.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+import project                          # noqa: E402  where the project is
 
 from harness import run_scenarios as engine   # noqa: E402
 
@@ -693,7 +694,7 @@ def collect(runs, toolchain: Toolchain):
                     "one build at a time."
                     % (node, entry.sha256[:16], machine["sha256"][:16],
                        run.test))
-            table = toolchain.symbol_table(REPO_ROOT / machine["binary"])
+            table = toolchain.symbol_table(project.project_root() / machine["binary"])
             entry.add(run.test, table, read_trace(machine["trace"]))
     return nodes
 
@@ -1098,7 +1099,7 @@ def resolve_subject():
     """
     try:
         from harness import network as topology
-        return str(topology.load(REPO_ROOT / "network.yml").dut().id)
+        return str(topology.load(project.network_path()).dut().id)
     except Exception:
         return None
 
@@ -1123,6 +1124,9 @@ def check_work_is_outside(work: Path, runs: Path) -> None:
 
 
 def _resolve(path):
+    # Paths quoted by a results file are repository-relative, and that is
+    # what this resolves. Project data reaches this module already
+    # resolved, through the results file that recorded it.
     return Path(path) if os.path.isabs(str(path)) else (REPO_ROOT / str(path))
 
 

@@ -32,10 +32,16 @@ if str(HARNESS_DIR) not in sys.path:
     sys.path.insert(0, str(HARNESS_DIR))
 
 import catalog as catalog_module  # noqa: E402
+from harness import project as project_paths  # noqa: E402
+
+# The PROJECT under test, resolved the way the engine resolves it, so a test
+# and the code it exercises can never disagree about which project they mean.
+# PROJECT-V2 §8.1: project data lives in projects/<name>/, not at the root.
+PROJECT_ROOT = project_paths.project_root()
 import gen_dbc  # noqa: E402
 
 
-PROJECT_CATALOG = REPO_ROOT / "catalog.yml"
+PROJECT_CATALOG = PROJECT_ROOT / "catalog.yml"
 
 
 # ---------------------------------------------------------------------------

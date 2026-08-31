@@ -15,6 +15,12 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from harness import run_scenarios as rs  # noqa: E402
+from harness import project as project_paths  # noqa: E402
+
+# The PROJECT under test, resolved the way the engine resolves it, so a test
+# and the code it exercises can never disagree about which project they mean.
+# PROJECT-V2 §8.1: project data lives in projects/<name>/, not at the root.
+PROJECT_ROOT = project_paths.project_root()
 
 
 class TestWindowDurations(unittest.TestCase):
@@ -122,7 +128,7 @@ class TestStepKeysAcceptEveryShippedScenario(unittest.TestCase):
         from harness.yaml_strict import StrictBoolLoader
 
         offenders = []
-        for path in sorted((REPO_ROOT / "scenarios").rglob("*.yml")):
+        for path in sorted((PROJECT_ROOT / "scenarios").rglob("*.yml")):
             doc = yaml.load(path.read_text(encoding="utf-8"), Loader=StrictBoolLoader)
             for index, step in enumerate(doc.get("steps") or []):
                 for verb, params in step.items():
@@ -159,7 +165,7 @@ class TestNodeFreezeRefusesWhatItCannotDo(unittest.TestCase):
         # a topology is (NN-5).
         cls.net = rs.topology.load(None)
         cls.cat = rs.contract.load(None)
-        cls.boards = rs.BoardBook.load(REPO_ROOT / "harness" / "boards.yml")
+        cls.boards = rs.BoardBook.load(PROJECT_ROOT / "boards.yml")
         cls.real = cls.net.dut().id
         scripted = [n.id for n in cls.net.scripted_nodes()]
         assert scripted, "the topology has no scripted node, so this is vacuous"

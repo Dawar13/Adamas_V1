@@ -18,6 +18,12 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from harness import perturbation                     # noqa: E402
+from harness import project as project_paths  # noqa: E402
+
+# The PROJECT under test, resolved the way the engine resolves it, so a test
+# and the code it exercises can never disagree about which project they mean.
+# PROJECT-V2 §8.1: project data lives in projects/<name>/, not at the root.
+PROJECT_ROOT = project_paths.project_root()
 
 
 def result_document(verdict="PASS", headline=400, assertions=None):
@@ -183,14 +189,14 @@ class TestR1TheComparatorHoldsNoProjectData(unittest.TestCase):
         source = (REPO_ROOT / "harness" / "perturbation.py").read_text(
             encoding="utf-8").lower()
         forbidden = set()
-        catalog_path = REPO_ROOT / "catalog.yml"
+        catalog_path = PROJECT_ROOT / "catalog.yml"
         if catalog_path.is_file():
             cat = catalog_module.load(catalog_path, warn_stream=io.StringIO())
             for message in cat.messages():
                 forbidden.add(message.name)
                 for signal in message.signals:
                     forbidden.add(signal.name)
-        network_path = REPO_ROOT / "network.yml"
+        network_path = PROJECT_ROOT / "network.yml"
         if network_path.is_file():
             net = network_module.load(network_path)
             for node in net.nodes():

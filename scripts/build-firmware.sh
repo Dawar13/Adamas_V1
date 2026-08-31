@@ -6,8 +6,12 @@
 #
 # Everything is resolved from project data, never from arguments or constants:
 #
-#   network.yml         node -> board key, elf path, boot_text, bus
-#   harness/boards.yml  board key -> zephyr_board, peripherals, can_bitrate
+#   <project>/network.yml   node -> board key, elf path, boot_text, bus
+#   <project>/boards.yml    board key -> zephyr_board, peripherals, bitrate
+#
+# The project is $BENCH_PROJECT (scripts/toolchain-env.sh), which is where
+# every path below is resolved from. Paths inside network.yml are relative
+# to the project, not to the repository.
 #
 # so this script contains no board name, no peripheral name and no bitrate.
 #
@@ -58,12 +62,13 @@ read_node() {
 	"$PY" - "$NODE" <<'PYEOF'
 import sys, yaml, os, shlex
 node_id = sys.argv[1]
-net = yaml.safe_load(open("network.yml", encoding="utf-8"))
-boards = yaml.safe_load(open("harness/boards.yml", encoding="utf-8"))
+project = os.environ["BENCH_PROJECT"]
+net = yaml.safe_load(open(os.path.join(project, "network.yml"), encoding="utf-8"))
+boards = yaml.safe_load(open(os.path.join(project, "boards.yml"), encoding="utf-8"))
 
 nodes = {n["id"]: n for n in net["nodes"]}
 if node_id not in nodes:
-    sys.exit("no node %r in network.yml (have: %s)" % (node_id, ", ".join(sorted(nodes))))
+    sys.exit("no node %r in the project network.yml (have: %s)" % (node_id, ", ".join(sorted(nodes))))
 n = nodes[node_id]
 if n.get("type") != "real":
     sys.exit("node %r is type %r; only real nodes have firmware to build"
@@ -72,7 +77,8 @@ if n.get("type") != "real":
 key = n.get("board")
 b = boards.get(key)
 if b is None:
-    sys.exit("node %r names board %r, which is not in harness/boards.yml" % (node_id, key))
+    sys.exit("node %r names board %r, which is not in the project boards.yml"
+         % (node_id, key))
 if b.get("tier") == "declared":
     sys.exit("board %r is tier 'declared': definable, not runnable.\n"
              "  %s\n"
@@ -115,8 +121,8 @@ PYEOF
 NODE_VARS="$(read_node)" || exit 1
 eval "$NODE_VARS"
 
-BUILD="$BENCH_REPO/$APP/build"
-INJECTABLES="$BENCH_REPO/$APP/injectables.txt"
+BUILD="$BENCH_PROJECT/$APP/build"
+INJECTABLES="$BENCH_PROJECT/$APP/injectables.txt"
 
 echo ""
 echo "--- $NODE ---"
@@ -130,7 +136,7 @@ printf '  %-14s %s\n' "bus bitrate" "$BUS_BITRATE"
 if [ -n "$BOARD_BITRATE" ] && [ "$BOARD_BITRATE" != "$BUS_BITRATE" ]; then
 	die "CAN bitrate disagreement in project data.
   network.yml bus         $BUS_BITRATE
-  harness/boards.yml      $BOARD_BITRATE
+  boards.yml              $BOARD_BITRATE
 These must match. A bus whose nodes are configured for different bitrates
 carries no traffic at all, and nothing reports an error."
 fi
@@ -140,9 +146,9 @@ fi
 # ---------------------------------------------------------------------------
 echo ""
 echo "--- building ---"
-west build -b "$ZBOARD" -d "$BUILD" "$BENCH_REPO/$APP" "--pristine=$PRISTINE" \
+west build -b "$ZBOARD" -d "$BUILD" "$BENCH_PROJECT/$APP" "--pristine=$PRISTINE" \
 	|| die "firmware build failed for $NODE. The compiler output above names the cause."
-[ -f "$BENCH_REPO/$ELF" ] || die "build reported success but produced no ELF at $ELF"
+[ -f "$BENCH_PROJECT/$ELF" ] || die "build reported success but produced no ELF at $ELF"
 
 # ---------------------------------------------------------------------------
 # Gate 1b: the compiled bitrate must equal the bus bitrate.
@@ -174,7 +180,7 @@ if [ -z "$COMPILED_BITRATE" ]; then
 devicetree ($BUILD/zephyr/zephyr.dts).
 
 Either the CAN controller is not enabled for this board, or it is not the
-node named in harness/boards.yml. The firmware would build and boot and then
+node named in the project boards.yml. The firmware would build and boot and then
 never speak on the bus, so this is a hard failure rather than a warning."
 fi
 
@@ -208,7 +214,7 @@ fi
 
 NM="$BENCH_SDK_DIR/arm-zephyr-eabi/bin/arm-zephyr-eabi-nm"
 [ -x "$NM" ] || die "arm-zephyr-eabi-nm missing from $BENCH_SDK_DIR"
-SYMS="$("$NM" "$BENCH_REPO/$ELF")"
+SYMS="$("$NM" "$BENCH_PROJECT/$ELF")"
 
 missing=""
 count=0
@@ -259,8 +265,10 @@ there is nothing to assert. Add one: it is what every scenario waits for."
 	RESC="$OUT/boot-$NODE.resc"
 	{
 		echo "mach create \"$NODE\""
-		echo "machine LoadPlatformDescription @$BENCH_REPO/$REPL"
-		echo "sysbus LoadELF @$BENCH_REPO/$ELF"
+		# Both paths come out of the project: boards.yml states the platform
+		# file and network.yml the binary, and both are project-relative.
+		echo "machine LoadPlatformDescription @$BENCH_PROJECT/$REPL"
+		echo "sysbus LoadELF @$BENCH_PROJECT/$ELF"
 		[ -n "$VECTOR_SYMBOL" ] && \
 			echo "sysbus.cpu0 VectorTableOffset \`sysbus GetSymbolAddress \"$VECTOR_SYMBOL\"\`"
 		echo "$UART CreateFileBackend @$UART_LOG true"

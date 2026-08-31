@@ -70,7 +70,7 @@ echo "    workers    $WORKERS each"
 # Built as plain variables first: an apostrophe inside a ${VAR:-default}
 # opens a quote context and breaks the parse, which cost a run start.
 shown_topology="$TOPOLOGY"
-[ -z "$shown_topology" ] && shown_topology="network.yml, the repository own topology"
+[ -z "$shown_topology" ] && shown_topology="the project's own network.yml"
 shown_filter="$FILTER"
 [ -z "$shown_filter" ] && shown_filter="none: the whole declared suite"
 echo "    topology   $shown_topology"

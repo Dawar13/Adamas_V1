@@ -18,13 +18,20 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from harness import catalog as catmod  # noqa: E402
+from harness import project as project_paths  # noqa: E402
+
+# The PROJECT under test, resolved the way the engine resolves it, so a test
+# and the code it exercises can never disagree about which project they mean.
+# PROJECT-V2 §8.1: project data lives in projects/<name>/, not at the root.
+PROJECT_ROOT = project_paths.project_root()
 from harness.catalog import CatalogError  # noqa: E402
 
-REAL_CATALOG = REPO_ROOT / "catalog.yml"
+REAL_CATALOG = PROJECT_ROOT / "catalog.yml"
 ENGINE_SOURCE = REPO_ROOT / "harness" / "catalog.py"
 
 

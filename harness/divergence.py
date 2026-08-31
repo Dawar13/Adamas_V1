@@ -132,6 +132,8 @@ REPO_ROOT = _HERE.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+import project                          # noqa: E402  where the project is
+
 from harness import network as topology            # noqa: E402
 from harness.yaml_strict import load_document      # noqa: E402
 
@@ -1404,8 +1406,8 @@ def main(argv=None) -> int:
 
     tests_dir = Path(args.tests) if args.tests else (
         REPO_ROOT / ".generated" / "tests")
-    topology_path = Path(args.topology) if args.topology else (
-        REPO_ROOT / "network.yml")
+    # The topology is the PROJECT's, not the repository's.
+    topology_path = project.network_path(args.topology)
     out_root = Path(args.out) if args.out else (
         REPO_ROOT / "harness" / "out" / "divergence")
     workers = None

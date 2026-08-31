@@ -25,11 +25,12 @@
 
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
-import { REPO_ROOT } from "./runs.mjs";
+import { PROJECT_ROOT, REPO_ROOT } from "./runs.mjs";
 
 /** Every `write_symbol` block naming this node, across the scenario library. */
 async function scenarioSymbols(nodeId) {
-  const roots = [path.join(REPO_ROOT, "scenarios"), path.join(REPO_ROOT, "patterns")];
+  const roots = [path.join(PROJECT_ROOT, "scenarios"),
+                 path.join(PROJECT_ROOT, "patterns")];
   const found = new Map();
 
   for (const root of roots) {

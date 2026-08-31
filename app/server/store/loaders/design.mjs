@@ -23,7 +23,7 @@ import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
-import { REPO_ROOT } from "./runs.mjs";
+import { PROJECT_ROOT, REPO_ROOT } from "./runs.mjs";
 
 const run = promisify(execFile);
 
@@ -36,7 +36,7 @@ export class DesignUnreadable extends Error {}
 const PYTHON = process.env.BENCH_PYTHON || (process.platform === "win32" ? "py" : "python3");
 const PYTHON_ARGS = process.env.BENCH_PYTHON ? [] : process.platform === "win32" ? ["-3"] : [];
 
-export async function loadTopology(file = "network.yml") {
+export async function loadTopology(file = path.join(PROJECT_ROOT, "network.yml")) {
   const script = path.join(REPO_ROOT, "harness", "network.py");
   let stdout;
   try {
@@ -87,12 +87,12 @@ export async function loadTopology(file = "network.yml") {
  * Anything it cannot parse is reported as absent, never guessed.
  */
 export async function loadBoards() {
-  const file = path.join(REPO_ROOT, "harness", "boards.yml");
+  const file = path.join(PROJECT_ROOT, "boards.yml");
   let text;
   try {
     text = await readFile(file, "utf8");
   } catch (err) {
-    throw new DesignUnreadable(`harness/boards.yml could not be read: ${err.message}`);
+    throw new DesignUnreadable(`the project boards.yml could not be read: ${err.message}`);
   }
 
   const boards = {};
@@ -121,7 +121,7 @@ export async function loadBoards() {
 }
 
 /** The topology, its boards, and what each node's box should say. */
-export async function loadDesign(file = "network.yml") {
+export async function loadDesign(file = path.join(PROJECT_ROOT, "network.yml")) {
   const [topology, boards] = await Promise.all([loadTopology(file), loadBoards()]);
 
   const nodes = topology.nodes.map((node) => {

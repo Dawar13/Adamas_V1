@@ -30,10 +30,17 @@ from contextlib import contextmanager
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from harness import divergence                       # noqa: E402
+from harness import project as project_paths  # noqa: E402
+
+# The PROJECT under test, resolved the way the engine resolves it, so a test
+# and the code it exercises can never disagree about which project they mean.
+# PROJECT-V2 §8.1: project data lives in projects/<name>/, not at the root.
+PROJECT_ROOT = project_paths.project_root()
 from harness.yaml_strict import load_document        # noqa: E402
 
 
@@ -1058,7 +1065,7 @@ class TestWorkerCount(unittest.TestCase):
         # nodes that execute instructions in the topology, so it stays correct
         # when a scripted node is promoted rather than going stale in a table.
         from harness import network
-        net = network.load(REPO_ROOT / "network.yml")
+        net = network.load(PROJECT_ROOT / "network.yml")
         executing = len(net.real_nodes())
         self.assertGreater(executing, 0)
         self.assertLess(executing, len(net.nodes()) + 1)
@@ -1305,7 +1312,7 @@ class TestR1GateHoldsNoProjectData(unittest.TestCase):
         spellings = set()            # identifier spellings: matched exactly
         cls.numbers = set()
 
-        catalog_path = REPO_ROOT / "catalog.yml"
+        catalog_path = PROJECT_ROOT / "catalog.yml"
         if catalog_path.is_file():
             from harness import catalog as catalog_module
             cat = catalog_module.load(catalog_path, warn_stream=io.StringIO())
@@ -1320,7 +1327,7 @@ class TestR1GateHoldsNoProjectData(unittest.TestCase):
                 spellings.update(cat.enum_for(key).names())
                 spellings.add(key)
 
-        network_path = REPO_ROOT / "network.yml"
+        network_path = PROJECT_ROOT / "network.yml"
         if network_path.is_file():
             from harness import network as network_module
             net = network_module.load(network_path)
@@ -1349,14 +1356,14 @@ class TestR1GateHoldsNoProjectData(unittest.TestCase):
             for bus in net.buses():
                 identifiers.add(str(bus.id))
 
-        boards_path = HARNESS_DIR / "boards.yml"
+        boards_path = PROJECT_ROOT / "boards.yml"
         if boards_path.is_file():
             boards = load_document(boards_path.read_text(encoding="utf-8"))
             if isinstance(boards, dict):
                 identifiers.update(str(k) for k in boards)
                 spellings.update(cls._leaf_strings(boards))
 
-        for path in sorted((REPO_ROOT / "scenarios").glob("*.yml")):
+        for path in sorted((PROJECT_ROOT / "scenarios").glob("*.yml")):
             document = load_document(path.read_text(encoding="utf-8"))
             if isinstance(document, dict) and document.get("id"):
                 identifiers.add(str(document["id"]))
@@ -1547,7 +1554,11 @@ class TestAWideEntryStillCannotAbsorbASurprise(EndToEndCase):
 
 
 def shipped_markers():
-    return sorted(REPO_ROOT.glob("*/*/%s" % divergence.MARKER_NAME))
+    # Under the PROJECT: a defective build is one customer's firmware variant,
+    # not a repository artefact (PROJECT-V2 §8.1). The depth is the project's
+    # own -- firmware/<variant>/ -- and the engine itself does not assume one:
+    # it finds markers by walking up from the baseline binary.
+    return sorted(PROJECT_ROOT.glob("*/*/%s" % divergence.MARKER_NAME))
 
 
 class TestShippedMarkers(unittest.TestCase):
@@ -1557,7 +1568,7 @@ class TestShippedMarkers(unittest.TestCase):
         markers = shipped_markers()
         self.assertTrue(markers, "no defective build is declared anywhere")
         for marker in markers:
-            with self.subTest(marker=str(marker.relative_to(REPO_ROOT))):
+            with self.subTest(marker=str(marker.relative_to(PROJECT_ROOT))):
                 expectation = divergence.Expectation.load(marker)
                 self.assertTrue(expectation.defect)
                 self.assertNotIn("\n", expectation.defect)
@@ -1578,7 +1589,7 @@ class TestShippedMarkers(unittest.TestCase):
 
     def test_each_rationale_says_what_a_growing_list_means(self):
         for marker in shipped_markers():
-            with self.subTest(marker=str(marker.relative_to(REPO_ROOT))):
+            with self.subTest(marker=str(marker.relative_to(PROJECT_ROOT))):
                 rationale = divergence.Expectation.load(marker).rationale
                 self.assertTrue(len(rationale.split()) >= 20,
                                 "a rationale short enough to be a label is not "

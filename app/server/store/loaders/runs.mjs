@@ -35,12 +35,27 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(HERE, "..", "..", "..", "..");
 
 /**
+ * The PROJECT under test -- a different thing from the repository.
+ *
+ * The repository holds the engine, the scripts and this studio; the project
+ * holds network.yml, catalog.yml, boards.yml, scenarios/, patterns/ and runs/
+ * (PROJECT-V2 section 8.1). The studio must resolve project data exactly where
+ * the engine does, or the canvas draws a real, correct picture of a DIFFERENT
+ * system and nothing on screen looks wrong.
+ *
+ * Same order as harness/project.py: $BENCH_PROJECT, else the shipped example.
+ */
+export const PROJECT_ROOT = process.env.BENCH_PROJECT
+  ? path.resolve(process.env.BENCH_PROJECT)
+  : path.join(REPO_ROOT, "projects", "demo-ev");
+
+/**
  * Stored runs have exactly one home, and it is the one the engine writes to.
  * Section 1.7 of PROJECT.md: one home per object. If the studio read from a
  * second directory, the two would drift and the UI would show a stale archive
  * while the engine wrote to another.
  */
-export const RUNS_ROOT = path.join(REPO_ROOT, "project", "runs");
+export const RUNS_ROOT = path.join(PROJECT_ROOT, "runs");
 
 export class RunUnreadable extends Error {}
 

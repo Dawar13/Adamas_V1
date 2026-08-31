@@ -21,6 +21,19 @@ BENCH_RENODE="${BENCH_RENODE:-$BENCH_RENODE_DIR/renode}"
 # from any working directory.
 BENCH_REPO="${BENCH_REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 
+# THE PROJECT UNDER TEST -- a different thing from the repository, and the
+# distinction the scripts now depend on. The repository holds the engine, the
+# scripts and the studio; the project holds network.yml, catalog.yml,
+# boards.yml, patterns/, scenarios/, platforms/, firmware/ and runs/
+# (PROJECT-V2 section 8.1).
+#
+# Same resolution order as harness/project.py, deliberately: an explicit
+# BENCH_PROJECT wins, otherwise the example project this repository ships.
+# Two answers to "which project" is how a script and the engine end up testing
+# different things while reporting one verdict.
+BENCH_PROJECT="${BENCH_PROJECT:-$BENCH_REPO/projects/demo-ev}"
+export BENCH_PROJECT
+
 # The venv holds west, cmake, ninja, robotframework and pyyaml. It comes first
 # on PATH so a stray system cmake cannot shadow the pinned one.
 export PATH="$BENCH_VENV/bin:$PATH"

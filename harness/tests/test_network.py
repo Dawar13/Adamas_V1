@@ -21,6 +21,12 @@ if str(HARNESS_DIR) not in sys.path:
     sys.path.insert(0, str(HARNESS_DIR))
 
 import network  # noqa: E402
+from harness import project as project_paths  # noqa: E402
+
+# The PROJECT under test, resolved the way the engine resolves it, so a test
+# and the code it exercises can never disagree about which project they mean.
+# PROJECT-V2 §8.1: project data lives in projects/<name>/, not at the root.
+PROJECT_ROOT = project_paths.project_root()
 
 
 # ---------------------------------------------------------------------------
@@ -544,11 +550,15 @@ class TestLoading(TopologyCase):
             network.load(path)
         self.assertIn("named_topology.yml", str(ctx.exception))
 
-    def test_default_path_points_at_the_project_root(self):
-        self.assertEqual(
-            network.DEFAULT_NETWORK_PATH.name, "network.yml"
-        )
-        self.assertEqual(network.DEFAULT_NETWORK_PATH.parent, REPO_ROOT)
+    def test_default_path_points_at_the_project_not_the_repository(self):
+        # The contract this pins CHANGED: the topology belongs to a project
+        # (PROJECT-V2 §8.1), so the default is the project's network.yml and
+        # not a file at the repository root. A default that resolved to the
+        # repository would read one project while the engine ran another.
+        default = network.default_network_path()
+        self.assertEqual(default.name, "network.yml")
+        self.assertEqual(default.parent, PROJECT_ROOT)
+        self.assertNotEqual(default.parent, REPO_ROOT)
 
 
 # ---------------------------------------------------------------------------
@@ -992,7 +1002,7 @@ class TestEngineHoldsNoProjectData(unittest.TestCase):
     def test_no_project_identifiers_in_the_engine_source(self):
         source = (HARNESS_DIR / "network.py").read_text(encoding="utf-8").lower()
         topology = yaml.safe_load(
-            (REPO_ROOT / "network.yml").read_text(encoding="utf-8")
+            (PROJECT_ROOT / "network.yml").read_text(encoding="utf-8")
         )
         forbidden = set()
         for entry in topology["nodes"]:
@@ -1008,7 +1018,7 @@ class TestEngineHoldsNoProjectData(unittest.TestCase):
 
     def test_no_message_ids_in_the_engine_source(self):
         source = (HARNESS_DIR / "network.py").read_text(encoding="utf-8")
-        catalog = yaml.safe_load((REPO_ROOT / "catalog.yml").read_text(encoding="utf-8"))
+        catalog = yaml.safe_load((PROJECT_ROOT / "catalog.yml").read_text(encoding="utf-8"))
         for row in catalog["messages"]:
             msg_id = row["id"]
             for spelling in ("0x%X" % msg_id, "0x%x" % msg_id, str(msg_id)):
@@ -1023,7 +1033,7 @@ class TestEngineHoldsNoProjectData(unittest.TestCase):
 
 
 @unittest.skipUnless(
-    (REPO_ROOT / "network.yml").exists() and (REPO_ROOT / "catalog.yml").exists(),
+    (PROJECT_ROOT / "network.yml").exists() and (PROJECT_ROOT / "catalog.yml").exists(),
     "project data not present",
 )
 class TestShippedProjectData(unittest.TestCase):
@@ -1031,7 +1041,7 @@ class TestShippedProjectData(unittest.TestCase):
     def setUpClass(cls):
         cls.net = network.load()
         cls.catalog = yaml.safe_load(
-            (REPO_ROOT / "catalog.yml").read_text(encoding="utf-8")
+            (PROJECT_ROOT / "catalog.yml").read_text(encoding="utf-8")
         )
 
     def test_loads_from_the_default_path(self):

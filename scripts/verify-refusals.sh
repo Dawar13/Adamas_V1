@@ -115,7 +115,7 @@ for arg in "$@"; do
 		*) WORK="$arg" ;;
 	esac
 done
-[ -n "$WORK" ] || WORK="$REPO/project/verify-refusals/$(date +%Y-%m-%d-%H%M%S)"
+[ -n "$WORK" ] || WORK="$BENCH_PROJECT/verify-refusals/$(date +%Y-%m-%d-%H%M%S)"
 mkdir -p "$WORK" || exit 2
 
 say()  { printf '%s\n' "$*"; }
@@ -155,10 +155,11 @@ PY="${BENCH_VENV}/bin/python"
 	stop "no Python 3 here can import pyyaml, so network.yml cannot be read."
 
 VARS="$("$PY" - <<'PYEOF'
-import shlex, sys, yaml
+import os, shlex, sys, yaml
 
-net = yaml.safe_load(open("network.yml", encoding="utf-8"))
-boards = yaml.safe_load(open("harness/boards.yml", encoding="utf-8"))
+root = os.environ["BENCH_PROJECT"]
+net = yaml.safe_load(open(os.path.join(root, "network.yml"), encoding="utf-8"))
+boards = yaml.safe_load(open(os.path.join(root, "boards.yml"), encoding="utf-8"))
 nodes = net["nodes"]
 
 duts = [n for n in nodes if n.get("dut")]
@@ -190,14 +191,14 @@ PYEOF
 )" || stop "$VARS"
 eval "$VARS"
 
-INJECTABLES="$REPO/$DUT_APP/injectables.txt"
-BOARD_REPL="$REPO/$DUT_REPL"
+INJECTABLES="$BENCH_PROJECT/$DUT_APP/injectables.txt"
+BOARD_REPL="$BENCH_PROJECT/$DUT_REPL"
 [ -f "$INJECTABLES" ] || stop "no injectables list at $INJECTABLES"
 [ -f "$BOARD_REPL" ] || stop "no board platform file at $BOARD_REPL"
 
 # A scenario to compile against. Any shipped one will do; it is the topology
 # and the board file being broken, not the scenario.
-SCENARIO="$(ls "$REPO"/scenarios/*.yml 2>/dev/null | head -n 1)"
+SCENARIO="$(ls "$BENCH_PROJECT"/scenarios/*.yml 2>/dev/null | head -n 1)"
 [ -n "$SCENARIO" ] || stop "no scenario to compile; there is nothing to refuse."
 
 step "the project under test"
@@ -211,10 +212,18 @@ printf '  %-22s %s\n' "work dir" "$WORK"
 [ "$QUICK" -eq 1 ] && say "  --quick: 1a, 1b and 2 will be skipped, and this run proves less."
 
 # --- the working tree ----------------------------------------------------------
+# Relative to the PROJECT, which is where the breaks are made. git is asked
+# about them at their place in the repository, so that a dirty-tree refusal
+# and a restore are talking about the same file.
 TOUCHED=("$DUT_APP/injectables.txt" "network.yml" "$DUT_REPL")
+PROJECT_REL="${BENCH_PROJECT#"$REPO/"}"
+TOUCHED_IN_REPO=()
+for rel in "${TOUCHED[@]}"; do
+	TOUCHED_IN_REPO+=("$PROJECT_REL/$rel")
+done
 
 if git -C "$REPO" rev-parse --git-dir >/dev/null 2>&1; then
-	dirty="$(git -C "$REPO" status --porcelain -- "${TOUCHED[@]}" 2>/dev/null)"
+	dirty="$(git -C "$REPO" status --porcelain -- "${TOUCHED_IN_REPO[@]}" 2>/dev/null)"
 	[ -z "$dirty" ] || stop "these files already have uncommitted changes:
 
 $dirty
@@ -228,7 +237,7 @@ BACKUP="$WORK/restore"
 mkdir -p "$BACKUP"
 for rel in "${TOUCHED[@]}"; do
 	mkdir -p "$BACKUP/$(dirname "$rel")"
-	cp "$REPO/$rel" "$BACKUP/$rel" || stop "cannot back up $rel"
+	cp "$BENCH_PROJECT/$rel" "$BACKUP/$rel" || stop "cannot back up $rel"
 done
 
 # The built binary is not tracked by git, so it is backed up separately and put
@@ -236,13 +245,13 @@ done
 # the retention gate a binary that genuinely lacks a declared symbol.
 ELF_BACKUP="$BACKUP/binary/$(basename "$DUT_ELF")"
 mkdir -p "$(dirname "$ELF_BACKUP")"
-[ -f "$REPO/$DUT_ELF" ] && cp "$REPO/$DUT_ELF" "$ELF_BACKUP"
+[ -f "$BENCH_PROJECT/$DUT_ELF" ] && cp "$BENCH_PROJECT/$DUT_ELF" "$ELF_BACKUP"
 
 restore_all() {
 	for rel in "${TOUCHED[@]}"; do
-		cp "$BACKUP/$rel" "$REPO/$rel" 2>/dev/null
+		cp "$BACKUP/$rel" "$BENCH_PROJECT/$rel" 2>/dev/null
 	done
-	[ -f "$ELF_BACKUP" ] && cp "$ELF_BACKUP" "$REPO/$DUT_ELF" 2>/dev/null
+	[ -f "$ELF_BACKUP" ] && cp "$ELF_BACKUP" "$BENCH_PROJECT/$DUT_ELF" 2>/dev/null
 	return 0
 }
 # Every exit path, including Ctrl-C. A break left in place is worse than a
@@ -381,8 +390,8 @@ if [ "$QUICK" -eq 0 ]; then
 		# Only a break if that binary genuinely lacks symbols this one declares.
 		NM="$BENCH_SDK_DIR/arm-zephyr-eabi/bin/arm-zephyr-eabi-nm"
 		absent=""
-		if [ -x "$NM" ] && [ -f "$REPO/$OTHER_ELF" ]; then
-			syms="$("$NM" "$REPO/$OTHER_ELF" 2>/dev/null)"
+		if [ -x "$NM" ] && [ -f "$BENCH_PROJECT/$OTHER_ELF" ]; then
+			syms="$("$NM" "$BENCH_PROJECT/$OTHER_ELF" 2>/dev/null)"
 			while read -r sym; do
 				case "$sym" in '' | \#*) continue ;; esac
 				sym="$(printf '%s' "$sym" | tr -d '[:space:]')"
@@ -405,7 +414,7 @@ if [ "$QUICK" -eq 0 ]; then
 			# retargets the whole build rather than mismatching it. That is
 			# its own check, 1c below.
 			say "  overwriting $DUT's binary with $OTHER's; it is missing:$absent"
-			cp "$REPO/$OTHER_ELF" "$REPO/$DUT_ELF"
+			cp "$BENCH_PROJECT/$OTHER_ELF" "$BENCH_PROJECT/$DUT_ELF"
 			expect_refusal "wrong binary" 1 "injectable symbol\(s\) absent" \
 				"a missing injection target must never reach a verdict" \
 				-- ./scripts/build-firmware.sh "$DUT"
@@ -415,8 +424,8 @@ if [ "$QUICK" -eq 0 ]; then
 			# never had anything to refuse is not evidence. Compared by content,
 			# because that is what the gate reads.
 			if command -v sha256sum >/dev/null 2>&1; then
-				now="$(sha256sum <"$REPO/$DUT_ELF" | awk '{print $1}')"
-				borrowed="$(sha256sum <"$REPO/$OTHER_ELF" | awk '{print $1}')"
+				now="$(sha256sum <"$BENCH_PROJECT/$DUT_ELF" | awk '{print $1}')"
+				borrowed="$(sha256sum <"$BENCH_PROJECT/$OTHER_ELF" | awk '{print $1}')"
 				if [ "$now" != "$borrowed" ]; then
 					record incomplete "wrong binary, premise" \
 						"the build relinked $DUT before the gate read it, so no wrong binary was ever inspected"
@@ -433,7 +442,7 @@ fi
 if [ "$QUICK" -eq 0 ] && [ -n "$OTHER" ]; then
 	step "break 1c: the node's elf: points at another node's application"
 	say "  network.yml: $DUT elf: -> $OTHER_ELF"
-	"$PY" - "$REPO/network.yml" "$DUT_ELF" "$OTHER_ELF" <<'PYEOF'
+	"$PY" - "$BENCH_PROJECT/network.yml" "$DUT_ELF" "$OTHER_ELF" <<'PYEOF'
 import sys
 path, old, new = sys.argv[1], sys.argv[2], sys.argv[3]
 text = open(path, encoding="utf-8").read()
@@ -498,7 +507,7 @@ fi
 step "break 3: the bus bitrate disagrees with the board"
 NEW_BITRATE=$(( BUS_BITRATE / 2 ))
 say "  network.yml bus $BUS_ID: $BUS_BITRATE -> $NEW_BITRATE bit/s"
-"$PY" - "$REPO/network.yml" "$BUS_BITRATE" "$NEW_BITRATE" <<'PYEOF'
+"$PY" - "$BENCH_PROJECT/network.yml" "$BUS_BITRATE" "$NEW_BITRATE" <<'PYEOF'
 import sys
 path, old, new = sys.argv[1], sys.argv[2], sys.argv[3]
 text = open(path, encoding="utf-8").read()

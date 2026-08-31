@@ -8,7 +8,10 @@ by hand is the whole point: report decoding and the customer's own tooling read
 one source, so they cannot drift. A hand-edited DBC that disagrees with the
 contract is a lie that only shows up when someone trusts the wrong one.
 
-    py -3 harness/gen_dbc.py --catalog catalog.yml --out dbc/system.dbc
+    py -3 harness/gen_dbc.py --out projects/demo-ev/dbc/system.dbc
+
+The contract defaults to the project's own catalog.yml (harness/project.py
+decides which project); --catalog overrides it.
 
 -----------------------------------------------------------------------------
 THE BYTE-ALIGNED SUBSET, AND WHY NOTHING IS EVER DROPPED SILENTLY
@@ -562,7 +565,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--catalog",
         default=None,
-        help="contract file to read (default: the project catalog beside the harness)",
+        help="contract file to read (default: the project's own catalog.yml)",
     )
     parser.add_argument(
         "--out",

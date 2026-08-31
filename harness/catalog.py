@@ -82,6 +82,13 @@ was wrong.
 from __future__ import annotations
 
 import sys
+from pathlib import Path as _Path
+
+_HERE = _Path(__file__).resolve().parent
+if str(_HERE) not in sys.path:
+    sys.path.insert(0, str(_HERE))
+
+import project                          # noqa: E402  where the project is
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
@@ -95,12 +102,15 @@ __all__ = [
     "Signal",
     "EnumTable",
     "CatalogError",
-    "DEFAULT_CATALOG_PATH",
+    "default_catalog_path",
 ]
 
 
-# The contract file sits at the repository root, one level above this package.
-DEFAULT_CATALOG_PATH = Path(__file__).resolve().parents[1] / "catalog.yml"
+# The contract belongs to a PROJECT, not to the repository. Resolved through
+# harness/project.py, and lazily, for the reason network.py gives: a module
+# constant would turn a missing project into an ImportError.
+def default_catalog_path() -> Path:
+    return project.catalog_path()
 
 # Widest payload this engine will accept, in bytes (classic CAN is 8, CAN FD 64).
 MAX_PAYLOAD_BYTES = 64
@@ -440,7 +450,7 @@ def load(
             payload, duplicate message ids or names, and malformed enum tables
             are all refused rather than worked around.
     """
-    target = Path(path) if path is not None else DEFAULT_CATALOG_PATH
+    target = Path(path) if path is not None else default_catalog_path()
     stream = warn_stream if warn_stream is not None else sys.stderr
 
     try:

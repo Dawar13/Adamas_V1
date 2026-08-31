@@ -83,11 +83,18 @@ if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
 import catalog as contract          # noqa: E402  the CAN contract loader
+import project                      # noqa: E402  where the project is
 import network as topology          # noqa: E402  the topology loader
 from yaml_strict import StrictBoolLoader  # noqa: E402
 
 import yaml                         # noqa: E402
 
+# THE REPOSITORY, NOT THE PROJECT. Two different roots, and conflating them is
+# what this refactor removed: paths a RESULTS FILE quotes are relative to the
+# repository so the file is machine-neutral, and the engine's own tooling
+# (can_toolkit.py, scripts/toolchain-env.sh) lives here. Project data --
+# binaries, platform files, scenarios -- resolves from the project root instead,
+# via harness/project.py.
 REPO_ROOT = _HERE.parent
 
 # Engine vocabulary, not project data.
@@ -604,7 +611,11 @@ class Compiler:
     """Turns the four input files into one emulator command script."""
 
     def __init__(self, net, cat, boards, scenario, out_dir, translate,
-                 trace_execution=False):
+                 trace_execution=False, project_root=None):
+        # Where this project's binaries and platform files are. Resolved once,
+        # here, rather than read from a global: two compilations in one process
+        # may belong to two different projects.
+        self.project_root = Path(project_root) if project_root else project.project_root()
         self.net = net
         self.cat = cat
         self.boards = boards
@@ -754,14 +765,14 @@ class Compiler:
             board = self.boards.board(node.board, where)
             name = _safe_name(node.id, where)
 
-            elf = (REPO_ROOT / str(node.elf)).resolve()
+            elf = (self.project_root / str(node.elf)).resolve()
             if not elf.is_file():
                 raise CompileError(
                     "%s: no binary at %s. Build it before running a scenario "
                     "against it -- an absent binary is not something to work "
                     "around." % (where, elf)
                 )
-            repl = (REPO_ROOT / str(board["repl"])).resolve()
+            repl = (self.project_root / str(board["repl"])).resolve()
             if not repl.is_file():
                 raise CompileError(
                     "%s: board %r points at a platform file that does not "
@@ -2070,6 +2081,7 @@ def parse_args(argv):
     parser.add_argument("--topology", default=None, help="override the topology file")
     parser.add_argument("--contract", default=None, help="override the contract file")
     parser.add_argument("--boards", default=None, help="override the board file")
+    project.add_argument(parser)
     parser.add_argument("--wsl-distro", default=None,
                         help="which compatibility-layer distribution hosts the emulator")
     parser.add_argument("--timeout", type=int, default=1800,
@@ -2128,14 +2140,17 @@ def main(argv=None):
     say = (lambda *a: None) if args.quiet else (lambda *a: print(*a))
 
     try:
+        # One project, resolved once, and every file below comes out of it.
+        # An explicit --topology / --contract / --boards still wins: a caller
+        # comparing two board files against one project must be able to say so.
+        project_root = project.project_root(args.project)
         scenario = Scenario.load(Path(args.scenario))
-        net = topology.load(Path(args.topology) if args.topology else None)
-        cat = contract.load(Path(args.contract) if args.contract else None)
+        net = topology.load(project.network_path(args.topology, args.project))
+        cat = contract.load(project.catalog_path(args.contract, args.project))
         net.validate_against(cat)
-        boards = BoardBook.load(
-            Path(args.boards) if args.boards else (_HERE / "boards.yml")
-        )
-    except (topology.NetworkError, contract.CatalogError, CompileError) as exc:
+        boards = BoardBook.load(project.boards_path(args.boards, args.project))
+    except (topology.NetworkError, contract.CatalogError, CompileError,
+            project.ProjectError) as exc:
         print("\nERROR: %s\n" % exc, file=sys.stderr)
         return EXIT_USAGE
 
@@ -2169,7 +2184,8 @@ def main(argv=None):
     try:
         emulator = Emulator(out_dir, args.wsl_distro)
         compiler = Compiler(net, cat, boards, scenario, out_dir,
-                            emulator.behind_layer, coverage_requested(args))
+                            emulator.behind_layer, coverage_requested(args),
+                            project_root=project_root)
         compiled = compiler.compile(event_log)
     except Refusal as exc:
         print("\n%s\n" % exc, file=sys.stderr)
@@ -2271,7 +2287,7 @@ def main(argv=None):
     # Hashed by content, not by path, because the path is identical in the case
     # that matters.
     for node in net.real_nodes():
-        elf = (REPO_ROOT / str(node.elf)).resolve()
+        elf = (project_root / str(node.elf)).resolve()
         key = "firmware:%s" % node.id
         inputs[key] = _sha256(elf) if elf.is_file() else "MISSING:%s" % node.elf
     observed = {"emulator": banner or "unknown"}

@@ -58,7 +58,18 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parent
-RUNS_ROOT = REPO_ROOT / "project" / "runs"
+if str(HERE) not in sys.path:
+    sys.path.insert(0, str(HERE))
+
+import project                          # noqa: E402  where the project is
+
+
+# Stored runs are the PROJECT's record, not the repository's (PROJECT-V2 §8.1).
+# A FUNCTION, not a constant: resolving at import time would turn a missing or
+# unnamed project into an ImportError from a storage module, and would also
+# freeze one project's path into a process that may be asked about another.
+def runs_root_default() -> Path:
+    return project.runs_dir()
 
 #: Files a stored run may contain. Anything else is unexpected and reported.
 SUMMARY = "summary.json"
@@ -158,7 +169,7 @@ def save_run(run_id: str, record: dict, *, traces=None, replay_text="",
              "a run id is a single directory name: %r" % run_id)
     validate_run(record)
 
-    root = Path(runs_root) if runs_root else RUNS_ROOT
+    root = Path(runs_root) if runs_root else runs_root_default()
     target = root / run_id
     _require(not target.exists(),
              "run %r already exists; a stored run is never overwritten, "
@@ -202,7 +213,7 @@ def save_run(run_id: str, record: dict, *, traces=None, replay_text="",
 
 def list_runs(runs_root: Path = None) -> list:
     """Every stored run, oldest first. Ids sort chronologically by design."""
-    root = Path(runs_root) if runs_root else RUNS_ROOT
+    root = Path(runs_root) if runs_root else runs_root_default()
     if not root.is_dir():
         return []
     return sorted(p.name for p in root.iterdir()
@@ -216,7 +227,7 @@ def open_run(run_id: str, runs_root: Path = None) -> dict:
     would re-execute the run. They are deliberately separate: a caller must
     never be able to think it re-ran a suite when it reopened a stored answer.
     """
-    root = Path(runs_root) if runs_root else RUNS_ROOT
+    root = Path(runs_root) if runs_root else runs_root_default()
     target = root / run_id
     _require(target.is_dir(), "no stored run %r" % run_id)
     _require((target / SUMMARY).is_file(), "run %r has no summary" % run_id)
@@ -246,7 +257,7 @@ def open_run(run_id: str, runs_root: Path = None) -> dict:
 
 def replay_command(run_id: str, runs_root: Path = None) -> str:
     """The command that would RE-EXECUTE this run. Returns text; runs nothing."""
-    root = Path(runs_root) if runs_root else RUNS_ROOT
+    root = Path(runs_root) if runs_root else runs_root_default()
     path = root / run_id / REPLAY
     _require(path.is_file(), "run %r has no reproduction note" % run_id)
     return path.read_text(encoding="utf-8")
@@ -258,7 +269,7 @@ def prune(keep_full: int = KEEP_FULL, runs_root: Path = None,
 
     Provenance is never touched, at any age.
     """
-    root = Path(runs_root) if runs_root else RUNS_ROOT
+    root = Path(runs_root) if runs_root else runs_root_default()
     runs = list_runs(root)
     older = runs[:-keep_full] if keep_full > 0 else runs
     removed, kept_provenance = [], []

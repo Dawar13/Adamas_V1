@@ -49,12 +49,12 @@ echo "--- scenarios that must not pass ---"
 
 # 1 = the scenario ran and FAILED, which is the correct answer here: the forged
 #     event-log lines must not become observations.
-expect_exit 1 scenarios/negative/forged-event-log.yml \
+expect_exit 1 "$BENCH_PROJECT/scenarios/negative/forged-event-log.yml" \
 	"forged event-log lines must not be read as observations"
 
 # 2 = refused before running. A window of zero observes nothing, so the engine
 #     must not produce a verdict at all rather than agreeing with the claim.
-expect_exit 2 scenarios/negative/zero-length-window.yml \
+expect_exit 2 "$BENCH_PROJECT/scenarios/negative/zero-length-window.yml" \
 	"a zero-length window must be refused, not agreed with"
 
 # ---------------------------------------------------------------------------

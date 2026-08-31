@@ -51,6 +51,12 @@ import os
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+_HERE = Path(__file__).resolve().parent
+if str(_HERE) not in sys.path:
+    sys.path.insert(0, str(_HERE))
+
+import project                          # noqa: E402  where the project is
+
 import yaml
 
 # The topology file quotes symbol names defined by the contract file, so both
@@ -69,7 +75,7 @@ __all__ = [
     "load",
     "REAL",
     "SCRIPTED",
-    "DEFAULT_NETWORK_PATH",
+    "default_network_path",
 ]
 
 # The two node kinds. Engine vocabulary, not project data.
@@ -77,9 +83,17 @@ REAL = "real"
 SCRIPTED = "scripted"
 NODE_TYPES = (REAL, SCRIPTED)
 
-# The topology file sits at the project root, one level above this engine
-# package. Callers may override it entirely.
-DEFAULT_NETWORK_PATH = Path(__file__).resolve().parent.parent / "network.yml"
+# The topology belongs to a PROJECT, not to the repository, and where the
+# project is is one question answered in one place (harness/project.py). This
+# used to read `parent.parent / "network.yml"` -- the engine assuming there is
+# exactly one project and that it sits on top of the engine.
+#
+# Resolved lazily, through a function, because a module constant would run the
+# resolution at import time and a missing project directory would then be an
+# ImportError from a loader rather than a sentence saying which project could
+# not be found.
+def default_network_path() -> Path:
+    return project.network_path()
 
 
 class NetworkError(Exception):
@@ -812,14 +826,14 @@ def _catalog_rows(catalog, source: str):
     return list(rows)
 
 
-def load(path=DEFAULT_NETWORK_PATH) -> Network:
+def load(path=None) -> Network:
     """Read and validate a topology file.
 
     ``path`` defaults to the topology file at the project root. Any load or
     validation failure raises :class:`NetworkError` naming the offender.
     """
     if path is None:
-        path = DEFAULT_NETWORK_PATH
+        path = default_network_path()
     if isinstance(path, (str, os.PathLike)):
         path = Path(path)
     else:
@@ -907,7 +921,7 @@ def main(argv=None) -> int:
 
     parser = argparse.ArgumentParser(
         description="Load a topology and print it as JSON.")
-    parser.add_argument("path", nargs="?", default=str(DEFAULT_NETWORK_PATH))
+    parser.add_argument("path", nargs="?", default=None)
     parser.add_argument("--json", action="store_true",
                         help="print the topology as JSON (the default)")
     args = parser.parse_args(argv if argv is not None else sys.argv[1:])

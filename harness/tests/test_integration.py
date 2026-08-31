@@ -42,9 +42,15 @@ if str(REPO_ROOT) not in sys.path:
 
 from harness import catalog as catmod  # noqa: E402
 from harness import network as netmod  # noqa: E402
+from harness import project as project_paths  # noqa: E402
 
-REAL_CATALOG = REPO_ROOT / "catalog.yml"
-REAL_NETWORK = REPO_ROOT / "network.yml"
+# The PROJECT under test, resolved the way the engine resolves it, so a test
+# and the code it exercises can never disagree about which project they mean.
+# PROJECT-V2 §8.1: project data lives in projects/<name>/, not at the root.
+PROJECT_ROOT = project_paths.project_root()
+
+REAL_CATALOG = PROJECT_ROOT / "catalog.yml"
+REAL_NETWORK = PROJECT_ROOT / "network.yml"
 
 # A pattern with no run of equal bits longer than one, so that a signal placed
 # at any offset gets a different value from its neighbours. Any off-by-one in

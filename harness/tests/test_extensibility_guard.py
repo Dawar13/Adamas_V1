@@ -52,17 +52,25 @@ from pathlib import Path
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from harness import expand  # noqa: E402
 from harness import run_scenarios as engine  # noqa: E402
+from harness import project as project_paths  # noqa: E402
+
+# The PROJECT under test, resolved the way the engine resolves it, so a test
+# and the code it exercises can never disagree about which project they mean.
+# PROJECT-V2 §8.1: project data lives in projects/<name>/, not at the root.
+PROJECT_ROOT = project_paths.project_root()
 
 
 def _plan(pattern_dir, scenario_dir):
     """A plan built from the given directories, through the engine's loader."""
     return expand.build_plan(
-        repo_root=REPO_ROOT, pattern_dir=pattern_dir, scenario_dir=scenario_dir
+        project_root=PROJECT_ROOT, pattern_dir=pattern_dir,
+        scenario_dir=scenario_dir
     )
 
 
@@ -75,7 +83,7 @@ class ExtensibilityGuard(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.baseline = _ids(_plan(REPO_ROOT / "patterns", REPO_ROOT / "scenarios"))
+        cls.baseline = _ids(_plan(PROJECT_ROOT / "patterns", PROJECT_ROOT / "scenarios"))
         assert cls.baseline, "the shipped library expands to nothing; this is vacuous"
 
     def library(self):
@@ -87,8 +95,8 @@ class ExtensibilityGuard(unittest.TestCase):
         """
         tmp = Path(tempfile.mkdtemp(prefix="guard4-"))
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
-        shutil.copytree(REPO_ROOT / "patterns", tmp / "patterns")
-        shutil.copytree(REPO_ROOT / "scenarios", tmp / "scenarios")
+        shutil.copytree(PROJECT_ROOT / "patterns", tmp / "patterns")
+        shutil.copytree(PROJECT_ROOT / "scenarios", tmp / "scenarios")
         return tmp
 
     def plan_of(self, tmp):
@@ -120,8 +128,8 @@ class TestANewPatternIsPickedUpFromAFile(ExtensibilityGuard):
         # The busiest shipped sweep, re-identified. Its own tests stay in the
         # plan; the probe's are additional, which is what makes the count
         # meaningful.
-        source_pattern = REPO_ROOT / "patterns" / "node-silent.yml"
-        source_scenario = REPO_ROOT / "scenarios" / "heartbeat-sweep.yml"
+        source_pattern = PROJECT_ROOT / "patterns" / "node-silent.yml"
+        source_scenario = PROJECT_ROOT / "scenarios" / "heartbeat-sweep.yml"
         expected = len([i for i in self.baseline if i.startswith("heartbeat-sweep")])
         self.assertGreater(expected, 1, "the source scenario is not a sweep")
 
@@ -153,7 +161,7 @@ class TestANewPatternIsPickedUpFromAFile(ExtensibilityGuard):
 
     def test_the_probe_pattern_is_not_in_the_shipped_library(self):
         # Otherwise the check above would be measuring something already there.
-        self.assertFalse((REPO_ROOT / "patterns" / "guard4-shape.yml").exists())
+        self.assertFalse((PROJECT_ROOT / "patterns" / "guard4-shape.yml").exists())
         self.assertNotIn("guard4-shape", str(self.baseline))
 
 
@@ -166,7 +174,7 @@ class TestANewScenarioIsPickedUpFromAFile(ExtensibilityGuard):
 
         # A scenario with no sweep: exactly one test, so the arithmetic has no
         # room to be accidentally right.
-        text = (REPO_ROOT / "scenarios" / "boot-sequence.yml").read_text(
+        text = (PROJECT_ROOT / "scenarios" / "boot-sequence.yml").read_text(
             encoding="utf-8"
         )
         self.assertIn("id: boot-sequence", text)
@@ -182,7 +190,7 @@ class TestANewChipIsPickedUpFromData(ExtensibilityGuard):
     """A board the engine has never seen, from data alone.
 
     §25.2 names four dimensions and this is the third V1 can answer today:
-    harness/boards.yml is a mapping of board key to board, and both it and the
+    the project's boards.yml is a mapping of board key to board, and both it
     topology are overridable on the command line, so a new target is a data
     edit.
 
@@ -198,7 +206,7 @@ class TestANewChipIsPickedUpFromData(ExtensibilityGuard):
         out = tmp / "out"
         return subprocess.run(
             [sys.executable, str(REPO_ROOT / "harness" / "run_scenarios.py"),
-             str(REPO_ROOT / "scenarios" / "boot-sequence.yml"),
+             str(PROJECT_ROOT / "scenarios" / "boot-sequence.yml"),
              "--dry-run", "--quiet",
              "--topology", str(network), "--boards", str(boards),
              "--out", str(out)],
@@ -212,10 +220,10 @@ class TestANewChipIsPickedUpFromData(ExtensibilityGuard):
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
 
         boards = yaml.safe_load(
-            (REPO_ROOT / "harness" / "boards.yml").read_text(encoding="utf-8")
+            (PROJECT_ROOT / "boards.yml").read_text(encoding="utf-8")
         )
         network = yaml.safe_load(
-            (REPO_ROOT / "network.yml").read_text(encoding="utf-8")
+            (PROJECT_ROOT / "network.yml").read_text(encoding="utf-8")
         )
         dut = next(n for n in network["nodes"] if n.get("dut"))
 

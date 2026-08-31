@@ -8,10 +8,11 @@
 #
 # THIS SCRIPT NAMES NOTHING (PROJECT.md §2.7). It used to hardcode the node, the
 # banner text, the application path, the Zephyr board and the UART instance --
-# all written before harness/boards.yml existed. That made it a second, silently
+# all written before boards.yml existed. That made it a second, silently
 # diverging definition of how a node is built: retargeting the project updated
-# boards.yml and left this script still asserting the old board. Now it resolves
-# the device under test from network.yml and hands the work to
+# boards.yml and left this script still asserting the old board. Now it
+# resolves the device under test from the project's network.yml and hands the
+# work to
 # build-firmware.sh, which is the single data-driven implementation.
 #
 # Delegating also makes this check strictly stronger than it was. It no longer
@@ -34,8 +35,10 @@ NODE="${1:-}"
 if [ -z "$NODE" ]; then
 	NODE="$(
 		"$PY" - <<'PYEOF'
-import sys, yaml
-net = yaml.safe_load(open("network.yml", encoding="utf-8"))
+import os, sys, yaml
+net = yaml.safe_load(
+    open(os.path.join(os.environ["BENCH_PROJECT"], "network.yml"),
+         encoding="utf-8"))
 duts = [n["id"] for n in net["nodes"] if n.get("dut")]
 if len(duts) != 1:
     sys.exit("network.yml must mark exactly one node dut: true (found %d: %s)"

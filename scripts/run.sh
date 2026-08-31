@@ -31,7 +31,10 @@ usage() {
 	  board file, runs it once in the emulator, and reports the verdict with the
 	  measured reaction latency.
 
-	  Scenarios live in scenarios/ . Useful options:
+	  Scenarios live in the project's scenarios/ directory -- by default
+	  projects/demo-ev/scenarios/ . Useful options:
+	    --project DIR which project to read (default: \$BENCH_PROJECT, else
+	                  projects/demo-ev)
 	    --dry-run     compile and write the emulator script; run nothing
 	    --out DIR     where this run's files are written
 	    --quiet       no human report; results are still written
