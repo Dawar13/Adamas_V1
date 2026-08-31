@@ -1,0 +1,25 @@
+00:36:32.5312 [INFO] Loaded monitor commands from: /home/dhx9/bench-tools/renode-1.16.1/scripts/monitor.py
+Renode, version 1.16.1 (d66b0c2a-202602160923)
+
+(monitor) i @/mnt/d/Adamas/Adamas/Adamas_V1/projects/demo-ev/spike-uart-watchers/003604/warm.resc
+00:36:32.8141 [INFO] Including script(s): /mnt/d/Adamas/Adamas/Adamas_V1/projects/demo-ev/spike-uart-watchers/003604/warm.resc
+can_toolkit loaded
+bench: event log /mnt/d/Adamas/Adamas/Adamas_V1/projects/demo-ev/spike-uart-watchers/003604/warm-out/events.log
+bench: node bms can=sysbus.fdcan1 uart=sysbus.usart3
+bench: node vcu can=sysbus.fdcan1 uart=sysbus.usart3
+bench: node charger can=sysbus.fdcan1 uart=sysbus.usart3
+00:36:35.5611 [INFO] bms: Machine resumed.
+00:36:35.5720 [INFO] vcu: Machine resumed.
+00:36:35.5726 [INFO] charger: Machine resumed.
+00:36:38.5859 [INFO] bms: Machine paused.
+00:36:38.5869 [INFO] vcu: Machine paused.
+00:36:38.5874 [INFO] charger: Machine paused.
+uart: warm bms len=34
+uart: warm bms | bms state INIT -> STANDBY @10 ms
+uart: warm vcu len=0
+uart: warm charger len=0
+bench: event log closed, 0 lines
+Renode is quitting
+00:36:38.7730 [INFO] bms: Disposed.
+00:36:38.8816 [INFO] vcu: Disposed.
+00:36:38.9911 [INFO] charger: Disposed.

@@ -1,0 +1,239 @@
+00:36:08.6967 [INFO] Loaded monitor commands from: /home/dhx9/bench-tools/renode-1.16.1/scripts/monitor.py
+Renode, version 1.16.1 (d66b0c2a-202602160923)
+
+(monitor) i @/mnt/d/Adamas/Adamas/Adamas_V1/projects/demo-ev/spike-uart-watchers/003604/cold.resc
+00:36:08.9778 [INFO] Including script(s): /mnt/d/Adamas/Adamas/Adamas_V1/projects/demo-ev/spike-uart-watchers/003604/cold.resc
+00:36:09.1326 [INFO] System bus created.
+00:36:10.8157 [INFO] sysbus: Loading block of 49772 bytes length at 0x8000000.
+00:36:10.8185 [INFO] sysbus: Loading block of 260 bytes length at 0x800C26C.
+00:36:10.8191 [INFO] sysbus: Loading block of 4 bytes length at 0x800C370.
+00:36:10.8195 [INFO] sysbus: Loading block of 4984 bytes length at 0x24000108.
+00:36:10.8290 [INFO] sysbus: Loading block of 16384 bytes length at 0x30040000.
+00:36:11.1285 [INFO] System bus created.
+00:36:11.7649 [INFO] vcu/sysbus: Loading block of 35904 bytes length at 0x8000000.
+00:36:11.7657 [INFO] vcu/sysbus: Loading block of 141 bytes length at 0x8008C40.
+00:36:11.7659 [INFO] vcu/sysbus: Loading block of 4 bytes length at 0x8008CCD.
+00:36:11.7661 [INFO] vcu/sysbus: Loading block of 4528 bytes length at 0x24000090.
+00:36:11.7664 [INFO] vcu/sysbus: Loading block of 16384 bytes length at 0x30040000.
+00:36:11.8544 [INFO] System bus created.
+00:36:12.4505 [INFO] charger/sysbus: Loading block of 36176 bytes length at 0x8000000.
+00:36:12.4509 [INFO] charger/sysbus: Loading block of 143 bytes length at 0x8008D50.
+00:36:12.4512 [INFO] charger/sysbus: Loading block of 4 bytes length at 0x8008DDF.
+00:36:12.4514 [INFO] charger/sysbus: Loading block of 5616 bytes length at 0x24000090.
+00:36:12.4517 [INFO] charger/sysbus: Loading block of 16384 bytes length at 0x30040000.
+00:36:12.5427 [INFO] Including script(s): /mnt/d/Adamas/Adamas/Adamas_V1/harness/can_toolkit.py
+can_toolkit loaded
+bench: event log /mnt/d/Adamas/Adamas/Adamas_V1/projects/demo-ev/spike-snapshot-phase/2026-09-01-000805/compiled/events.log
+bench: node bms can=sysbus.fdcan1 uart=sysbus.usart3
+bench: node vcu can=sysbus.fdcan1 uart=sysbus.usart3
+bench: node charger can=sysbus.fdcan1 uart=sysbus.usart3
+bench: primary=bms
+bench: clock_host=bms
+bench: tapped hub canHub
+bench: player motor id=400 every 20 ms
+bench: player motor id=401 every 20 ms
+bench: player motor id=402 every 20 ms
+bench: player dash id=500 every 200 ms
+bench: player dash id=501 every 200 ms
+bench: player bms_diag id=610 every 1000 ms
+00:36:12.9716 [INFO] bms/cpu: Guessing VectorTableOffset value to be 0x8000000.
+00:36:12.9898 [INFO] bms/cpu: Setting initial values: PC = 0x8002831, SP = 0x24001340.
+00:36:12.9923 [INFO] bms: Machine started.
+00:36:12.9930 [INFO] vcu/cpu: Guessing VectorTableOffset value to be 0x8000000.
+00:36:13.0102 [INFO] vcu/cpu: Setting initial values: PC = 0x80013A9, SP = 0x24001200.
+00:36:13.0123 [INFO] vcu: Machine started.
+00:36:13.0169 [INFO] charger/cpu: Guessing VectorTableOffset value to be 0x8000000.
+00:36:13.0400 [INFO] charger/cpu: Setting initial values: PC = 0x800146D, SP = 0x24001640.
+00:36:13.0406 [INFO] charger: Machine started.
+00:36:13.1030 [WARNING] bms/nvic: Unhandled write to offset 0xD2C. Unhandled bits: [0-31] when writing value 0xFFFFFFFF. Tags: RESERVED (0x1), VECTTBL (0x1), RESERVED (0xFFFFFFF), FORCED (0x1), DEBUGEVT (0x1).
+00:36:13.1060 [WARNING] bms/nvic: Unhandled write to offset 0xF50 (ICacheInvalidateAllToPoUaIgnored), value 0x0.
+00:36:13.1163 [WARNING] bms/sysbus: [cpu: 0x8001818] (tag: 'PWR') ReadDoubleWord from non existing peripheral at 0x5802480C, returning 0x00000000.
+00:36:13.1168 [WARNING] bms/sysbus: [cpu: 0x8001822] (tag: 'PWR') WriteDoubleWord to non existing peripheral at 0x5802480C, value 0x2.
+00:36:13.1174 [WARNING] bms/sysbus: [cpu: 0x8001824] (tag: 'PWR/D3CR') ReadDoubleWord from non existing peripheral at 0x58024818, returning 0x00002000.
+00:36:13.1179 [WARNING] bms/sysbus: [cpu: 0x800182A] (tag: 'PWR/D3CR') WriteDoubleWord to non existing peripheral at 0x58024818, value 0xE000.
+00:36:13.1184 [WARNING] bms/sysbus: [cpu: 0x800182C] (tag: 'PWR/D3CR') ReadDoubleWord from non existing peripheral at 0x58024818, returning 0x00002000.
+00:36:13.1190 [WARNING] bms/sysbus: [cpu: 0x8001834] ReadDoubleWord from non existing peripheral at 0x5C001000.
+00:36:13.1197 [WARNING] bms/rcc: Unhandled write to offset 0x0. Unhandled bits: [18] when writing value 0x40187. Tags: HSEBYP (0x1).
+00:36:13.1202 [WARNING] bms/rcc: Unhandled write to offset 0x2C. Unhandled bits: [3] when writing value 0x1FF0008.
+00:36:13.1208 [WARNING] bms/rcc: Unhandled read from offset 0x30.
+00:36:13.1213 [WARNING] bms/rcc: Unhandled write to offset 0x30, value 0x17.
+00:36:13.1218 [WARNING] bms/rcc: Unhandled read from offset 0x30.
+00:36:13.1223 [WARNING] bms/rcc: Unhandled write to offset 0x30, value 0x200.
+00:36:13.1227 [WARNING] bms/rcc: Unhandled read from offset 0x30.
+00:36:13.1232 [WARNING] bms/rcc: Unhandled write to offset 0x30, value 0x30000.
+00:36:13.1237 [WARNING] bms/rcc: Unhandled read from offset 0x30.
+00:36:13.1242 [WARNING] bms/rcc: Unhandled write to offset 0x30, value 0x1000000.
+00:36:13.1248 [WARNING] bms/sysbus: [cpu: 0x8004B3C] (tag: 'PWR') ReadDoubleWord from non existing peripheral at 0x5802480C, returning 0x00000000.
+00:36:13.1253 [WARNING] bms/sysbus: [cpu: 0x8004B46] (tag: 'PWR') WriteDoubleWord to non existing peripheral at 0x5802480C, value 0x2.
+00:36:13.1259 [WARNING] bms/sysbus: [cpu: 0x8004B48] (tag: 'PWR/D3CR') ReadDoubleWord from non existing peripheral at 0x58024818, returning 0x00002000.
+00:36:13.1263 [WARNING] bms/sysbus: [cpu: 0x8004B4E] (tag: 'PWR/D3CR') WriteDoubleWord to non existing peripheral at 0x58024818, value 0xE000.
+00:36:13.1268 [WARNING] bms/sysbus: [cpu: 0x8004B50] (tag: 'PWR/D3CR') ReadDoubleWord from non existing peripheral at 0x58024818, returning 0x00002000.
+00:36:13.1273 [WARNING] bms/sysbus: [cpu: 0x8005A3E] (tag: 'PWR/D3CR') ReadDoubleWord from non existing peripheral at 0x58024818, returning 0x00002000.
+00:36:13.1278 [WARNING] bms/sysbus: [cpu: 0x8005A8A] (tag: 'PWR/D3CR') ReadDoubleWord from non existing peripheral at 0x58024818, returning 0x00002000.
+00:36:13.1280 [WARNING] bms/rcc: Unhandled read from offset 0x18.
+00:36:13.1285 [WARNING] bms/rcc: Unhandled write to offset 0x18, value 0x0.
+00:36:13.1289 [WARNING] bms/rcc: Unhandled read from offset 0x18.
+00:36:13.1295 [WARNING] bms/rcc: Unhandled write to offset 0x18, value 0x0.
+00:36:13.1317 [WARNING] bms/rcc: Unhandled read from offset 0x1C.
+00:36:13.1322 [WARNING] bms/rcc: Unhandled write to offset 0x1C, value 0x0.
+00:36:13.1326 [WARNING] bms/rcc: Unhandled read from offset 0x1C.
+00:36:13.1331 [WARNING] bms/rcc: Unhandled write to offset 0x1C, value 0x0.
+00:36:13.1337 [WARNING] bms/rcc: Unhandled read from offset 0x18.
+00:36:13.1341 [WARNING] bms/rcc: Unhandled write to offset 0x18, value 0x0.
+00:36:13.1345 [WARNING] bms/rcc: Unhandled read from offset 0x20.
+00:36:13.1350 [WARNING] bms/rcc: Unhandled write to offset 0x20, value 0x0.
+00:36:13.1354 [WARNING] bms/sysbus: [cpu: 0x8004BBA] (tag: 'PWR') ReadDoubleWord from non existing peripheral at 0x5802480C, returning 0x00000000.
+00:36:13.1359 [WARNING] bms/sysbus: [cpu: 0x8004BC4] (tag: 'PWR') WriteDoubleWord to non existing peripheral at 0x5802480C, value 0x2.
+00:36:13.1363 [WARNING] bms/sysbus: [cpu: 0x8004BC6] (tag: 'PWR/D3CR') ReadDoubleWord from non existing peripheral at 0x58024818, returning 0x00002000.
+00:36:13.1367 [WARNING] bms/sysbus: [cpu: 0x8004BCC] (tag: 'PWR/D3CR') WriteDoubleWord to non existing peripheral at 0x58024818, value 0xE000.
+00:36:13.1372 [WARNING] bms/sysbus: [cpu: 0x8004BCE] (tag: 'PWR/D3CR') ReadDoubleWord from non existing peripheral at 0x58024818, returning 0x00002000.
+00:36:13.1377 [WARNING] bms/sysbus: [cpu: 0x80057AA] ReadDoubleWord from non existing peripheral at 0x5C001004.
+00:36:13.1382 [WARNING] bms/sysbus: [cpu: 0x80057B0] WriteDoubleWord to non existing peripheral at 0x5C001004, value 0x0.
+00:36:13.1386 [WARNING] bms/rcc: Unhandled read from offset 0xE8.
+00:36:13.1408 [WARNING] bms/rcc: Unhandled write to offset 0xE8, value 0x40000.
+00:36:13.1414 [WARNING] bms/rcc: Unhandled read from offset 0x90.
+00:36:13.1419 [WARNING] bms/rcc: Unhandled write to offset 0x90, value 0x40000.
+00:36:13.1423 [WARNING] bms/rcc: Unhandled read from offset 0x90.
+00:36:13.1428 [WARNING] bms/rcc: Unhandled write to offset 0x90, value 0x0.
+00:36:13.1433 [WARNING] bms/rcc: Unhandled read from offset 0x50.
+00:36:13.1438 [WARNING] bms/rcc: Unhandled write to offset 0x50, value 0x10000000.
+00:36:13.1442 [WARNING] bms/rcc: Unhandled read from offset 0xEC.
+00:36:13.1447 [WARNING] bms/rcc: Unhandled write to offset 0xEC, value 0x100.
+00:36:13.1451 [WARNING] vcu/nvic: Unhandled write to offset 0xD2C. Unhandled bits: [0-31] when writing value 0xFFFFFFFF. Tags: RESERVED (0x1), VECTTBL (0x1), RESERVED (0xFFFFFFF), FORCED (0x1), DEBUGEVT (0x1).
+00:36:13.1456 [WARNING] vcu/nvic: Unhandled write to offset 0xF50 (ICacheInvalidateAllToPoUaIgnored), value 0x0.
+00:36:13.1460 [WARNING] vcu/sysbus: [cpu: 0x8000F60] (tag: 'PWR') ReadDoubleWord from non existing peripheral at 0x5802480C, returning 0x00000000.
+00:36:13.1463 [WARNING] vcu/sysbus: [cpu: 0x8000F6A] (tag: 'PWR') WriteDoubleWord to non existing peripheral at 0x5802480C, value 0x2.
+00:36:13.1467 [WARNING] vcu/sysbus: [cpu: 0x8000F6C] (tag: 'PWR/D3CR') ReadDoubleWord from non existing peripheral at 0x58024818, returning 0x00002000.
+00:36:13.1472 [WARNING] vcu/sysbus: [cpu: 0x8000F72] (tag: 'PWR/D3CR') WriteDoubleWord to non existing peripheral at 0x58024818, value 0xE000.
+00:36:13.1476 [WARNING] vcu/sysbus: [cpu: 0x8000F74] (tag: 'PWR/D3CR') ReadDoubleWord from non existing peripheral at 0x58024818, returning 0x00002000.
+00:36:13.1479 [WARNING] vcu/sysbus: [cpu: 0x8000F7C] ReadDoubleWord from non existing peripheral at 0x5C001000.
+00:36:13.1484 [WARNING] vcu/rcc: Unhandled write to offset 0x0. Unhandled bits: [18] when writing value 0x40187. Tags: HSEBYP (0x1).
+00:36:13.1487 [WARNING] vcu/rcc: Unhandled write to offset 0x2C. Unhandled bits: [3] when writing value 0x1FF0008.
+00:36:13.1489 [WARNING] vcu/rcc: Unhandled read from offset 0x30.
+00:36:13.1490 [WARNING] vcu/rcc: Unhandled write to offset 0x30, value 0x17.
+00:36:13.1494 [WARNING] vcu/rcc: Unhandled read from offset 0x30.
+00:36:13.1498 [WARNING] vcu/rcc: Unhandled write to offset 0x30, value 0x200.
+00:36:13.1502 [WARNING] vcu/rcc: Unhandled read from offset 0x30.
+00:36:13.1505 [WARNING] vcu/rcc: Unhandled write to offset 0x30, value 0x30000.
+00:36:13.1509 [WARNING] vcu/rcc: Unhandled read from offset 0x30.
+00:36:13.1512 [WARNING] vcu/rcc: Unhandled write to offset 0x30, value 0x1000000.
+00:36:13.1516 [WARNING] vcu/sysbus: [cpu: 0x8002C90] (tag: 'PWR') ReadDoubleWord from non existing peripheral at 0x5802480C, returning 0x00000000.
+00:36:13.1519 [WARNING] vcu/sysbus: [cpu: 0x8002C9A] (tag: 'PWR') WriteDoubleWord to non existing peripheral at 0x5802480C, value 0x2.
+00:36:13.1523 [WARNING] vcu/sysbus: [cpu: 0x8002C9C] (tag: 'PWR/D3CR') ReadDoubleWord from non existing peripheral at 0x58024818, returning 0x00002000.
+00:36:13.1528 [WARNING] vcu/sysbus: [cpu: 0x8002CA2] (tag: 'PWR/D3CR') WriteDoubleWord to non existing peripheral at 0x58024818, value 0xE000.
+00:36:13.1556 [WARNING] vcu/sysbus: [cpu: 0x8002CA4] (tag: 'PWR/D3CR') ReadDoubleWord from non existing peripheral at 0x58024818, returning 0x00002000.
+00:36:13.1562 [WARNING] vcu/sysbus: [cpu: 0x8003B12] (tag: 'PWR/D3CR') ReadDoubleWord from non existing peripheral at 0x58024818, returning 0x00002000.
+00:36:13.1566 [WARNING] vcu/sysbus: [cpu: 0x8003B5E] (tag: 'PWR/D3CR') ReadDoubleWord from non existing peripheral at 0x58024818, returning 0x00002000.
+00:36:13.1570 [WARNING] vcu/rcc: Unhandled read from offset 0x18.
+00:36:13.1575 [WARNING] vcu/rcc: Unhandled write to offset 0x18, value 0x0.
+00:36:13.1579 [WARNING] vcu/rcc: Unhandled read from offset 0x18.
+00:36:13.1583 [WARNING] vcu/rcc: Unhandled write to offset 0x18, value 0x0.
+00:36:13.1590 [WARNING] vcu/rcc: Unhandled read from offset 0x1C.
+00:36:13.1594 [WARNING] vcu/rcc: Unhandled write to offset 0x1C, value 0x0.
+00:36:13.1599 [WARNING] vcu/rcc: Unhandled read from offset 0x1C.
+00:36:13.1604 [WARNING] vcu/rcc: Unhandled write to offset 0x1C, value 0x0.
+00:36:13.1608 [WARNING] vcu/rcc: Unhandled read from offset 0x18.
+00:36:13.1613 [WARNING] vcu/rcc: Unhandled write to offset 0x18, value 0x0.
+00:36:13.1616 [WARNING] vcu/rcc: Unhandled read from offset 0x20.
+00:36:13.1621 [WARNING] vcu/rcc: Unhandled write to offset 0x20, value 0x0.
+00:36:13.1626 [WARNING] vcu/sysbus: [cpu: 0x8002D0E] (tag: 'PWR') ReadDoubleWord from non existing peripheral at 0x5802480C, returning 0x00000000.
+00:36:13.1632 [WARNING] vcu/sysbus: [cpu: 0x8002D18] (tag: 'PWR') WriteDoubleWord to non existing peripheral at 0x5802480C, value 0x2.
+00:36:13.1638 [WARNING] vcu/sysbus: [cpu: 0x8002D1A] (tag: 'PWR/D3CR') ReadDoubleWord from non existing peripheral at 0x58024818, returning 0x00002000.
+00:36:13.1642 [WARNING] vcu/sysbus: [cpu: 0x8002D20] (tag: 'PWR/D3CR') WriteDoubleWord to non existing peripheral at 0x58024818, value 0xE000.
+00:36:13.1644 [WARNING] vcu/sysbus: [cpu: 0x8002D22] (tag: 'PWR/D3CR') ReadDoubleWord from non existing peripheral at 0x58024818, returning 0x00002000.
+00:36:13.1647 [WARNING] vcu/sysbus: [cpu: 0x800387E] ReadDoubleWord from non existing peripheral at 0x5C001004.
+00:36:13.1652 [WARNING] vcu/sysbus: [cpu: 0x8003884] WriteDoubleWord to non existing peripheral at 0x5C001004, value 0x0.
+00:36:13.1657 [WARNING] vcu/rcc: Unhandled read from offset 0xE8.
+00:36:13.1663 [WARNING] vcu/rcc: Unhandled write to offset 0xE8, value 0x40000.
+00:36:13.1667 [WARNING] vcu/rcc: Unhandled read from offset 0x90.
+00:36:13.1673 [WARNING] vcu/rcc: Unhandled write to offset 0x90, value 0x40000.
+00:36:13.1677 [WARNING] vcu/rcc: Unhandled read from offset 0x90.
+00:36:13.1682 [WARNING] vcu/rcc: Unhandled write to offset 0x90, value 0x0.
+00:36:13.1686 [WARNING] vcu/rcc: Unhandled read from offset 0x50.
+00:36:13.1690 [WARNING] vcu/rcc: Unhandled write to offset 0x50, value 0x10000000.
+00:36:13.1695 [WARNING] vcu/rcc: Unhandled read from offset 0xEC.
+00:36:13.1699 [WARNING] vcu/rcc: Unhandled write to offset 0xEC, value 0x100.
+00:36:13.1704 [WARNING] charger/nvic: Unhandled write to offset 0xD2C. Unhandled bits: [0-31] when writing value 0xFFFFFFFF. Tags: RESERVED (0x1), VECTTBL (0x1), RESERVED (0xFFFFFFF), FORCED (0x1), DEBUGEVT (0x1).
+00:36:13.1731 [WARNING] charger/nvic: Unhandled write to offset 0xF50 (ICacheInvalidateAllToPoUaIgnored), value 0x0.
+00:36:13.1738 [WARNING] charger/sysbus: [cpu: 0x8001024] (tag: 'PWR') ReadDoubleWord from non existing peripheral at 0x5802480C, returning 0x00000000.
+00:36:13.1743 [WARNING] charger/sysbus: [cpu: 0x800102E] (tag: 'PWR') WriteDoubleWord to non existing peripheral at 0x5802480C, value 0x2.
+00:36:13.1748 [WARNING] charger/sysbus: [cpu: 0x8001030] (tag: 'PWR/D3CR') ReadDoubleWord from non existing peripheral at 0x58024818, returning 0x00002000.
+00:36:13.1753 [WARNING] charger/sysbus: [cpu: 0x8001036] (tag: 'PWR/D3CR') WriteDoubleWord to non existing peripheral at 0x58024818, value 0xE000.
+00:36:13.1758 [WARNING] charger/sysbus: [cpu: 0x8001038] (tag: 'PWR/D3CR') ReadDoubleWord from non existing peripheral at 0x58024818, returning 0x00002000.
+00:36:13.1763 [WARNING] charger/sysbus: [cpu: 0x8001040] ReadDoubleWord from non existing peripheral at 0x5C001000.
+00:36:13.1767 [WARNING] charger/rcc: Unhandled write to offset 0x0. Unhandled bits: [18] when writing value 0x40187. Tags: HSEBYP (0x1).
+00:36:13.1773 [WARNING] charger/rcc: Unhandled write to offset 0x2C. Unhandled bits: [3] when writing value 0x1FF0008.
+00:36:13.1777 [WARNING] charger/rcc: Unhandled read from offset 0x30.
+00:36:13.1781 [WARNING] charger/rcc: Unhandled write to offset 0x30, value 0x17.
+00:36:13.1784 [WARNING] charger/rcc: Unhandled read from offset 0x30.
+00:36:13.1787 [WARNING] charger/rcc: Unhandled write to offset 0x30, value 0x200.
+00:36:13.1789 [WARNING] charger/rcc: Unhandled read from offset 0x30.
+00:36:13.1791 [WARNING] charger/rcc: Unhandled write to offset 0x30, value 0x30000.
+00:36:13.1793 [WARNING] charger/rcc: Unhandled read from offset 0x30.
+00:36:13.1794 [WARNING] charger/rcc: Unhandled write to offset 0x30, value 0x1000000.
+00:36:13.1796 [WARNING] charger/sysbus: [cpu: 0x8002D54] (tag: 'PWR') ReadDoubleWord from non existing peripheral at 0x5802480C, returning 0x00000000.
+00:36:13.1798 [WARNING] charger/sysbus: [cpu: 0x8002D5E] (tag: 'PWR') WriteDoubleWord to non existing peripheral at 0x5802480C, value 0x2.
+00:36:13.1799 [WARNING] charger/sysbus: [cpu: 0x8002D60] (tag: 'PWR/D3CR') ReadDoubleWord from non existing peripheral at 0x58024818, returning 0x00002000.
+00:36:13.1801 [WARNING] charger/sysbus: [cpu: 0x8002D66] (tag: 'PWR/D3CR') WriteDoubleWord to non existing peripheral at 0x58024818, value 0xE000.
+00:36:13.1803 [WARNING] charger/sysbus: [cpu: 0x8002D68] (tag: 'PWR/D3CR') ReadDoubleWord from non existing peripheral at 0x58024818, returning 0x00002000.
+00:36:13.1806 [WARNING] charger/sysbus: [cpu: 0x8003BD6] (tag: 'PWR/D3CR') ReadDoubleWord from non existing peripheral at 0x58024818, returning 0x00002000.
+00:36:13.1810 [WARNING] charger/sysbus: [cpu: 0x8003C22] (tag: 'PWR/D3CR') ReadDoubleWord from non existing peripheral at 0x58024818, returning 0x00002000.
+00:36:13.1814 [WARNING] charger/rcc: Unhandled read from offset 0x18.
+00:36:13.1819 [WARNING] charger/rcc: Unhandled write to offset 0x18, value 0x0.
+00:36:13.1823 [WARNING] charger/rcc: Unhandled read from offset 0x18.
+00:36:13.1827 [WARNING] charger/rcc: Unhandled write to offset 0x18, value 0x0.
+00:36:13.1831 [WARNING] charger/rcc: Unhandled read from offset 0x1C.
+00:36:13.1836 [WARNING] charger/rcc: Unhandled write to offset 0x1C, value 0x0.
+00:36:13.1840 [WARNING] charger/rcc: Unhandled read from offset 0x1C.
+00:36:13.1845 [WARNING] charger/rcc: Unhandled write to offset 0x1C, value 0x0.
+00:36:13.1848 [WARNING] charger/rcc: Unhandled read from offset 0x18.
+00:36:13.1853 [WARNING] charger/rcc: Unhandled write to offset 0x18, value 0x0.
+00:36:13.1857 [WARNING] charger/rcc: Unhandled read from offset 0x20.
+00:36:13.1861 [WARNING] charger/rcc: Unhandled write to offset 0x20, value 0x0.
+00:36:13.1865 [WARNING] charger/sysbus: [cpu: 0x8002DD2] (tag: 'PWR') ReadDoubleWord from non existing peripheral at 0x5802480C, returning 0x00000000.
+00:36:13.1869 [WARNING] charger/sysbus: [cpu: 0x8002DDC] (tag: 'PWR') WriteDoubleWord to non existing peripheral at 0x5802480C, value 0x2.
+00:36:13.1874 [WARNING] charger/sysbus: [cpu: 0x8002DDE] (tag: 'PWR/D3CR') ReadDoubleWord from non existing peripheral at 0x58024818, returning 0x00002000.
+00:36:13.1878 [WARNING] charger/sysbus: [cpu: 0x8002DE4] (tag: 'PWR/D3CR') WriteDoubleWord to non existing peripheral at 0x58024818, value 0xE000.
+00:36:13.1883 [WARNING] charger/sysbus: [cpu: 0x8002DE6] (tag: 'PWR/D3CR') ReadDoubleWord from non existing peripheral at 0x58024818, returning 0x00002000.
+00:36:13.1887 [WARNING] charger/sysbus: [cpu: 0x8003942] ReadDoubleWord from non existing peripheral at 0x5C001004.
+00:36:13.1890 [WARNING] charger/sysbus: [cpu: 0x8003948] WriteDoubleWord to non existing peripheral at 0x5C001004, value 0x0.
+00:36:13.1896 [WARNING] charger/rcc: Unhandled read from offset 0xE8.
+00:36:13.1900 [WARNING] charger/rcc: Unhandled write to offset 0xE8, value 0x40000.
+00:36:13.1904 [WARNING] charger/rcc: Unhandled read from offset 0x90.
+00:36:13.1908 [WARNING] charger/rcc: Unhandled write to offset 0x90, value 0x40000.
+00:36:13.1912 [WARNING] charger/rcc: Unhandled read from offset 0x90.
+00:36:13.1915 [WARNING] charger/rcc: Unhandled write to offset 0x90, value 0x0.
+00:36:13.1919 [WARNING] charger/rcc: Unhandled read from offset 0x50.
+00:36:13.1923 [WARNING] charger/rcc: Unhandled write to offset 0x50, value 0x10000000.
+00:36:13.1927 [WARNING] charger/rcc: Unhandled read from offset 0xEC.
+00:36:13.1931 [WARNING] charger/rcc: Unhandled write to offset 0xEC, value 0x100.
+00:36:13.1935 [WARNING] bms/rcc: Unhandled read from offset 0x50.
+00:36:13.1939 [WARNING] bms/fdcan1: Unhandled write to offset 0x1C. Unhandled bits: [1, 9-10, 25-26] when writing value 0xC01. Tags: NTSEG2 (0x1), NTSEG1 (0xC), NSJW (0x0).
+00:36:13.2212 [WARNING] vcu/rcc: Unhandled read from offset 0x50.
+00:36:13.2222 [WARNING] vcu/fdcan1: Unhandled write to offset 0x1C. Unhandled bits: [1, 9-10, 25-26] when writing value 0xC01. Tags: NTSEG2 (0x1), NTSEG1 (0xC), NSJW (0x0).
+00:36:13.3019 [WARNING] charger/rcc: Unhandled read from offset 0x50.
+00:36:13.3026 [WARNING] charger/fdcan1: Unhandled write to offset 0x1C. Unhandled bits: [1, 9-10, 25-26] when writing value 0xC01. Tags: NTSEG2 (0x1), NTSEG1 (0xC), NSJW (0x0).
+00:36:16.6492 [INFO] bms: Machine paused.
+00:36:16.6496 [INFO] vcu: Machine paused.
+00:36:16.6500 [INFO] charger: Machine paused.
+uart: cold bms len=199
+uart: cold bms | *** Booting Zephyr OS build zephyr-v3.5.0 ***
+uart: cold bms | BMS ready
+uart: cold bms | bms can ready init_res=0
+uart: cold bms | bms filter vcu_command rc=0
+uart: cold bms | bms filter charger_status rc=1
+uart: cold bms | bms can_start rc=0
+uart: cold bms | bms state INIT -> STANDBY @10 ms
+uart: cold vcu len=127
+uart: cold vcu | *** Booting Zephyr OS build zephyr-v3.5.0 ***
+uart: cold vcu | VCU ready
+uart: cold vcu | vcu can_ready=0
+uart: cold vcu | vcu state=0 hb=1 thr=0 trq=0 spd=0 tx=1 rc=0 rst=0
+uart: cold charger len=58
+uart: cold charger | *** Booting Zephyr OS build zephyr-v3.5.0 ***
+uart: cold charger | CHG ready
+bench: event log closed, 67 lines
+Renode is quitting
+00:36:16.9649 [INFO] bms: Disposed.
+00:36:17.0706 [INFO] vcu: Disposed.
+00:36:17.1703 [INFO] charger: Disposed.

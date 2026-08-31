@@ -68,8 +68,19 @@ RESULTS = "results.json"
 EVENTS = "events.log"
 INCOMPLETE = "INCOMPLETE"
 
-#: The one provenance entry that is allowed -- required, in fact -- to differ.
+#: The provenance entries that are allowed -- required, in fact -- to differ
+#: between a cold run and a snapshot run.
+#:
+#:   the .resc      each mode executes its own script
+#:   the shim       only a snapshot run executes one, and provenance records
+#:                  everything that shaped a run (NN-4), so its absence from
+#:                  the cold side is the truth about the cold side
+#:
+#: Nothing else is excused. can_toolkit.py's hash in particular must match, and
+#: that is the check that the fast path did not quietly edit the slow path's
+#: toolkit.
 SCRIPT_SUFFIX = ".resc"
+SHIM_NAME = "snapshot_shim.py"
 PROVENANCE_INPUTS = ("provenance", "inputs_sha256")
 
 
@@ -118,7 +129,10 @@ def take_script_entry(results: dict, label: str):
             % (label, SCRIPT_SUFFIX, len(entries), ", ".join(map(str, entries)))
         )
     key = entries[0]
-    return key, node.pop(key)
+    shim = [k for k in node if str(k).endswith(SHIM_NAME)]
+    for k in shim:
+        node.pop(k)
+    return key, node.pop(key), bool(shim)
 
 
 def differences(a, b, path="") -> list:
@@ -180,8 +194,8 @@ def main(argv=None) -> int:
     try:
         a = load_run(Path(args.a), args.label_a)
         b = load_run(Path(args.b), args.label_b)
-        a_key, a_hash = take_script_entry(a["results"], args.label_a)
-        b_key, b_hash = take_script_entry(b["results"], args.label_b)
+        a_key, a_hash, a_shim = take_script_entry(a["results"], args.label_a)
+        b_key, b_hash, b_shim = take_script_entry(b["results"], args.label_b)
     except CannotCompare as exc:
         print("\nCANNOT COMPARE: %s\n" % exc, file=sys.stderr)
         return 2
@@ -212,6 +226,12 @@ def main(argv=None) -> int:
             print("             ... and %d more" % (len(diffs) - 20))
 
     # 3. The difference that must be there.
+    if a_shim != b_shim:
+        which = args.label_b if b_shim else args.label_a
+        print("  expected only %s records the snapshot shim in its provenance,"
+              % which)
+        print("           which is what says that run executed one")
+
     print()
     if a_hash == b_hash and a_key == b_key:
         print("  note     both runs executed the SAME emulator script:")

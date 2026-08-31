@@ -302,5 +302,114 @@ class TestFreezeIsHaltNeverPause(unittest.TestCase):
         self.assertIn("halt-did-not-take", self.source[start:start + 2600])
 
 
+class TestSnapshotModeSplitsWhereNothingHasHappenedYet(unittest.TestCase):
+    """The split point decides whether a snapshot means anything.
+
+    A snapshot is of boot and settle: the state every test of one topology
+    starts from, before anything has been done TO the device. Split one step
+    late and the snapshot contains a stimulus, so every test restored from it
+    begins with that stimulus already applied -- and the run would still look
+    perfectly ordinary.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.net = rs.topology.load(None)
+        cls.cat = rs.contract.load(None)
+        cls.boards = rs.BoardBook.load(PROJECT_ROOT / "boards.yml")
+
+    def compiler(self, steps):
+        scenario = rs.Scenario({"id": "split-unit", "steps": steps},
+                               Path("split-unit.yml"))
+        return rs.Compiler(self.net, self.cat, self.boards, scenario,
+                           REPO_ROOT / "harness" / "out" / "split-unit", False)
+
+    def test_leading_waits_and_marks_are_the_snapshot(self):
+        compiler = self.compiler([
+            {"wait_uart": {"node": "bms", "text": "x", "timeout_ms": 10}},
+            {"mark": "settled"},
+            {"node_silence": {"node": "vcu", "silence": True}},
+            {"run_for": {"ms": 10}},
+        ])
+        self.assertEqual(compiler._snapshot_split(), 2)
+
+    def test_the_split_stops_at_the_first_stimulus(self):
+        # run_for is not a settle verb: it advances time, and time advanced
+        # after a stimulus is part of the test rather than part of the boot.
+        compiler = self.compiler([
+            {"wait_uart": {"node": "bms", "text": "x", "timeout_ms": 10}},
+            {"run_for": {"ms": 5}},
+            {"mark": "later"},
+        ])
+        self.assertEqual(compiler._snapshot_split(), 1)
+
+    def test_a_scenario_that_starts_by_acting_is_refused(self):
+        # The other direction. Snapshot mode must not silently degrade to a
+        # cold run: a caller who asked for it and got something else would
+        # measure the wrong thing and be told nothing.
+        compiler = self.compiler([
+            {"node_silence": {"node": "vcu", "silence": True}},
+            {"run_for": {"ms": 10}},
+        ])
+        out = REPO_ROOT / "harness" / "out" / "split-unit"
+        with self.assertRaises(rs.Refusal) as ctx:
+            compiler.compile_snapshot(out / "a.log", out / "b.log",
+                                      out / "s.txt", out / "s.dat")
+        message = str(ctx.exception)
+        self.assertIn("node_silence", message)
+        self.assertIn("REFUSING TO EXECUTE", message)
+
+    def test_cold_mode_produces_no_second_script(self):
+        # A Compilation carrying suffix lines in cold mode would mean the two
+        # modes had been confused somewhere upstream.
+        compiler = self.compiler([
+            {"wait_uart": {"node": "bms", "text": "x", "timeout_ms": 10}},
+            {"run_for": {"ms": 10}},
+        ])
+        self.assertEqual(compiler.result.suffix_lines, [])
+        self.assertEqual(compiler.result.snapshot_after_step, 0)
+
+
+class TestTheSnapshotShimIsPartOfWhatRan(unittest.TestCase):
+    """The shim changes what executes, so provenance has to name it (NN-4).
+
+    It also must not write to the event log: a snapshot run's log is required
+    to be byte-identical to a cold run's, and a line about the mechanism would
+    be a line the cold run never had.
+    """
+
+    def setUp(self):
+        self.source = (REPO_ROOT / "harness" / "snapshot_shim.py").read_text(
+            encoding="utf-8"
+        )
+
+    def test_the_shim_exists_and_is_hashed_into_snapshot_runs(self):
+        engine = (REPO_ROOT / "harness" / "run_scenarios.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("snapshot_shim.py", engine)
+        # The behaviour, not its neighbourhood: an earlier version of this
+        # test searched from the first `if args.snapshot:` and found the
+        # compile branch instead, which would have passed while provenance
+        # named nothing.
+        self.assertIn("inputs[_repo_relative(shim)] = _sha256(shim)", engine)
+
+    def test_the_shim_writes_nothing_to_the_event_log(self):
+        offenders = [
+            line.strip()
+            for line in self.source.splitlines()
+            if "_write(" in line and not line.strip().startswith("#")
+        ]
+        self.assertEqual(offenders, [], "; ".join(offenders))
+
+    def test_the_toolkit_is_not_edited_by_the_snapshot_path(self):
+        # The whole reason the shim exists: can_toolkit.py's hash is in every
+        # stored run's provenance.
+        toolkit = (REPO_ROOT / "harness" / "can_toolkit.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("snapshot", toolkit.lower())
+
+
 if __name__ == "__main__":
     unittest.main()
