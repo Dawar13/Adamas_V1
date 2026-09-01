@@ -20,6 +20,7 @@ args:
 applies_to: [real]
 requires_capabilities: [console]
 emits: EXPECT_ARM
+resolves: [EXPECT_MET]
 handler: expect_boots
 doc: |
   Did it come back? The banner the topology already declares for this node is

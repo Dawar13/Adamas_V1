@@ -15,10 +15,12 @@ operator sees are the words on this page.
 | Verb | Class | Applies to | Needs a handler | Summary |
 |---|---|---|---|---|
 | [`can_send`](#can-send) | stimulus | real, scripted | yes | Put one frame on a bus |
+| [`expect_always`](#expect-always) | assert | real, scripted | yes | Demand that every frame of a message satisfied a condition, and that there were some |
 | [`expect_boots`](#expect-boots) | assert | real | yes | Demand that the device came back up |
 | [`expect_can`](#expect-can) | assert | real, scripted | yes | Demand a frame, with signal values, within a deadline |
 | [`expect_flash`](#expect-flash) | assert | real | yes | Demand that non-volatile memory holds particular bytes |
 | [`expect_no_can`](#expect-no-can) | assert | real, scripted | yes | Demand the absence of a frame for a whole window |
+| [`expect_order`](#expect-order) | assert | real, scripted | yes | Demand that one frame was seen before another, over one window |
 | [`expect_symbol`](#expect-symbol) | assert | real | yes | Demand that a variable holds a value |
 | [`flood`](#flood) | stimulus | real, scripted | yes | Put many frames on a bus in one tick, to load it or exhaust buffers |
 | [`mark`](#mark) | book | real, scripted | yes | A labelled point in the event log |
@@ -32,7 +34,7 @@ operator sees are the words on this page.
 | [`wait_uart`](#wait-uart) | observe | real | yes | Wait for text to appear on a node's console |
 | [`write_symbol`](#write-symbol) | stimulus | real | yes | Write a value into a running node's memory |
 
-17 verbs: 7 stimulus (make something happen), 2 power (cut, restore, reset), 1 time (let virtual time pass), 1 observe (wait for something), 5 assert (demand something, or forbid it), 1 book (record, annotate, checkpoint).
+19 verbs: 7 stimulus (make something happen), 2 power (cut, restore, reset), 1 time (let virtual time pass), 1 observe (wait for something), 7 assert (demand something, or forbid it), 1 book (record, annotate, checkpoint).
 
 ---
 
@@ -68,6 +70,78 @@ measuring the tool's echo.
 
 ---
 
+## expect_always
+
+*Demand that every frame of a message satisfied a condition, and that there were some*
+
+| | |
+|---|---|
+| class | `assert`, polarity `expect` |
+| applies to | real, scripted |
+| writes to the event log | `ALWAYS_ARM` |
+| answered by | `ALWAYS_HELD` |
+| explained by | `ALWAYS_FAILED`, `ALWAYS_UNTESTED` |
+| compiled by | a handler, `_verb_expect_always` |
+
+**Arguments**
+
+| Name | Type | Required | Notes |
+|---|---|---|---|
+| `id` | `message_id` | yes |  |
+| `signals` | `signals` | no | the signal values every frame of this message must carry |
+| `for_ms` | `window_ms` | yes | how long the invariant must hold |
+| `label` | `label` | no | what this invariant means |
+
+The verb for a requirement phrased as an ABSENCE, which is the class that is
+systematically the least tested and the most expensive to get wrong.
+
+IT EXISTS BECAUSE A PROHIBITION PASSES ON SILENCE. expect_no_can is judged
+"violated, or else honoured": a prohibition on a frame that never arrived is
+reported as honoured, with nothing said. That is not a hypothetical. Against
+a build whose limits publisher never transmits, the safety statement "the
+main contactor was never closed during startup" came back GREEN -- green
+precisely because the device had gone silent and nothing could be observed
+at all.
+
+An invariant is the other half of that sentence. It says every observation
+satisfied the condition AND that there were observations, and it records how
+many, so a reader can tell a proof from an absence of evidence. Zero samples
+is a FAILURE with its own diagnosis, never a pass.
+
+THE SECOND THING IT ADDS: a prohibition can only forbid ONE masked pattern.
+"This signal was never anything other than X" is not one pattern, it is
+every other pattern, and spelling it as prohibitions means one step per
+wrong value -- in consecutive windows, which do not overlap the interval the
+requirement is about.
+
+ONLY WHAT A NODE TRANSMITTED COUNTS. A frame the harness injected cannot
+satisfy an invariant about the firmware.
+
+RANGES ARE NOT THIS VERB. The condition is a masked equality, because that
+is what the contract's encoder produces and what the emulator-side matcher
+compares. "Stayed between two bounds" needs a signal decoder inside the
+emulator, and it is section 10.5's expect_within_range, which is NOT BUILT.
+Asking for a range here is refused by the shared parsers rather than
+silently narrowed to an equality.
+
+IT IS A STATEMENT ABOUT OBSERVED FRAMES, NOT ABOUT THE FIRMWARE'S VARIABLES.
+A violation that begins and ends between two transmissions of a periodic
+message is invisible here, and the direction of that inaccuracy is that we
+UNDER-REPORT violations -- the flattering direction, so it is stated here
+rather than left to be discovered.
+
+**Refuses**
+
+`empty_mask` — exit 2
+
+```
+{verb}: the condition constrains no bits of 0x{message_id:X}, so every frame satisfies it and the invariant is true however the firmware behaves.
+  Name the signals that must hold with   signals: {{ <signal>: <value> }}.
+  An unconstrained expect_can is a real claim -- that a frame with this id arrived at all -- but an unconstrained invariant is a claim about nothing.
+```
+
+---
+
 ## expect_boots
 
 *Demand that the device came back up*
@@ -77,6 +151,7 @@ measuring the tool's echo.
 | class | `assert`, polarity `expect` |
 | applies to | real |
 | writes to the event log | `EXPECT_ARM` |
+| answered by | `EXPECT_MET` |
 | needs | `console` |
 | compiled by | a handler, `_verb_expect_boots` |
 
@@ -127,6 +202,7 @@ node {node!r} is a frame player, so there is nothing to boot. A player has no fi
 | class | `assert`, polarity `expect` |
 | applies to | real, scripted |
 | writes to the event log | `EXPECT_ARM` |
+| answered by | `EXPECT_MET` |
 | compiled by | a handler, `_verb_expect_can` |
 
 **Arguments**
@@ -159,6 +235,7 @@ An assertion armed and never resolved is a FAILURE, not a pass.
 | class | `assert`, polarity `expect` |
 | applies to | real |
 | writes to the event log | `EXPECT_ARM` |
+| answered by | `EXPECT_MET` |
 | needs | `flash_read` |
 | compiled by | a handler, `_verb_expect_flash` |
 
@@ -202,6 +279,7 @@ node {node!r} is a frame player and has no memory to read. This verb is for exec
 | class | `assert`, polarity `forbid` |
 | applies to | real, scripted |
 | writes to the event log | `FORBID_ARM` |
+| answered by | `FORBID_HIT` |
 | compiled by | a handler, `_verb_expect_no_can` |
 
 **Arguments**
@@ -223,6 +301,79 @@ violated", so an absent FORBID_ARM in the log fails the run.
 
 ---
 
+## expect_order
+
+*Demand that one frame was seen before another, over one window*
+
+| | |
+|---|---|
+| class | `assert`, polarity `expect` |
+| applies to | real, scripted |
+| writes to the event log | `ORDER_ARM` |
+| answered by | `ORDER_MET` |
+| explained by | `ORDER_OUT_OF`, `ORDER_UNSEEN` |
+| compiled by | a handler, `_verb_expect_order` |
+
+**Arguments**
+
+| Name | Type | Required | Notes |
+|---|---|---|---|
+| `sequence` | `sequence` | yes | two or more frame descriptions, in the order they must first appear |
+| `within_ms` | `window_ms` | yes | one window, covering the whole sequence |
+| `label` | `label` | no | what this ordering means |
+
+A happened before B. This is the verb V1 had no words for at all, and the
+reason is structural rather than an oversight: every other window here is
+armed and then run, so two assertions cover two CONSECUTIVE stretches of
+virtual time. Nothing in that vocabulary can make two statements about the
+same interval, and "B did not appear before A" is exactly that -- a
+prohibition whose end is the moment the expectation is met, which is the
+thing under test and therefore not known in advance.
+
+So this arms every term at once, over ONE window, and records the first
+frame that matches each. The sequence is answered at the end of the window.
+
+WHAT IT PROVES, SAID EXACTLY. Each term's FIRST observation is strictly
+earlier than the next term's first observation, and every term was observed
+inside the window. Two terms first seen in the same microsecond are refused
+as out of order rather than accepted: the bus shows nothing that would order
+them, and calling that "before" would be a claim the log does not support.
+
+ONLY WHAT A NODE TRANSMITTED COUNTS. A frame the harness injected cannot
+order anything, because an order established between two of our own
+injections measures the tool rather than the firmware. Measured in a spike:
+242 injections ordered nothing.
+
+IT IS A STATEMENT ABOUT OBSERVED FRAMES, NOT ABOUT THE FIRMWARE'S VARIABLES.
+A sequence that begins and ends between two transmissions of a periodic
+message is invisible here, and the direction of that inaccuracy is that we
+UNDER-REPORT disorder -- the flattering direction, stated rather than left
+to be discovered.
+
+**Refuses**
+
+`sequence_entry_not_a_mapping` — exit 2
+
+```
+{verb}: entry {index} of 'sequence' is {found}, not a mapping. Each entry describes one frame, the same way expect_can does: an id, and optionally the signals that narrow it.
+```
+
+`sequence_not_a_list` — exit 2
+
+```
+{verb}: 'sequence' is the ordered list of frames, so it must be a list. It is {found}.
+  Write it as   sequence: [ {{ id: ..., signals: {{...}} }}, {{ id: ..., signals: {{...}} }} ]   with the entries in the order they must first appear.
+```
+
+`sequence_too_short` — exit 2
+
+```
+{verb}: 'sequence' has {count}, and an order needs at least two things to be in.
+  For a single frame, use   expect_can: {{ id: ..., within_ms: ... }}   which is the verb for that.
+```
+
+---
+
 ## expect_symbol
 
 *Demand that a variable holds a value*
@@ -232,6 +383,7 @@ violated", so an absent FORBID_ARM in the log fails the run.
 | class | `assert`, polarity `expect` |
 | applies to | real |
 | writes to the event log | `EXPECT_ARM` |
+| answered by | `EXPECT_MET` |
 | needs | `symbol_read` |
 | compiled by | a handler, `_verb_expect_symbol` |
 
@@ -660,6 +812,7 @@ and the deadline is the thing under test.
 | class | `observe`, polarity `expect` |
 | applies to | real |
 | writes to the event log | `EXPECT_ARM` |
+| answered by | `EXPECT_MET` |
 | needs | `console` |
 | compiled by | a handler, `_verb_wait_uart` |
 

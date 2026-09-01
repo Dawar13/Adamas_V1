@@ -319,6 +319,28 @@ def _as_ms(value, what: str) -> int:
     return ms
 
 
+def _describe(value) -> str:
+    """What a wrongly-shaped value IS, in words an author can act on.
+
+    A refusal that says only "must be a list" leaves the author to work out
+    what they wrote instead; naming it turns a re-read of the file into a
+    single glance.
+    """
+    if value is None:
+        return "empty"
+    if isinstance(value, dict):
+        return "a mapping"
+    if isinstance(value, str):
+        return "the text %r" % value
+    if isinstance(value, bool):
+        return "the value %s" % ("true" if value else "false")
+    if isinstance(value, (int, float)):
+        return "the number %s" % value
+    if isinstance(value, list):
+        return "a list of %d" % len(value)
+    return "a %s" % type(value).__name__
+
+
 def _as_window_ms(value, what: str) -> int:
     """A duration that something is observed over, so it cannot be zero.
 
@@ -1136,13 +1158,19 @@ class Compiler:
         which is the whole point, because the same message carries counters
         that change on every transmission.
         """
-        where = step.where
-        signals = step.get("signals")
+        return self._matcher_of(
+            step.get("signals"), message, step.where, step.get("id"))
+
+    def _matcher_of(self, signals, message, where, raw_id):
+        """(value, mask) from signals stated anywhere -- a step, or one entry of
+        a sequence. Split out of _matcher_for so an ordered sequence encodes its
+        terms through the SAME encoder a plain expectation does, rather than a
+        second spelling of it that could drift."""
         if signals:
             if message is None:
                 raise CompileError(
                     "%s: the contract defines no message %s, so its signals "
-                    "cannot be named" % (where, step.get("id"))
+                    "cannot be named" % (where, raw_id)
                 )
             value, mask = self._encode(message, signals, where)
             return _hex_bytes(value), _hex_bytes(mask)
@@ -1307,6 +1335,109 @@ class Compiler:
              "message": message.name if message else None},
         )
         self._run_window(window)
+
+    def _verb_expect_order(self, step):
+        """A happened before B, over ONE window.
+
+        Every other assertion here arms and then runs its own window, so two of
+        them describe two consecutive stretches of time. This one arms every
+        term at once and runs a single window across all of them, which is the
+        only way "B did not appear before A" can be stated at all: the end of
+        that prohibition is the moment A arrives, and that moment is the thing
+        under test.
+        """
+        where = step.where
+        raw = step.need("sequence")
+        if not isinstance(raw, list):
+            self._refuse(step, "sequence_not_a_list", verb=step.verb,
+                         found=_describe(raw))
+        if len(raw) < 2:
+            # The count is rendered here, not in the manifest, so that an empty
+            # sequence does not read "has 0 entry". A refusal with a grammar
+            # mistake in it is one the reader trusts a little less.
+            self._refuse(
+                step, "sequence_too_short", verb=step.verb,
+                count="%d %s" % (len(raw), "entry" if len(raw) == 1 else "entries"))
+        terms, detail = [], []
+        for index, entry in enumerate(raw):
+            if not isinstance(entry, dict):
+                self._refuse(step, "sequence_entry_not_a_mapping",
+                             verb=step.verb, index=index,
+                             found=_describe(entry))
+            unknown = sorted(set(entry) - {"id", "signals"})
+            if unknown:
+                raise CompileError(
+                    "%s: entry %d of 'sequence' has keys this verb does not "
+                    "know: %s. An entry describes one frame, so it takes the "
+                    "same two keys expect_can does: 'id', and optionally "
+                    "'signals'." % (where, index, ", ".join(unknown))
+                )
+            if "id" not in entry:
+                raise CompileError(
+                    "%s: entry %d of 'sequence' names no 'id', so there is no "
+                    "frame for it to be about" % (where, index)
+                )
+            signals = entry.get("signals")
+            message, msg_id = self._message_for(
+                entry["id"], "%s: sequence[%d]" % (where, index),
+                need_contract=bool(signals)
+            )
+            value_hex, mask_hex = self._matcher_of(
+                signals, message, "%s: sequence[%d]" % (where, index),
+                entry["id"])
+            terms.append("0x%X:%s:%s" % (msg_id, value_hex, mask_hex))
+            detail.append({"id": "0x%X" % msg_id, "signals": signals or {},
+                           "message": message.name if message else None})
+
+        window = _as_window_ms(step.need("within_ms"), "%s: within_ms" % where)
+        label = step.get("label") or (
+            "%s in that order" % ", ".join(d["id"] for d in detail))
+        token = self._token()
+        self._emit(
+            'bench_expect_order "%s" "%s" "%d" "%s"'
+            % (token, ",".join(terms), window,
+               self._text_arg(label, "%s: label" % where))
+        )
+        self._run_window(window)
+        # RESOLVED AFTER THE WINDOW, NEVER DURING IT. An order is only knowable
+        # once the window is over: a term still unseen at this instant might
+        # have arrived later, and a sequence answered early would report a
+        # verdict that depended on where the compiler happened to stop.
+        self._emit('bench_order_resolve "%s"' % token)
+        # message_id is None on purpose: a sequence may span several
+        # identifiers, and naming one of them would let the judge attach a
+        # frame that is not the one the verdict rests on.
+        self.result.tokens.append(
+            Token(token, step.verb, label, step.index, None, window,
+                  {"sequence": detail})
+        )
+
+    def _verb_expect_always(self, step):
+        """Every frame of this message satisfied the condition, and there were
+        frames. The second half is the verb: a prohibition on a message that
+        never arrived is judged honoured, and this is not."""
+        where = step.where
+        message, msg_id = self._message_for(
+            step.need("id"), where, need_contract=bool(step.get("signals"))
+        )
+        window = _as_window_ms(step.need("for_ms"), "%s: for_ms" % where)
+        value_hex, mask_hex = self._matcher_for(step, message, msg_id)
+        if not any(int(mask_hex[i:i + 2], 16) for i in range(0, len(mask_hex), 2)):
+            self._refuse(step, "empty_mask", verb=step.verb, message_id=msg_id)
+        label = step.get("label") or ("0x%X always matches" % msg_id)
+        token = self._token()
+        self._emit(
+            'bench_expect_always "%s" "0x%X" "%s" "%s" "%d" "%s"'
+            % (token, msg_id, value_hex, mask_hex, window,
+               self._text_arg(label, "%s: label" % where))
+        )
+        self._run_window(window)
+        self._emit('bench_always_resolve "%s"' % token)
+        self.result.tokens.append(
+            Token(token, step.verb, label, step.index, "0x%X" % msg_id, window,
+                  {"signals": step.get("signals") or {},
+                   "message": message.name if message else None})
+        )
 
     def _sender_of(self, message, step, msg_id):
         """Who a frame is attributed to: the scenario, or the contract's sender."""
@@ -2105,16 +2236,42 @@ class EventLog:
     def failures(self):
         return [{"us": e.us, "detail": " ".join(e.fields)} for e in self.of_kind("FAIL")]
 
+    # THE KINDS COME FROM THE MANIFESTS, NOT FROM THIS FILE.
+    #
+    # These three used to be literal tuples here. Section 3.1 removed exactly
+    # that shape -- five hand-maintained lists that nothing checked agreed --
+    # and a verb whose arm kind lived in its manifest while its resolution kind
+    # lived here would be that same drift with the same failure mode: a new
+    # verb whose token is armed, never looked for, and silently reported as
+    # never resolved.
+    #
+    # Derived, the sets are exactly what was hardcoded before the ordering
+    # verbs existed, which is why adding them changed no existing verdict.
+
     def armed(self):
         out = {}
-        for event in self.of_kind("EXPECT_ARM", "FORBID_ARM"):
+        for event in self.of_kind(*REGISTRY.arm_kinds):
             if event.fields:
                 out[event.fields[0]] = event
         return out
 
     def resolved(self):
         out = {}
-        for event in self.of_kind("EXPECT_MET", "FORBID_HIT"):
+        for event in self.of_kind(*REGISTRY.resolve_kinds):
+            if event.fields and event.fields[0] not in out:
+                out[event.fields[0]] = event
+        return out
+
+    def diagnoses(self):
+        """Lines that explain a token which was NOT answered.
+
+        A verdict of FAIL is worth little without the reason, and the reason is
+        the emulator's to state: it saw the frames. "nothing matched within the
+        window" is true of a sequence that ran backwards and of one whose
+        second term never appeared, and those are different findings.
+        """
+        out = {}
+        for event in self.of_kind(*REGISTRY.diagnosis_kinds):
             if event.fields and event.fields[0] not in out:
                 out[event.fields[0]] = event
         return out
@@ -2179,6 +2336,37 @@ def _matched_before(frames, wanted_id, arm, stimulus_us) -> bool:
     return False
 
 
+def _deciding_us(verb, hit):
+    """The microsecond a resolved token actually decided at, or None.
+
+    Three answers, and which one applies is declared by the verb rather than
+    assumed here:
+
+      line    the resolving line's own timestamp is the instant. True of every
+              verb that writes its resolution at the moment it matched.
+      <n>     field n of the line carries it. A verb answered at the END of a
+              window writes its line then, and that timestamp is the window's
+              end -- not the moment anything happened. Quoting it as a latency
+              would be a measurement of the compiler's window, not the bus.
+      none    there is no single deciding instant. An invariant over a window
+              does not have one, and an invented one would be a fabricated
+              reaction time in the stored results.
+    """
+    if hit is None:
+        return None
+    instant = REGISTRY.instant_of(verb)
+    if instant == verb_registry.INSTANT_NONE:
+        return None
+    if instant == verb_registry.INSTANT_LINE:
+        return hit.us
+    try:
+        return int(hit.fields[instant])
+    except (IndexError, ValueError):
+        # The line is malformed, so there is no honest instant to quote. The
+        # token still resolved -- that is a separate fact, decided above.
+        return None
+
+
 def judge(compiled, log, exit_code, console_text, machines_boot):
     """Every verdict in one place, from what was observed and nothing else."""
     hard = []
@@ -2209,6 +2397,7 @@ def judge(compiled, log, exit_code, console_text, machines_boot):
 
     armed = log.armed()
     resolved = log.resolved()
+    diagnoses = log.diagnoses()
     stim_us = sorted(s["us"] for s in log.stimuli())
     frames = log.frames()
 
@@ -2218,7 +2407,7 @@ def judge(compiled, log, exit_code, console_text, machines_boot):
         arm = armed.get(token.name)
         hit = resolved.get(token.name)
         record["armed_us"] = arm.us if arm else None
-        record["met_us"] = hit.us if hit else None
+        record["met_us"] = _deciding_us(token.verb, hit)
         record["latency_us"] = None
         record["latency_ms"] = None
         record["matched_frame"] = None
@@ -2247,16 +2436,38 @@ def judge(compiled, log, exit_code, console_text, machines_boot):
             )
         else:
             record["verdict"] = "PASS" if hit else "FAIL"
-            record["reason"] = (
-                "matched at %d us" % hit.us
-                if hit
-                else "nothing matched within the window"
-            )
+            if hit and record["met_us"] is not None:
+                record["reason"] = "matched at %d us" % record["met_us"]
+            elif hit:
+                # A verb with NO deciding instant. "matched at 500000 us" would
+                # be wrong twice over: an invariant does not match at a moment,
+                # and 500000 is where the window ended rather than where
+                # anything happened. Its own line already says what held and
+                # over how many observations, so quote that.
+                record["reason"] = "%s: %s" % (
+                    hit.kind, " ".join(hit.fields[1:])) if len(hit.fields) > 1 \
+                    else hit.kind
+            else:
+                # THE EMULATOR SAW THE FRAMES; LET IT SAY WHY. "nothing matched
+                # within the window" is true of a sequence that ran backwards
+                # and of one whose second term never appeared at all, and those
+                # are different findings about the firmware. A verb that writes
+                # a diagnosis declares it in its manifest, and the words below
+                # are that line, not a re-derivation of it.
+                note = diagnoses.get(token.name)
+                record["reason"] = (
+                    "%s: %s" % (note.kind, " ".join(note.fields[1:]))
+                    if note is not None
+                    else "nothing matched within the window"
+                )
+                if note is not None:
+                    record["diagnosis"] = note.kind
 
-        if hit and token.verb not in FORBID_VERBS:
-            earlier = [u for u in stim_us if u <= hit.us]
+        decided = record["met_us"]
+        if hit and decided is not None and token.verb not in FORBID_VERBS:
+            earlier = [u for u in stim_us if u <= decided]
             if earlier:
-                record["latency_us"] = hit.us - earlier[-1]
+                record["latency_us"] = decided - earlier[-1]
                 record["latency_ms"] = _fmt_ms(record["latency_us"])
                 record["stimulus_us"] = earlier[-1]
             # Only a bus assertion has a frame behind it. An assertion about a
@@ -2265,7 +2476,7 @@ def judge(compiled, log, exit_code, console_text, machines_boot):
             if token.message_id is not None:
                 wanted = int(token.message_id, 16)
                 for frame in frames:
-                    if frame["us"] == hit.us and frame["id"] == wanted:
+                    if frame["us"] == decided and frame["id"] == wanted:
                         record["matched_frame"] = frame
                         break
 

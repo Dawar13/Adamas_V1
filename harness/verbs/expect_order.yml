@@ -1,0 +1,66 @@
+# expect_order -- PROJECT-V2 section 10.2. This file IS the verb: its arguments,
+# its refusals and their exact words, and its documentation.
+verb: expect_order
+class: assert
+polarity: expect
+summary: Demand that one frame was seen before another, over one window
+args:
+  sequence:
+    type: sequence
+    required: true
+    doc: two or more frame descriptions, in the order they must first appear
+  within_ms:
+    type: window_ms
+    required: true
+    doc: one window, covering the whole sequence
+  label:
+    type: label
+    doc: what this ordering means
+emits: ORDER_ARM
+resolves: [ORDER_MET]
+diagnoses: [ORDER_OUT_OF, ORDER_UNSEEN]
+instant: 1
+handler: expect_order
+doc: |
+  A happened before B. This is the verb V1 had no words for at all, and the
+  reason is structural rather than an oversight: every other window here is
+  armed and then run, so two assertions cover two CONSECUTIVE stretches of
+  virtual time. Nothing in that vocabulary can make two statements about the
+  same interval, and "B did not appear before A" is exactly that -- a
+  prohibition whose end is the moment the expectation is met, which is the
+  thing under test and therefore not known in advance.
+
+  So this arms every term at once, over ONE window, and records the first
+  frame that matches each. The sequence is answered at the end of the window.
+
+  WHAT IT PROVES, SAID EXACTLY. Each term's FIRST observation is strictly
+  earlier than the next term's first observation, and every term was observed
+  inside the window. Two terms first seen in the same microsecond are refused
+  as out of order rather than accepted: the bus shows nothing that would order
+  them, and calling that "before" would be a claim the log does not support.
+
+  ONLY WHAT A NODE TRANSMITTED COUNTS. A frame the harness injected cannot
+  order anything, because an order established between two of our own
+  injections measures the tool rather than the firmware. Measured in a spike:
+  242 injections ordered nothing.
+
+  IT IS A STATEMENT ABOUT OBSERVED FRAMES, NOT ABOUT THE FIRMWARE'S VARIABLES.
+  A sequence that begins and ends between two transmissions of a periodic
+  message is invisible here, and the direction of that inaccuracy is that we
+  UNDER-REPORT disorder -- the flattering direction, stated rather than left
+  to be discovered.
+refusals:
+  - if: sequence_too_short
+    exit: 2
+    message: |-
+        {verb}: 'sequence' has {count}, and an order needs at least two things to be in.
+          For a single frame, use   expect_can: {{ id: ..., within_ms: ... }}   which is the verb for that.
+  - if: sequence_not_a_list
+    exit: 2
+    message: |-
+        {verb}: 'sequence' is the ordered list of frames, so it must be a list. It is {found}.
+          Write it as   sequence: [ {{ id: ..., signals: {{...}} }}, {{ id: ..., signals: {{...}} }} ]   with the entries in the order they must first appear.
+  - if: sequence_entry_not_a_mapping
+    exit: 2
+    message: |-
+        {verb}: entry {index} of 'sequence' is {found}, not a mapping. Each entry describes one frame, the same way expect_can does: an id, and optionally the signals that narrow it.

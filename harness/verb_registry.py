@@ -125,6 +125,10 @@ POLARITIES = (POLARITY_EXPECT, POLARITY_FORBID)
 ARG_TYPES = (
     "node_ref", "injectable_symbol", "message_id", "signals", "integer",
     "duration_ms", "window_ms", "text", "boolean", "hex_bytes", "label",
+    # An ordered list of frame descriptions. Each entry has the shape
+    # expect_can's own arguments have, so the type is not a new grammar --
+    # it is the existing one, repeated and given an order that matters.
+    "sequence",
 )
 
 #: Which node kinds a verb applies to. Section 10.7 item 1: a verb works on both
@@ -141,10 +145,14 @@ EXIT_USAGE = 2
 EXIT_REFUSED = 3
 REFUSAL_EXITS = (EXIT_USAGE, EXIT_REFUSED)
 
+#: Where a verb's deciding instant comes from -- see Verb.instant.
+INSTANT_LINE = "line"
+INSTANT_NONE = "none"
+
 MANIFEST_KEYS = {
     "verb", "class", "polarity", "summary", "doc", "args", "bare_arg",
-    "applies_to", "requires_capabilities", "emits", "refusals", "handler",
-    "template",
+    "applies_to", "requires_capabilities", "emits", "resolves", "diagnoses",
+    "instant", "refusals", "handler", "template",
 }
 REQUIRED_KEYS = ("verb", "class", "summary", "args", "doc")
 ARG_KEYS = {"type", "required", "default", "must_be", "doc"}
@@ -226,6 +234,7 @@ class Verb:
 
     __slots__ = ("name", "cls", "polarity", "summary", "doc", "args",
                  "bare_arg", "applies_to", "requires_capabilities", "emits",
+                 "resolves", "diagnoses", "instant",
                  "refusals", "handler", "template", "scope", "source")
 
     def __init__(self, document, source, scope):
@@ -306,6 +315,82 @@ class Verb:
         self.requires_capabilities = tuple(
             document.get("requires_capabilities") or ())
         self.emits = document.get("emits")
+
+        # HOW THE JUDGE READS THIS VERB'S TOKEN, IN DATA.
+        #
+        # `emits` already names the line that ARMS a token. These three name
+        # the lines that RESOLVE it, the lines that explain a token that did
+        # not, and which field of a resolving line carries the instant the
+        # verb decided at.
+        #
+        # They are here rather than in the judge because the judge used to
+        # carry hardcoded sets of log kinds, and section 3.1 removed exactly
+        # that class of list: five hand-maintained lists that nothing checked
+        # agreed. A verb whose resolution kind lived in run_scenarios.py while
+        # its arm kind lived in its manifest would be that same drift with two
+        # entries instead of five.
+        #
+        # POLARITY STILL DECIDES WHAT A RESOLUTION MEANS. For an `expect` verb
+        # a resolution is a pass; for a `forbid` verb it is a violation. That
+        # inversion is one rule in one place and is not repeated here.
+        self.resolves = tuple(document.get("resolves") or ())
+        self.diagnoses = tuple(document.get("diagnoses") or ())
+        for kind in self.resolves + self.diagnoses:
+            if not isinstance(kind, str) or not kind or kind.split() != [kind]:
+                raise VerbError(
+                    "%s: %r is not a usable event-log kind. A kind is one bare "
+                    "word, because the log is whitespace separated and a kind "
+                    "with a space in it could never be parsed back out."
+                    % (where, kind))
+        overlap = sorted(set(self.resolves) & set(self.diagnoses))
+        if overlap:
+            raise VerbError(
+                "%s: %s is declared as both a resolution and a diagnosis. One "
+                "line cannot mean both 'this token was answered' and 'this "
+                "token was not answered, and here is why'."
+                % (where, ", ".join(overlap)))
+        if self.polarity is not None and not self.resolves:
+            raise VerbError(
+                "%s: this verb arms a token (polarity %r) and declares no "
+                "'resolves', so the judge has no line that could ever answer "
+                "it. Every such token would be reported as armed and never "
+                "resolved, which is a FAILURE -- the verb would be incapable "
+                "of passing.\n"
+                "  Add   resolves: [<KIND>]   naming the event-log line the "
+                "handler writes when the token is answered."
+                % (where, self.polarity))
+        if self.resolves and self.polarity is None:
+            raise VerbError(
+                "%s: 'resolves' names the lines that answer an armed token, "
+                "and this verb declares no polarity, so it arms none."
+                % where)
+
+        # WHERE THE DECIDING INSTANT COMES FROM. Three honest answers, and the
+        # verb has to pick one, because the judge quotes this microsecond as a
+        # measured latency:
+        #
+        #   line       (the default) the resolving line's own timestamp IS the
+        #              instant. True of every verb that writes its resolution
+        #              at the moment it matched.
+        #   <n>        field n of the resolving line carries it. For a verb
+        #              answered at the END of a window, the line's timestamp is
+        #              the window's end and not the moment anything happened.
+        #   none       there is no single deciding instant. An invariant over a
+        #              window does not have one, and inventing one would put a
+        #              fabricated latency into the results.
+        self.instant = document.get("instant", INSTANT_LINE)
+        if self.instant not in (INSTANT_LINE, INSTANT_NONE):
+            if (not isinstance(self.instant, int)
+                    or isinstance(self.instant, bool) or self.instant < 1):
+                raise VerbError(
+                    "%s: 'instant' is %r; it is %r, %r, or a 1-based field "
+                    "index into the resolving line after the token."
+                    % (where, self.instant, INSTANT_LINE, INSTANT_NONE))
+        if self.instant != INSTANT_LINE and not self.resolves:
+            raise VerbError(
+                "%s: 'instant' says where to read the deciding moment of a "
+                "resolving line, and this verb declares no 'resolves'."
+                % where)
 
         self.refusals = {}
         for entry in document.get("refusals") or ():
@@ -472,6 +557,41 @@ class Registry:
     def of_polarity(self, polarity) -> tuple:
         return tuple(sorted(n for n, v in self.verbs.items()
                             if v.polarity == polarity))
+
+    @property
+    def arm_kinds(self) -> tuple:
+        """Every event-log line that ARMS a token, from the manifests.
+
+        The judge scans the log for these. Deriving it here means adding a verb
+        that arms a new kind of token needs no edit to the judge -- and, more
+        to the point, cannot be forgotten there.
+        """
+        every = set()
+        for verb in self.verbs.values():
+            if verb.polarity is not None and verb.emits:
+                every.add(verb.emits)
+        return tuple(sorted(every))
+
+    @property
+    def resolve_kinds(self) -> tuple:
+        """Every event-log line that ANSWERS an armed token."""
+        every = set()
+        for verb in self.verbs.values():
+            every.update(verb.resolves)
+        return tuple(sorted(every))
+
+    @property
+    def diagnosis_kinds(self) -> tuple:
+        """Every line that explains a token which was not answered."""
+        every = set()
+        for verb in self.verbs.values():
+            every.update(verb.diagnoses)
+        return tuple(sorted(every))
+
+    def instant_of(self, name):
+        """Where this verb's deciding instant comes from: line, none, or field n."""
+        verb = self.verbs.get(name)
+        return verb.instant if verb is not None else INSTANT_LINE
 
     @property
     def template_only(self) -> tuple:

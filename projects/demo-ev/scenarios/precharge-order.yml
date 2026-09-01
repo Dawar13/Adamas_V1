@@ -1,0 +1,92 @@
+# precharge-order — the sequence, not the values.
+# =============================================================================
+# THIS FILE IS PROJECT DATA. Everything specific to this vehicle lives here and
+# in catalog.yml / network.yml; the engine that runs it holds none of it.
+#
+# WHAT IT ASSERTS, AND WHY NOTHING ELSE IN THIS SUITE COULD
+# -----------------------------------------------------------------------------
+# firmware/bms/src/main.c derives the contactor from the state machine:
+#
+#     case BMS_STATE_PRECHARGE:  return BMS_CONTACTOR_PRECHARGE;
+#     case BMS_STATE_RUNNING:    return BMS_CONTACTOR_CLOSED;
+#
+# and bms.h gives the dwell that separates them:
+#
+#     #define BMS_PRECHARGE_DWELL_MS      200U
+#
+# The requirement is an ORDER. The precharge resistor limits inrush, and only
+# once the bus has come up may the main contactor close. Close the main
+# contactor onto a discharged bus and the inrush welds the contacts shut --
+# after which the battery can never be disconnected, including during a crash
+# or a fire.
+#
+# WHY expect_can CANNOT SAY THIS
+# -----------------------------------------------------------------------------
+# The natural phrasing without this verb is two expectations in a row: that
+# PRECHARGE appears, and then that CLOSED appears. Both are satisfied by a
+# firmware that closes the main contactor FIRST, because both values really do
+# appear -- only their order differs. Measured, against
+# firmware/bms-broken-precharge: both green.
+#
+# To catch it you have to say "CLOSED did not appear before PRECHARGE", which is
+# a prohibition whose end is the moment the expectation is met -- and that
+# moment is the thing under test, so it cannot be written as a window in
+# advance. Every window in this suite is armed and then run, so two of them
+# cover two CONSECUTIVE stretches of time. expect_order arms all three terms
+# over ONE window, which is the only way the sentence can be stated.
+#
+# WHY THERE IS NO STIMULUS
+# -----------------------------------------------------------------------------
+# Nothing is injected. The sequence is the device's own startup, driven by the
+# drive request the VCU puts on the bus, so every instant here is measured
+# against the firmware's own schedule. There is therefore no latency to quote,
+# and the engine correctly reports none.
+#
+# THE RESOLUTION IS TWO SAMPLES, AND THAT IS STATED
+# -----------------------------------------------------------------------------
+# bms_limits is transmitted every 100 ms and the dwell is 200 ms, so PRECHARGE
+# is visible in exactly two frames. This assertion is about OBSERVED FRAMES: a
+# disordering that began and ended between two transmissions would be invisible
+# here, and the direction of that inaccuracy is that we UNDER-report disorder.
+# =============================================================================
+
+id: precharge-order
+title: The precharge contactor engages before the main contactor closes
+description: >
+  Watch the contactor through its whole startup and require the three states
+  in the order the hardware demands: open while standing by, precharge while
+  the bus comes up, and only then closed. Nothing is injected -- the sequence
+  is the device's own, and what is asserted is the order of three moments
+  rather than the presence of three values.
+
+steps:
+
+  # 1. Nothing is asserted until the device under test says it is up. The text
+  #    is the boot_text network.yml declares for that node.
+  - wait_uart:
+      node: bms
+      text: "BMS ready"
+      timeout_ms: 500
+
+  - mark: "watching the contactor through precharge"
+
+  # 2. The order, over ONE window. Each term records the first frame that
+  #    matches it, and the sequence is answered when the window ends.
+  #
+  #    Only contactor_state is named, so only its bits are compared: bms_limits
+  #    also carries the two current limits, which move with temperature and
+  #    state, and an unmasked comparison would be wrong for reasons that have
+  #    nothing to do with the contactor.
+  - expect_order:
+      sequence:
+        - id: 0x602
+          signals:
+            contactor_state: OPEN
+        - id: 0x602
+          signals:
+            contactor_state: PRECHARGE
+        - id: 0x602
+          signals:
+            contactor_state: CLOSED
+      within_ms: 1000
+      label: "open, then precharge, then closed -- never closed first"

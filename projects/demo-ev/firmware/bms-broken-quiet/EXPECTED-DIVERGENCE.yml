@@ -1,0 +1,101 @@
+# What this defective build is expected to change, and nothing else.
+# =============================================================================
+# Written from the divergence gate's own report. The list below is OBSERVED,
+# never predicted: the gate ran the whole suite against this binary and against
+# the good one and recorded which verdicts moved.
+#
+# The gate fails if the observed set differs from this list in EITHER direction.
+#
+# An entry may name one test or a family of them; see
+# firmware/bms-broken/EXPECTED-DIVERGENCE.yml for why, and for why a wildcard
+# cannot absorb a surprise.
+# =============================================================================
+
+# WHICH BUILD THIS IS A DEFECTIVE COPY OF
+# -----------------------------------------------------------------------------
+variant_of: bms
+
+defect: the limits frame is never transmitted, so the contactor state is unobservable
+
+diverging_tests:
+  # The invariant, and the ordering assertion. Both are about the message this
+  # binary stops sending, so both fail -- and they are the two that say so.
+  - contactor-open-in-standby
+  - precharge-order
+  # Every swept variant that witnesses the contactor before injecting. All three
+  # sampled moments move here, unlike bms-broken-precharge where only the one
+  # inside the dwell does: this binary removes the message entirely, so there is
+  # no instant at which it can be witnessed.
+  - overtemp-sweep-*
+  - overvolt-sweep-*
+  - undervolt-sweep-*
+  - undervolt-running-only
+  # The startup and peer-loss scenarios that check the contactor on the way.
+  - boot-sequence
+  - heartbeat-freeze
+  - heartbeat-loss
+  - charge-loss-recovery
+  - unexpected-frame
+  # The longer sweeps in those two families, WRITTEN OUT rather than globbed.
+  # `heartbeat-sweep-*` and `charge-loss-sweep-*` would also match their
+  # shortest variants, and those do NOT diverge -- see the rationale.
+  - heartbeat-sweep-300ms
+  - heartbeat-sweep-400ms
+  - heartbeat-sweep-500ms
+  - heartbeat-sweep-600ms
+  - heartbeat-sweep-800ms
+  - heartbeat-sweep-1000ms
+  - charge-loss-sweep-300ms
+  - charge-loss-sweep-500ms
+  - charge-loss-sweep-700ms
+  - charge-loss-sweep-900ms
+  - charge-loss-sweep-1100ms
+
+rationale: |
+  THIS BINARY IS THE ARGUMENT FOR expect_always, AND WHAT IT DEMONSTRATES IS A
+  LIVE HOLE IN THE VOCABULARY RATHER THAN A MISSING FEATURE.
+
+  The cadence timer still advances, so every other frame keeps its exact phase;
+  its verdict is discarded and bms_limits is never sent. The VCU therefore never
+  learns the pack's current limits and never learns the contactor's state.
+
+  85 OF 92, AND THE SIZE IS NOT THE POINT. A message that vanishes is visible to
+  every test that expects it, so most of the suite moves. The finding is not
+  that only one test can see this binary -- it is that THE ONE ASSERTION WRITTEN
+  TO GUARD THIS WINDOW reported success while the thing it guards was
+  unobservable.
+
+  Measured in the emulator before the verb was written: the prohibition phrasing
+  of "the main contactor was never closed during startup" -- a safety statement
+  -- came back GREEN against this binary, because expect_no_can is judged
+  "violated, or else honoured" and nothing arrived to violate it. The invariant
+  over the same window fails, and the reason it gives is that it saw no
+  observation to test. A verdict that is confidently wrong is worse than one
+  that is missing, and that is the whole of why expect_always exists.
+
+  THE SEVEN THAT DO NOT MOVE ARE THE CONTROL, AND THEY MUST NOT MOVE:
+  bus-flood, overtemp-boundary, overtemp-fault, overvolt-boundary,
+  charge-loss-sweep-100ms, heartbeat-sweep-100ms, heartbeat-sweep-200ms.
+  Every one of them reaches its verdict without ever asserting anything about
+  the limits frame -- the three fault scenarios watch the fault identifier
+  alone, and the two shortest sweeps in each family finish before the pack has
+  been asked to bring high voltage up. If one of them ever appears in the
+  observed set, this build has acquired a second defect.
+
+  WHY TWO FAMILIES ARE WRITTEN OUT INSTEAD OF GLOBBED. `heartbeat-sweep-*` and
+  `charge-loss-sweep-*` would each also match their shortest variants, which do
+  not diverge. A pattern matching more than diverged is reported as a missing
+  divergence and fails -- so globbing there would not quietly pass, it would
+  fail differently. The entries are spelled out because the boundary between the
+  variants that reach high voltage and the ones that do not is the very thing
+  worth being able to see in this file.
+
+  IF THE OBSERVED SET GROWS, the extra entry is the thing to investigate, not to
+  add. This build changes exactly one publisher, so a test that never asserts
+  anything about that message, directly or as a precondition, cannot see it.
+
+  IF IT SHRINKS, an assertion about this message stopped being made somewhere.
+  Losing contactor-open-in-standby specifically would remove the only test that
+  fails HERE FOR THE RIGHT REASON: the others report a missing frame they wanted
+  for some other purpose, while that one reports that an invariant was never
+  measured against anything.

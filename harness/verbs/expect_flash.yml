@@ -24,6 +24,7 @@ args:
 applies_to: [real]
 requires_capabilities: [flash_read]
 emits: EXPECT_ARM
+resolves: [EXPECT_MET]
 handler: expect_flash
 doc: |
   What survived. This is the verb that can tell two devices apart when the boot

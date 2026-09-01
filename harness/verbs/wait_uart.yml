@@ -12,6 +12,7 @@ args:
 applies_to: [real]
 requires_capabilities: [console]
 emits: EXPECT_ARM
+resolves: [EXPECT_MET]
 handler: wait_uart
 doc: |
   Arms a console watcher and then runs for the whole timeout. The window always

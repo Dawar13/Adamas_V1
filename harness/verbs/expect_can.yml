@@ -10,6 +10,7 @@ args:
   within_ms: { type: window_ms, required: true, doc: the deadline }
   label:     { type: label }
 emits: EXPECT_ARM
+resolves: [EXPECT_MET]
 handler: expect_can
 doc: |
   Arms a masked matcher and runs the whole window. Nothing is compared

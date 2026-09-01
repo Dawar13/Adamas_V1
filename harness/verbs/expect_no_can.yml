@@ -10,6 +10,7 @@ args:
   for_ms:  { type: window_ms, required: true, doc: how long it must not appear }
   label:   { type: label }
 emits: FORBID_ARM
+resolves: [FORBID_HIT]
 handler: expect_no_can
 doc: |
   The prohibition half of the pair. It is what proves a fault did NOT fire

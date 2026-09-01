@@ -1,0 +1,70 @@
+# expect_always -- PROJECT-V2 section 10.2. This file IS the verb: its
+# arguments, its refusals and their exact words, and its documentation.
+verb: expect_always
+class: assert
+polarity: expect
+summary: Demand that every frame of a message satisfied a condition, and that there were some
+args:
+  id:
+    type: message_id
+    required: true
+  signals:
+    type: signals
+    doc: the signal values every frame of this message must carry
+  for_ms:
+    type: window_ms
+    required: true
+    doc: how long the invariant must hold
+  label:
+    type: label
+    doc: what this invariant means
+emits: ALWAYS_ARM
+resolves: [ALWAYS_HELD]
+diagnoses: [ALWAYS_FAILED, ALWAYS_UNTESTED]
+instant: none
+handler: expect_always
+doc: |
+  The verb for a requirement phrased as an ABSENCE, which is the class that is
+  systematically the least tested and the most expensive to get wrong.
+
+  IT EXISTS BECAUSE A PROHIBITION PASSES ON SILENCE. expect_no_can is judged
+  "violated, or else honoured": a prohibition on a frame that never arrived is
+  reported as honoured, with nothing said. That is not a hypothetical. Against
+  a build whose limits publisher never transmits, the safety statement "the
+  main contactor was never closed during startup" came back GREEN -- green
+  precisely because the device had gone silent and nothing could be observed
+  at all.
+
+  An invariant is the other half of that sentence. It says every observation
+  satisfied the condition AND that there were observations, and it records how
+  many, so a reader can tell a proof from an absence of evidence. Zero samples
+  is a FAILURE with its own diagnosis, never a pass.
+
+  THE SECOND THING IT ADDS: a prohibition can only forbid ONE masked pattern.
+  "This signal was never anything other than X" is not one pattern, it is
+  every other pattern, and spelling it as prohibitions means one step per
+  wrong value -- in consecutive windows, which do not overlap the interval the
+  requirement is about.
+
+  ONLY WHAT A NODE TRANSMITTED COUNTS. A frame the harness injected cannot
+  satisfy an invariant about the firmware.
+
+  RANGES ARE NOT THIS VERB. The condition is a masked equality, because that
+  is what the contract's encoder produces and what the emulator-side matcher
+  compares. "Stayed between two bounds" needs a signal decoder inside the
+  emulator, and it is section 10.5's expect_within_range, which is NOT BUILT.
+  Asking for a range here is refused by the shared parsers rather than
+  silently narrowed to an equality.
+
+  IT IS A STATEMENT ABOUT OBSERVED FRAMES, NOT ABOUT THE FIRMWARE'S VARIABLES.
+  A violation that begins and ends between two transmissions of a periodic
+  message is invisible here, and the direction of that inaccuracy is that we
+  UNDER-REPORT violations -- the flattering direction, so it is stated here
+  rather than left to be discovered.
+refusals:
+  - if: empty_mask
+    exit: 2
+    message: |-
+        {verb}: the condition constrains no bits of 0x{message_id:X}, so every frame satisfies it and the invariant is true however the firmware behaves.
+          Name the signals that must hold with   signals: {{ <signal>: <value> }}.
+          An unconstrained expect_can is a real claim -- that a frame with this id arrived at all -- but an unconstrained invariant is a claim about nothing.

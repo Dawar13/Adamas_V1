@@ -1,0 +1,86 @@
+# What this defective build is expected to change, and nothing else.
+# =============================================================================
+# Written from the divergence gate's own report. The list below is OBSERVED,
+# never predicted: the gate ran the whole suite against this binary and against
+# the good one and recorded which verdicts moved.
+#
+# The gate fails if the observed set differs from this list in EITHER direction.
+#
+# An entry may name one test or a family of them; see
+# firmware/bms-broken/EXPECTED-DIVERGENCE.yml for why, and for why a wildcard
+# cannot absorb a surprise.
+# =============================================================================
+
+# WHICH BUILD THIS IS A DEFECTIVE COPY OF
+# -----------------------------------------------------------------------------
+# The directory beside this one holding the good firmware. This level holds the
+# builds of more than one device, and sitting beside a build is not the same as
+# being a defective version of it.
+variant_of: bms
+
+defect: the main contactor closes before the precharge resistor is engaged
+
+diverging_tests:
+  # The ordering assertion. The only test here whose failure NAMES this defect.
+  - precharge-order
+  # ...and every swept variant that witnesses the contactor mid-dwell before
+  # injecting. Written as the 600 ms moment rather than as file names: what
+  # diverges is the CLASS of variants that sample inside the dwell, and the
+  # 200 ms and 900 ms moments of the same sweeps do not diverge and must not.
+  - overtemp-sweep-*-at-600ms
+  - overvolt-sweep-*-at-600ms
+
+rationale: |
+  THIS BINARY IS THE ARGUMENT FOR expect_order, AND THE GATE QUALIFIED THAT
+  ARGUMENT RATHER THAN CONFIRMING IT. Read the second half before quoting the
+  first.
+
+  The defect. The same two contactor states appear on the bus, at the same
+  cadence, for the same total dwell, and the steady state at the end is CLOSED
+  exactly as it should be. Only their ORDER differs: the main contactor is shut
+  for the first half of the dwell and the precharge resistor is engaged for the
+  second. On a vehicle that is inrush into a discharged bus through a closed
+  main contactor, which welds the contacts and leaves a pack that can never be
+  disconnected -- including during a crash or a fire.
+
+  WHAT expect_order ADDS. Measured in the emulator before the verb was written:
+  the phrasing a scenario reaches for without it -- an expectation that
+  PRECHARGE appears, then an expectation that CLOSED appears -- is GREEN against
+  this binary, because both values really do appear. No assertion in this suite
+  STATES the ordering requirement, and precharge-order is the only test whose
+  failure names it: the sequence is reported out of order, at 700300 against
+  600300 us.
+
+  WHAT THE GATE THEN SHOWED, AND IT IS NOT WHAT WAS EXPECTED. Nineteen existing
+  sweep variants also move, and none of them is about the contactor. They fail
+  on a PRECONDITION -- "at 600ms the device reports PRECHARGE, which is the
+  condition this variant injects into" -- because at 600 ms this binary reports
+  CLOSED. The suite therefore does notice that something is wrong, and it
+  reports it as a sweep that could not set up its own starting state rather
+  than as a pack that is welding its contactor shut. A true observation,
+  attributed to the wrong thing.
+
+  THAT DETECTION IS AN ACCIDENT OF WHERE THE SWEEP SAMPLES, AND THE OBSERVED SET
+  PROVES IT. The moment dimension visits 200 ms, 600 ms and 900 ms. Only the
+  600 ms variants diverge; the 200 ms and 900 ms variants of the very same
+  sweeps are blind, because those instants fall outside the 200 ms dwell where
+  the two states are swapped. Move that one sampled moment, or drop the moment
+  dimension, and nineteen of these twenty stop catching this binary while
+  precharge-order still does.
+
+  IF THE OBSERVED SET GROWS, the extra entry is the thing to investigate, not to
+  add. This defect lives entirely inside the precharge dwell, so a test that
+  never brings high voltage up cannot see it and a test that only inspects the
+  steady state cannot either. Any further divergence would mean the binary
+  acquired a second defect, or that a verdict moved for a reason that is not
+  about the contactor.
+
+  IF IT SHRINKS, that is the more alarming direction. Losing precharge-order
+  would leave nineteen tests that catch this binary while describing it wrongly;
+  losing the 600 ms moment would leave one test carrying the whole proof. The
+  gate reports either as a missing divergence and fails, rather than reporting a
+  smaller clean set.
+
+  The way to lose the proof silently is to rewrite the ordering assertion as two
+  expectations because they read more simply. They are also both green against
+  this binary.

@@ -95,6 +95,16 @@ def render(registry) -> str:
         out.append("| applies to | %s |" % ", ".join(verb.applies_to))
         out.append("| writes to the event log | %s |"
                    % ("`%s`" % verb.emits if verb.emits else "nothing"))
+        # WHAT ANSWERS AN ARMED TOKEN, and what explains one that was not
+        # answered. Both are declared in the manifest so the judge does not
+        # spell them, and a reader of this page can follow a verdict back to
+        # the exact line in an event log that produced it.
+        if verb.resolves:
+            out.append("| answered by | %s |"
+                       % ", ".join("`%s`" % k for k in verb.resolves))
+        if verb.diagnoses:
+            out.append("| explained by | %s |"
+                       % ", ".join("`%s`" % k for k in verb.diagnoses))
         if verb.requires_capabilities:
             out.append("| needs | %s |"
                        % ", ".join("`%s`" % c for c in verb.requires_capabilities))

@@ -1,10 +1,18 @@
 {
+  "expect_always": {
+    "empty_mask": "test-scenario.yml: step 1: expect_always: the condition constrains no bits of 0x600, so every frame satisfies it and the invariant is true however the firmware behaves.\n  Name the signals that must hold with   signals: { <signal>: <value> }.\n  An unconstrained expect_can is a real claim -- that a frame with this id arrived at all -- but an unconstrained invariant is a claim about nothing."
+  },
   "expect_boots": {
     "node_declares_no_banner": "test-scenario.yml: step 1: node 'updater' declares no boot_text in the topology, so there is nothing that would prove it came back.\n  Add   boot_text: \"<the line this firmware prints once it is up>\"   to that node in the topology file.\n  The engine must not guess: a boot check that matched nothing would pass the moment the window closed, and a bricked device would read as a healthy one.",
     "node_is_scripted": "test-scenario.yml: step 1: node 'motor' is a frame player, so there is nothing to boot. A player has no firmware and never says anything it was not scripted to say."
   },
   "expect_flash": {
     "node_is_scripted": "test-scenario.yml: step 1: node 'motor' is a frame player and has no memory to read. This verb is for executed nodes only."
+  },
+  "expect_order": {
+    "sequence_entry_not_a_mapping": "test-scenario.yml: step 1: expect_order: entry 1 of 'sequence' is the text '0x600', not a mapping. Each entry describes one frame, the same way expect_can does: an id, and optionally the signals that narrow it.",
+    "sequence_not_a_list": "test-scenario.yml: step 1: expect_order: 'sequence' is the ordered list of frames, so it must be a list. It is a mapping.\n  Write it as   sequence: [ { id: ..., signals: {...} }, { id: ..., signals: {...} } ]   with the entries in the order they must first appear.",
+    "sequence_too_short": "test-scenario.yml: step 1: expect_order: 'sequence' has 1 entry, and an order needs at least two things to be in.\n  For a single frame, use   expect_can: { id: ..., within_ms: ... }   which is the verb for that."
   },
   "expect_symbol": {
     "node_is_scripted": "test-scenario.yml: step 1: node 'motor' has no firmware behind it, so it has no memory to read"

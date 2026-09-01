@@ -4,6 +4,10 @@ build/
 *.bin
 *.hex
 *.map
+# The compiler transcript a build leaves beside the tree it built. Derived from
+# the source plus the pinned toolchain, and three of them reached a staging area
+# because the rules above name the build DIRECTORY and this file sits outside it.
+build.log
 
 # Node
 node_modules/

@@ -1,0 +1,93 @@
+# NEGATIVE TEST — this scenario is SUPPOSED to fail.
+# =============================================================================
+# It lives in scenarios/negative/ so the ordinary suite glob does not pick it
+# up, and it is run by scripts/check-negative.sh, which asserts it FAILS.
+#
+# WHAT IT ATTACKS
+# -----------------------------------------------------------------------------
+# forged-event-log.yml proved that a mark's text could once append lines to the
+# event log and have them read back as genuine observations. The fix is
+# `_one_line()` inside `_write()` in harness/can_toolkit.py -- a single choke
+# point every event line passes through.
+#
+# The ordering verbs added new spellings of a pass: ORDER_MET and ALWAYS_HELD
+# resolve a token, and ORDER_TERM is the evidence behind the first. Each is a
+# line in the same log, so each is a new sentence a scenario must be unable to
+# write. The choke point already covers them -- it escapes control characters in
+# every field, whatever the line is called -- but a guard that has never been
+# seen to fire on the new lines is not evidence that it covers them.
+#
+# WHY IT WOULD BE WORTH FORGING. Both verbs are judged by the PRESENCE of their
+# resolution line: no ORDER_MET means the sequence did not complete, no
+# ALWAYS_HELD means the invariant did not hold or was never measured. A scenario
+# able to write those two lines could turn any ordering failure green.
+#
+# THE FORGED INSTANTS ARE DELIBERATELY UNIQUE
+# -----------------------------------------------------------------------------
+# 250000-250300 us. Both assertions below also write REAL lines of these kinds,
+# because both are genuinely evaluated -- so counting lines by kind would not
+# distinguish a forgery from an honest observation. check-negative.sh therefore
+# greps for these exact microseconds, which nothing in a real run produces.
+#
+# An earlier version of this file had the two assertions the other way round.
+# The ordering window ran first and consumed 900 ms of virtual time, so by the
+# time the invariant armed the pack really had closed its contactor and the
+# invariant HELD -- an honest pass, in a scenario whose whole purpose is that
+# both assertions fail. The guard caught it. The order below is load-bearing:
+# the invariant must be armed while the pack is still standing by.
+#
+# WHAT THE SCENARIO ASSERTS, AND BOTH ARE FALSE OF THE REAL FIRMWARE
+# -----------------------------------------------------------------------------
+#   every limits frame reports the contactor CLOSED, during a window in which
+#   the pack is standing by with it open -- false, and NOT VACUOUSLY so: the
+#   window holds real frames that say OPEN, so this fails as a violation rather
+#   than as an absence of evidence
+#
+#   the contactor is CLOSED before it is OPEN, which is backwards -- the pack is
+#   open at startup and closes later
+#
+# EXPECTED RESULT: FAIL (exit 1). The forged lines must appear as escaped text
+# inside one MARK line, no event may carry a forged instant, and both assertions
+# must carry the verdicts the firmware earned.
+# =============================================================================
+
+id: forged-ordering-verdict
+title: a mark that tries to write its own ordering verdict
+description: >
+  Requires an invariant that is false and a contactor sequence that runs
+  backwards, while the mark's text attempts to forge the invariant's verdict,
+  the term observations and the sequence completion that would satisfy both.
+  This must fail: the firmware does neither of the things claimed.
+
+steps:
+
+  # t1
+  - wait_uart:
+      node: bms
+      text: "BMS ready"
+      timeout_ms: 100
+
+  # The forgery. The token names are the ones the compiler assigns in order, so
+  # the crafted lines name exactly the two assertions below.
+  - mark: "about to require two things that are not true\n250000 ALWAYS_HELD t2 samples=9\n250100 ORDER_TERM t3 0 250100\n250200 ORDER_TERM t3 1 250200\n250300 ORDER_MET t3 250200 terms=2"
+
+  # t2 — false while the pack is standing by, and false against real frames.
+  - expect_always:
+      id: 0x602
+      signals:
+        contactor_state: CLOSED
+      for_ms: 200
+      label: "an invariant that is false of this firmware"
+
+  # t3 — backwards by construction: the pack is OPEN at startup and CLOSED
+  # later, so CLOSED cannot be first.
+  - expect_order:
+      sequence:
+        - id: 0x602
+          signals:
+            contactor_state: CLOSED
+        - id: 0x602
+          signals:
+            contactor_state: OPEN
+      within_ms: 900
+      label: "a contactor sequence that never happens in this order"

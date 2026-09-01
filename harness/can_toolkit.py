@@ -125,6 +125,14 @@ _WIDTH_OK = (1, 2, 4, 8)
 # grows if a pattern is longer than it.
 _UART_TAIL = 4096
 
+# The event-log kinds that mean A NODE TRANSMITTED THIS. The third kind, INJ, is
+# a frame the harness put on the bus itself. The ordering matchers accept only
+# these two, because an order established between two of our own injections, or
+# an invariant satisfied by them, is the tool measuring its own echo. The
+# host-side reaction aggregate keeps the same list for the same reason; a test
+# pins the two together, because two spellings of one rule is how they drift.
+FIRMWARE_KINDS = ('TX', 'TXN')
+
 
 # --- state -------------------------------------------------------------------
 # Every collection that is iterated during logging keeps a parallel list of keys
@@ -146,6 +154,10 @@ _EXPECTS = {}
 _EXPECT_ORDER = []
 _FORBIDS = {}
 _FORBID_ORDER = []
+_ORDERS = {}         # ordered sequences: token -> dict(terms, ...)
+_ORDER_KEYS = []
+_ALWAYS = {}         # invariants: token -> dict(id, value, mask, samples, ...)
+_ALWAYS_KEYS = []
 
 _UARTS = {}          # node -> dict(tail, keep)
 
@@ -693,7 +705,7 @@ def _bus_frame(node, frame):
     _STATE['bus_frames'] = _STATE['bus_frames'] + 1
     kind = 'TX' if (node in _NODES and _NODES[node]['primary']) else 'TXN'
     _write(us, kind, '%s %x %d %s' % (node, msg_id, len(data), _hex_of(data)))
-    _feed(us, msg_id, data)
+    _feed(us, msg_id, data, kind)
 
 
 def _on_hub_delivery(hub, source, destination, socketcan):
@@ -758,7 +770,7 @@ def _emit_frame(source_node, target_node, msg_id, data):
     _STATE['injected'] = _STATE['injected'] + 1
     _write(us, 'INJ', '%s %x %d %s' % (_s(source_node), msg_id, len(data),
                                        _hex_of(data)))
-    _feed(us, msg_id, data)
+    _feed(us, msg_id, data, 'INJ')
 
 
 def mc_bench_emit(node, target, msg_id, dlc, data_hex, count):
@@ -1427,11 +1439,21 @@ def _match(entry, msg_id, data):
     return True
 
 
-def _feed(us, msg_id, data):
+def _feed(us, msg_id, data, kind):
     """Offer one bus frame to every armed matcher, in arming order.
 
     Called for real transmissions and for injections alike -- one path, so an
-    assertion cannot be blind to a source of traffic."""
+    assertion cannot be blind to a source of traffic.
+
+    <kind> is the event-log kind this frame was recorded as: TX or TXN for a
+    node's own transmission, INJ for one the harness put on the bus. It is
+    passed EXPLICITLY from both call sites and has no default: a default would
+    let a new call site quietly attribute an injection to the firmware, and the
+    ordering matchers below decide what they may believe on exactly this
+    field. A missing argument is a TypeError, which is loud.
+
+    expect/forbid deliberately ignore it and keep matching every source, which
+    is the behaviour every shipped scenario was written against."""
     for tok in _EXPECT_ORDER:
         e = _EXPECTS[tok]
         if e['met_us'] is not None:
@@ -1450,6 +1472,214 @@ def _feed(us, msg_id, data):
         if _match(f, msg_id, data):
             f['hit_us'] = us
             _write(us, 'FORBID_HIT', '%s %d' % (tok, us))
+    _feed_ordering(us, msg_id, data, kind)
+
+
+# --- ordering matchers: sequence, and invariant ------------------------------
+#
+# WHAT THESE TWO ADD, IN ONE SENTENCE: every matcher above answers a question
+# about ONE MOMENT inside a window, and these answer a question about the WHOLE
+# window -- the relative order of two moments, or a property of every
+# observation in it. A window here is armed once and runs once, so two
+# statements can cover the same interval; the expect/forbid pair cannot, because
+# each of those runs its own window and the windows are consecutive.
+#
+# ONLY WHAT A NODE TRANSMITTED COUNTS. Both refuse to look at an INJ frame. An
+# order established between two frames the harness itself put on the bus, or an
+# invariant satisfied by our own injections, measures the tool and not the
+# firmware -- the same rule the host-side reaction aggregate already applies,
+# applied here at the point of observation. Verified in a spike: 242 injections
+# ordered nothing.
+
+def _feed_ordering(us, msg_id, data, kind):
+    """Offer one bus frame to the sequence and invariant matchers."""
+    if kind not in FIRMWARE_KINDS:
+        return
+    for tok in _ORDER_KEYS:
+        o = _ORDERS[tok]
+        if us > o['deadline'] or o['resolved']:
+            continue
+        i = 0
+        while i < len(o['terms']):
+            term = o['terms'][i]
+            if term['first_us'] is None and _match(term, msg_id, data):
+                term['first_us'] = us
+                o['seen'] = o['seen'] + 1
+                _write(us, 'ORDER_TERM', '%s %d %d' % (tok, i, us))
+            i = i + 1
+    for tok in _ALWAYS_KEYS:
+        a = _ALWAYS[tok]
+        if us > a['deadline'] or a['resolved'] or msg_id != a['id']:
+            continue
+        # SAMPLED FIRST, JUDGED SECOND. The count is what makes the difference
+        # between "the invariant held" and "nothing was ever measured against
+        # it", and those must never be the same answer.
+        a['samples'] = a['samples'] + 1
+        if not _match(a, msg_id, data) and a['broken_us'] is None:
+            a['broken_us'] = us
+            a['broken_data'] = _hex_of(data)
+            _write(us, 'ALWAYS_BROKEN', '%s %d %s' % (tok, us, _hex_of(data)))
+
+
+def mc_bench_expect_order(token, terms, within_ms, label):
+    """bench_expect_order "<token>" "<id:value:mask,...>" "<within ms>" "<label>"
+
+    Arm ONE window over an ordered sequence of masked terms. Each term records
+    the first frame that matches it; the sequence is answered at the end of the
+    window by bench_order_resolve.
+
+    The terms arrive packed into a single argument because a monitor command
+    takes a fixed number of arguments (see the calling convention at the top of
+    this file), and a sequence has no fixed length. The packing is the same hex
+    the value and mask already use, so nothing new has to be escaped."""
+    tok = _s(token)
+    if tok == '':
+        _fail('bench_expect_order', 'empty-token')
+    if tok in _ORDERS:
+        _fail('bench_expect_order', 'token-reused:' + tok)
+    parsed = []
+    for chunk in _s(terms).split(','):
+        bits = chunk.split(':')
+        if len(bits) != 3:
+            _fail('bench_expect_order', 'bad-term:' + chunk)
+        value = _bytes_from_hex(bits[1], 'value')
+        mask = _bytes_from_hex(bits[2], 'mask')
+        if len(value) != len(mask):
+            _fail('bench_expect_order',
+                  'value-mask-length-mismatch:%d/%d' % (len(value), len(mask)))
+        parsed.append({'id': _int(bits[0], 'id'), 'value': value,
+                       'mask': mask, 'first_us': None})
+    if len(parsed) < 2:
+        # One term is not an order. It is an expectation, and expect_can is
+        # the verb for that.
+        _fail('bench_expect_order', 'needs-at-least-two-terms:%d' % len(parsed))
+    within = _int(within_ms, 'within_ms')
+    us = _now_us()
+    _ORDERS[tok] = {'terms': parsed, 'armed_us': us,
+                    'deadline': us + within * 1000, 'seen': 0,
+                    'resolved': False}
+    _ORDER_KEYS.append(tok)
+    _write(us, 'ORDER_ARM', '%s %d %d %s' % (
+        tok, len(parsed), within * 1000, _text(label)))
+
+
+def mc_bench_order_resolve(token):
+    """bench_order_resolve "<token>"
+
+    Answer one armed sequence, at the end of its window. Writes exactly one of:
+
+      ORDER_MET       <tok> <completed_us> terms=<n>
+      ORDER_OUT_OF    <tok> pair=<i>,<j> at=<us>,<us> terms=<n>
+      ORDER_UNSEEN    <tok> term=<i> terms=<n>
+
+    Only ORDER_MET resolves the token; the other two are diagnoses, and the
+    manifest says so. A token with neither is one whose window never ended,
+    and the judge fails it as armed-and-never-resolved."""
+    tok = _s(token)
+    if tok not in _ORDERS:
+        _fail('bench_order_resolve', 'no-such-token:' + tok)
+    o = _ORDERS[tok]
+    if o['resolved']:
+        _fail('bench_order_resolve', 'already-resolved:' + tok)
+    o['resolved'] = True
+    us = _now_us()
+    n = len(o['terms'])
+    i = 0
+    while i < n:
+        if o['terms'][i]['first_us'] is None:
+            # HOW MANY WERE SEEN, not just which one was not. "term 0 never
+            # observed, 0 of 3 seen" is a node that said nothing at all;
+            # "term 2 never observed, 2 of 3 seen" is a sequence that stopped
+            # part way. Those are different findings and the log should not
+            # make a reader go and count.
+            _write(us, 'ORDER_UNSEEN', '%s term=%d seen=%d terms=%d' % (
+                tok, i, o['seen'], n))
+            return
+        i = i + 1
+    i = 0
+    while i < n - 1:
+        a = o['terms'][i]['first_us']
+        b = o['terms'][i + 1]['first_us']
+        # STRICTLY EARLIER. Two terms first seen in the same microsecond are
+        # not ordered by anything the bus can show, and calling that "before"
+        # would be a claim the log does not support.
+        if not (a < b):
+            _write(us, 'ORDER_OUT_OF', '%s pair=%d,%d at=%d,%d terms=%d' % (
+                tok, i, i + 1, a, b, n))
+            return
+        i = i + 1
+    _write(us, 'ORDER_MET', '%s %d terms=%d' % (
+        tok, o['terms'][n - 1]['first_us'], n))
+
+
+def mc_bench_expect_always(token, msg_id, value_hex, mask_hex, for_ms, label):
+    """bench_expect_always "<tok>" "<id>" "<value>" "<mask>" "<for ms>" "<label>"
+
+    EVERY observation of this id in the window must match, AND there must be
+    observations. Zero samples is a failure, not a pass.
+
+    That second half is the whole verb. A prohibition is judged "violated, or
+    else honoured", so a prohibition on a device that has gone silent is
+    reported as honoured -- measured against a real binary that transmits
+    nothing, where "the main contactor was never closed" came back green. An
+    invariant is the other half of that sentence: it says what was observed,
+    and it fails when nothing was."""
+    tok = _s(token)
+    if tok == '':
+        _fail('bench_expect_always', 'empty-token')
+    if tok in _ALWAYS:
+        _fail('bench_expect_always', 'token-reused:' + tok)
+    value = _bytes_from_hex(value_hex, 'value')
+    mask = _bytes_from_hex(mask_hex, 'mask')
+    if len(value) != len(mask):
+        _fail('bench_expect_always',
+              'value-mask-length-mismatch:%d/%d' % (len(value), len(mask)))
+    # AN EMPTY MASK CONSTRAINS NOTHING, so every frame would satisfy it and the
+    # invariant would be true by construction. That is legitimate for
+    # expect_can, where a zero mask means "any frame with this id" and is a
+    # real claim about presence; here it is a claim about nothing.
+    constrains = False
+    for byte in mask:
+        if byte != 0:
+            constrains = True
+    if not constrains:
+        _fail('bench_expect_always', 'empty-mask-constrains-nothing')
+    window = _int(for_ms, 'for_ms')
+    us = _now_us()
+    _ALWAYS[tok] = {'id': _int(msg_id, 'id'), 'value': value, 'mask': mask,
+                    'armed_us': us, 'deadline': us + window * 1000,
+                    'samples': 0, 'broken_us': None, 'broken_data': None,
+                    'resolved': False}
+    _ALWAYS_KEYS.append(tok)
+    _write(us, 'ALWAYS_ARM', '%s %x %s %s %d %s' % (
+        tok, _ALWAYS[tok]['id'], _hex_of(value), _hex_of(mask),
+        window * 1000, _text(label)))
+
+
+def mc_bench_always_resolve(token):
+    """bench_always_resolve "<token>"
+
+    Answer one armed invariant, at the end of its window. Writes exactly one of:
+
+      ALWAYS_HELD      <tok> samples=<n>
+      ALWAYS_FAILED    <tok> at=<us> saw=<hex> samples=<n>
+      ALWAYS_UNTESTED  <tok> samples=0
+    """
+    tok = _s(token)
+    if tok not in _ALWAYS:
+        _fail('bench_always_resolve', 'no-such-token:' + tok)
+    a = _ALWAYS[tok]
+    if a['resolved']:
+        _fail('bench_always_resolve', 'already-resolved:' + tok)
+    a['resolved'] = True
+    us = _now_us()
+    if a['samples'] == 0:
+        _write(us, 'ALWAYS_UNTESTED', '%s samples=0' % tok)
+    elif a['broken_us'] is not None:
+        _write(us, 'ALWAYS_FAILED', '%s at=%d saw=%s samples=%d' % (
+            tok, a['broken_us'], a['broken_data'], a['samples']))
+    else:
+        _write(us, 'ALWAYS_HELD', '%s samples=%d' % (tok, a['samples']))
 
 
 def mc_bench_expect(token, msg_id, value_hex, mask_hex, within_ms, label):

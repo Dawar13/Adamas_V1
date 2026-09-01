@@ -13,6 +13,7 @@ args:
 applies_to: [real]
 requires_capabilities: [symbol_read]
 emits: EXPECT_ARM
+resolves: [EXPECT_MET]
 handler: expect_symbol
 doc: |
   Reads a global out of the emulated machine at this instant and compares it.

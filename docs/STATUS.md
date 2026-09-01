@@ -1836,6 +1836,328 @@ was already placed.
 - **Coverage over the OTA arm.** `--coverage` joins coverage to a gate record and
   was not asked for on this run.
 
+## Phase 3 §3.3 — the ordering verbs ✓ (two of three)
+
+2026-09-01, branch `v2-phase1`. PROJECT-V2 §10.5 ASSERT, §10.6. The verbs that
+describe a WHOLE WINDOW rather than one moment inside it.
+
+### The sentence the whole task rests on
+
+Every assertion V1 had arms a matcher and then runs its own window, so two of
+them cover two **consecutive** stretches of virtual time. **Nothing in V1 can
+make two statements about the same interval** — and "B did not appear before A"
+is exactly that: a prohibition whose end is the moment A arrives, which is the
+thing under test and therefore not knowable when the window is written.
+
+That was not a new observation. `patterns/startup-sequence.yml` had already
+conceded it, in its own words, before this task existed:
+
+> They are not proof that the firmware could not have printed them in some
+> other order inside its first tick.
+
+### What was built
+
+| | Where |
+|---|---|
+| `expect_order`, `expect_always` | `harness/verbs/`, class `assert`, polarity `expect` |
+| The emulator-side half | `bench_expect_order` / `bench_order_resolve`, `bench_expect_always` / `bench_always_resolve` in `can_toolkit.py` |
+| The frame kind, carried | `_feed(us, msg_id, data, kind)` — explicit at both call sites, no default |
+| How the judge reads a token, in data | `resolves:`, `diagnoses:`, `instant:` on every manifest that arms one |
+| The defects | `firmware/bms-broken-precharge`, `firmware/bms-broken-quiet` |
+| The scenarios | `scenarios/precharge-order.yml`, `scenarios/contactor-open-in-standby.yml` |
+| The adversarial case | `scenarios/negative/forged-ordering-verdict.yml`, and a third check in `scripts/check-negative.sh` |
+
+### The spikes, which ran first and earned it
+
+Every row measured on this machine before any verb code was written.
+
+| Question | Answer |
+|---|---|
+| Does the good BMS put OPEN → PRECHARGE → CLOSED on the bus, and when? | **Yes** — 100300, 600300, 800300 us. A 200 ms dwell at a 100 ms cadence is **two frames** of PRECHARGE |
+| Can one Monitor command arm a multi-term matcher over one window? | **Yes** — three terms, one window, correct microseconds |
+| Does `include` share the toolkit's namespace, so a prototype can be tried without editing it? | **Yes** — nothing in `can_toolkit.py` was touched until the answers were in |
+| Can an injected frame satisfy an ordering matcher? | **No, and it was measured** — over a run carrying **242 injections**, a sequence armed on two injected payloads reported term 0 never observed |
+| Does an all-zero mask match every frame with that id? | **Yes** — which is why the empty-mask refusal is scoped to `expect_always` and not applied to `expect_can`, where it is a real claim about presence |
+
+The last row changed the design. The shipped `boot-sequence` scenario arms an
+unmasked `expect_can` on purpose — "the pack publishes telemetry once it is up"
+— so a refusal written for both verbs would have broken a passing scenario.
+
+### expect_latched was planned, gated, and did not ship
+
+It is named after the single most common defect in BMS firmware, and it was to
+be the third verb here. Its negative control went red, and the rule was that a
+verb which cannot show a defect the existing vocabulary misses does not ship.
+
+The defect built for it, `firmware/bms-broken-reclose`, holds the contactor open
+for 400 ms after a latched fault and then **closes it again** — re-energising the
+traction bus while the fault is still latched and still being published. Three
+controls were run against it, in the same run:
+
+```
+CONTROL-A  expect_can{OPEN}       PASS   blind, as predicted: an expectation
+                                         resolves on its first match
+CONTROL-B  expect_no_can{CLOSED}  FAIL   the EXISTING verb catches it
+CONTROL-C  expect_always{OPEN}    FAIL   the other new verb catches it too
+expect_latched                    BROKEN set=1000400 lost=1400400
+```
+
+The prediction was that CONTROL-B would raise a false alarm on the GOOD binary,
+because a prohibition has to be armed at a moment the author guesses. **It did
+not.** The fault always propagates before the next 100 ms frame, so arming at the
+injection instant is robust rather than lucky — the prediction was wrong, and
+finding that out is what the control was for.
+
+So the fixed-value form of the verb adds nothing here: `expect_no_can` says it,
+and `expect_always` says it. It moves to **3.3b in the value-anchored form** —
+*"whatever fault code it first raised, it must keep reporting that same code"* —
+which is genuinely inexpressible today, because every matcher in this engine
+carries a compile-time constant and nothing can compare a frame against a value
+observed earlier in the same run. The defect for it is a fault code overwritten
+by a later, lower-priority condition: the pack reports the wrong cause and the
+wrong part gets replaced. `bms-broken-reclose` is kept, unmarked and outside the
+gate, as the evidence for why the first form was refused.
+
+A verb that failed its gate is a finding, not an omission.
+
+### The log kinds moved into the manifests, and why they had to
+
+`EventLog` carried literal tuples — `EXPECT_ARM`/`FORBID_ARM` to find armed
+tokens, `EXPECT_MET`/`FORBID_HIT` to find answered ones. Adding two more kinds
+there would have rebuilt exactly the five-hand-maintained-lists shape §3.1 took
+out, with the same failure mode: a verb whose token is armed, never looked for,
+and silently reported as never resolved.
+
+So a manifest now declares `resolves:` (what answers this token) and
+`diagnoses:` (what explains one that was not answered), and the judge derives
+its sets from the registry. **The derived sets are exactly what was hardcoded**
+— `('EXPECT_ARM', 'FORBID_ARM')` and `('EXPECT_MET', 'FORBID_HIT')` — which is
+why adding the ordering verbs moved no existing verdict.
+
+### `instant:` exists because the obvious implementation fabricates a latency
+
+`ORDER_MET` is written when the window ENDS, not when the sequence completed.
+Using the line's own timestamp — which is what every other verb correctly does —
+would have quoted the compiler's window as a reaction time. So a verb declares
+where its deciding moment comes from:
+
+```
+line    the resolving line's timestamp IS the instant (every pre-existing verb)
+<n>     field n of the line carries it            (expect_order: field 1)
+none    there is no single deciding instant       (expect_always)
+```
+
+Measured on the real run: `precharge-order` records `met_us: 800300`, the
+microsecond the sequence completed, with the line itself written at 1500000.
+`contactor-open-in-standby` records `met_us: null` and `latency_us: null`, and
+appears in `excluded_no_reaction` — an invariant has no reaction time, and
+recording the window's end as one would put a number in the stored results that
+nothing on the bus ever achieved.
+
+### The ways these verbs could have lied, and what stops each
+
+| The lie | What stops it |
+|---|---|
+| Measuring our own echo | Both matchers accept only `TX`/`TXN`. Proven in the spike against 242 injections |
+| A missed call site attributing an injection to the firmware | `_feed` takes `kind` with **no default** — a missed site is a `TypeError`, not a wrong answer |
+| An invariant that constrains no bits | Refused. Scoped to `expect_always`: the same shape is a real claim for `expect_can` |
+| A sequence answered before its window ended | `bench_order_resolve` is emitted AFTER the `RunFor`, and a term unseen mid-window may still arrive |
+| Two terms in the same microsecond called "ordered" | Refused as out of order — the bus shows nothing that would order them |
+| An armed token whose window never ended | No resolution line ⇒ FAIL, for both verbs, in both directions |
+| A verdict with no reason | The emulator writes the diagnosis; "ran backwards" and "term never appeared" are different findings and are reported as such |
+| An invariant passing on silence | Zero samples is `ALWAYS_UNTESTED`, a FAILURE, and the sample count is recorded beside every verdict |
+
+### The fidelity limit, stated rather than discovered
+
+Both verbs judge **observed frames**, not the firmware's internal variables. At
+a 100 ms cadence a disordering or a violation that begins and ends between two
+transmissions is invisible. **Direction of the inaccuracy: we UNDER-report** —
+the flattering direction, so it is written into both manifests and onto the
+generated docs page.
+
+### The gate
+
+```
+  DISCRIMINATION · 92 tests · 5 defective binaries
+
+  bms-broken            caught by 4 of 92   ok
+  bms-broken-latch      caught by 17 of 92  ok
+  bms-broken-precharge  caught by 20 of 92  ok
+  bms-broken-quiet      caught by 85 of 92  ok
+  bms-broken-state      caught by 5 of 92   ok
+
+  gate held · 5 of 5 documented divergences observed exactly · 0 warnings
+```
+
+**The three existing markers did not move.** 4, 17 and 5, exactly as before —
+adding two tests to the suite strengthened nothing by accident and weakened
+nothing.
+
+### The gate qualified the argument for expect_order rather than confirming it
+
+This was predicted to be caught by one test. **It is caught by twenty**, and the
+other nineteen are the finding.
+
+They are over-temperature and over-voltage sweep variants, and none of them is
+about the contactor. They fail on a PRECONDITION — *"at 600ms the device reports
+PRECHARGE, which is the condition this variant injects into"* — because at 600 ms
+this binary reports CLOSED. So the suite does notice something is wrong, and
+reports it as a sweep that could not set up its own starting state rather than as
+a pack that is welding its contactor shut. A true observation, attributed to the
+wrong thing.
+
+**That detection is an accident of where the sweep samples, and the observed set
+proves it.** The moment dimension visits 200 ms, 600 ms and 900 ms. Only the
+600 ms variants diverge; the 200 ms and 900 ms variants of the very same sweeps
+are blind, because those instants fall outside the 200 ms dwell where the two
+states are swapped. Move that one sampled moment and nineteen of the twenty stop
+catching this binary while `precharge-order` still does.
+
+So the honest claim is narrower than the one in the plan: **no assertion in this
+suite STATES the ordering requirement, and `precharge-order` is the only test
+whose failure names the defect** — not "nothing else catches it". The two
+sequential `expect_can` steps a scenario would otherwise write remain green
+against this binary, which is the measurement that justified the verb and is
+unaffected.
+
+### expect_always: 85 of 92, and the size is not the point
+
+A message that vanishes is visible to every test that expects it, so most of the
+suite moves. The finding is that the ONE ASSERTION WRITTEN TO GUARD THAT WINDOW
+reported success while the thing it guards was unobservable:
+
+```
+expect_no_can{contactor_state: CLOSED} for 400 ms   PASS   (0 frames of 0x602)
+expect_always{contactor_state: OPEN}   for 400 ms   FAIL   no-observation-in-window
+```
+
+"The main contactor was never closed during startup" — a safety statement — came
+back green, and it was green precisely because the device had gone silent. That
+is `expect_no_can`'s `FAIL if hit else PASS`, on a real binary. A verdict that is
+confidently wrong is worse than one that is missing.
+
+Seven tests do not move and must not: `bus-flood`, `overtemp-boundary`,
+`overtemp-fault`, `overvolt-boundary`, `charge-loss-sweep-100ms`,
+`heartbeat-sweep-100ms`, `heartbeat-sweep-200ms`. Every one reaches its verdict
+without asserting anything about the limits frame.
+
+### The adversarial guard gained a case, and the case caught me first
+
+`check-negative.sh` proves a SCENARIO cannot talk the engine into a false pass.
+The ordering verbs added new spellings of one — `ORDER_MET` and `ALWAYS_HELD`
+resolve a token — so `scenarios/negative/forged-ordering-verdict.yml` makes two
+assertions that are false of the firmware while its `mark` text tries to forge
+the lines that would satisfy them.
+
+**The forgery is inert**, and the log says so exactly: no line in it *is* an
+`ALWAYS_HELD` or `ORDER_MET` event, and the whole crafted payload sits escaped
+inside one MARK line. That is `_one_line()` in `_write()`, the choke point the
+earlier forgery fix installed, covering lines that did not exist when it was
+written.
+
+Two mistakes were found by writing the case, both mine, and both in the test
+rather than the engine:
+
+- **The first version of the scenario asserted something true.** The ordering
+  window ran first and consumed 900 ms of virtual time, so by the time the
+  invariant armed the pack really had closed its contactor and the invariant
+  HELD — an honest pass, inside a scenario whose entire purpose is that both
+  assertions fail. The steps are now ordered so the invariant is armed while the
+  pack is still standing by, and the file says that order is load-bearing.
+- **The first version of the check counted lines by KIND.** Both assertions are
+  genuinely evaluated and write real `ORDER_TERM` and `ALWAYS_*` lines of their
+  own, so "ALWAYS_HELD lines, want 0" failed on an honest observation. The check
+  greps the four forged microseconds instead, which nothing in a real run
+  produces, and then asserts the verdicts themselves.
+
+Both assertions now fail for the right reasons rather than merely failing:
+
+```
+expect_always  FAIL  ALWAYS_FAILED: at=100300 saw=000000000000 samples=2
+expect_order   FAIL  ORDER_OUT_OF: pair=0,1 at=800300,300300 terms=2
+```
+
+The invariant fails as a VIOLATION with two samples behind it, not as an absence
+of evidence — which is the distinction the verb exists to make, exercised here
+in the direction that is easy to get wrong.
+
+### Equivalence
+
+**Stage A — the compiled scripts.** The 90 pre-existing tests, compiled before
+and after, **byte-for-byte identical**. Both snapshots taken from the same
+repository path with only the engine's CONTENT swapped: taking the BEFORE from a
+git worktree instead made all 90 differ on the one line embedding the toolkit's
+own path, and normalising that away would have been widening the comparison to
+make it pass.
+
+The two new tests are excluded and the reason is stated: the HEAD engine does not
+know their verbs and refuses them, so comparing 92 against 90 would compare two
+tests against nothing and call the result clean.
+
+**Stage B — the full suite, once, at the end.** Stage A proves the emulator is
+handed identical commands and can see no further; the judge, the event-log
+parser and the results writer all run AFTER it, and this task changed all
+three. So the suite was run on both engines.
+
+```
+before, at cba048f    90 of 90 passed in 17m 00s
+after                 90 of 90 passed in 17m 12s
+```
+
+All 90 pairs compared by `scripts/compare-suites.py`:
+
+```
+  90 agreed, 0 differed, 0 could not be compared
+
+  SAME ANSWER: every event log byte-identical, every results.json
+  identical outside the entries named above.
+```
+
+**The one difference that had to be there, cut narrowly and printed.**
+`provenance.inputs_sha256` hashes the engine and the engine changed, so those
+entries MUST move — provenance that had not noticed would describe a run made by
+an engine that no longer exists (NN-4). Eleven entries moved, identically for
+all 90 tests, and `--engine-changed` prints every one:
+
+```
+harness/can_toolkit.py · harness/run_scenarios.py · harness/verb_registry.py
+the two new manifests · the six that gained `resolves:`
+```
+
+Three engine modules, two new verbs, six manifests that now declare how the
+judge reads their token. And what did NOT move, out of the entries the two runs
+share: every firmware binary, every platform file, the scenario, the contract
+and the board file.
+
+**The negative control on that instrument, because a flag that excused
+everything would pass every test above.** The same two directories compared
+WITHOUT the exemption report **0 agreed, 90 differed**, each naming the eleven
+entries. The exemption is excusing something real, and only that.
+
+### Observed
+
+```
+harness/tests, every module                       938 tests   OK (3 skipped)
+scripts/verb-docs.py --check                      current, 19 verbs
+scripts/compiled-snapshot.py --diff before after  90 of 90 identical
+scripts/check-negative.sh                         3 of 3 adversarial cases correct
+check-divergence.sh                               gate held, 5 of 5, 0 warnings
+```
+
+### What has NOT been run
+
+- **`expect_latched`.** Gated, refused, moved to 3.3b in the value-anchored
+  form. `bms-broken-reclose` is built and kept as the evidence.
+- **`expect_within_range`.** Named in `expect_always`'s own manifest as the verb
+  for a bounds condition, and not built: a range needs a signal decoder inside
+  the emulator, which is its own task across an IronPython 2 process boundary.
+- **A second scenario using either verb.** Each is exercised by exactly one
+  shipped test. The gate does not warn, because both binaries are caught by many
+  tests — but only one test per verb names the defect, and that is the same
+  single-file fragility §3.2 reported for `expect_flash`.
+- **Sweeps.** Neither new scenario declares one; both assert a sequence the
+  device produces on its own schedule, with no stimulus and no swept dimension.
+
 ## Known findings
 
 Open defects, observed rather than theorised. Each names what was seen, what it costs,

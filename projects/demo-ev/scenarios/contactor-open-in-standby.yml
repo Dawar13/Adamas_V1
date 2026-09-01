@@ -1,0 +1,77 @@
+# contactor-open-in-standby — an absence, asserted so that silence cannot pass.
+# =============================================================================
+# THIS FILE IS PROJECT DATA. Everything specific to this vehicle lives here and
+# in catalog.yml / network.yml; the engine that runs it holds none of it.
+#
+# WHAT IT ASSERTS
+# -----------------------------------------------------------------------------
+# firmware/bms/src/main.c derives the contactor from the state machine, and in
+# STANDBY -- before any drive or charge request has arrived -- it is open:
+#
+#     case BMS_STATE_INIT:
+#     case BMS_STATE_STANDBY:
+#     default:                   return BMS_CONTACTOR_OPEN;
+#
+# The pack must not energise the traction bus before something asks it to. That
+# is a requirement phrased as an ABSENCE, which is the class that is
+# systematically the least tested and the most expensive to get wrong.
+#
+# WHY expect_no_can IS NOT ENOUGH, AND THIS IS NOT A STYLE PREFERENCE
+# -----------------------------------------------------------------------------
+# The prohibition phrasing is "no bms_limits frame carrying CLOSED for 400 ms".
+# The engine judges a prohibition as violated-or-else-honoured, so a device that
+# transmits NOTHING AT ALL satisfies it. Measured, against
+# firmware/bms-broken-quiet, whose limits publisher never runs: the prohibition
+# came back GREEN, and it was green precisely because the contactor's state was
+# unobservable for the whole window.
+#
+# An invariant is the other half of that sentence. It requires that every frame
+# of this message satisfied the condition AND that there were frames, and it
+# records how many, so a reader can tell a proof from an absence of evidence.
+# Against the same binary it fails, and the reason it gives is that nothing was
+# ever observed -- which is the finding.
+#
+# THE SAMPLE COUNT IS THE EVIDENCE
+# -----------------------------------------------------------------------------
+# bms_limits is transmitted every 100 ms, so a 400 ms window holds four frames.
+# This assertion is about OBSERVED FRAMES: a contactor that closed and reopened
+# between two transmissions would be invisible here, and the direction of that
+# inaccuracy is that we UNDER-report violations.
+# =============================================================================
+
+id: contactor-open-in-standby
+title: The contactor stays open while the pack is standing by
+description: >
+  Before any drive or charge request has arrived, every bms_limits frame must
+  report the contactor open -- and there must be frames to report it. Nothing
+  is injected; the window covers the pack's own quiet period after boot, and
+  the assertion records how many frames it was measured against so that a
+  silent device cannot pass as a compliant one.
+
+steps:
+
+  # 1. Nothing is asserted until the device under test says it is up. The text
+  #    is the boot_text network.yml declares for that node. The timeout is
+  #    short on purpose: the window below has to fall inside standby, which
+  #    ends when the VCU's drive request arrives.
+  - wait_uart:
+      node: bms
+      text: "BMS ready"
+      timeout_ms: 100
+
+  - mark: "pack standing by, nothing has asked for high voltage"
+
+  # 2. The invariant. Every bms_limits frame in this window reports OPEN, and
+  #    the count of frames it saw is recorded beside the verdict. Zero frames
+  #    is a FAILURE, not a pass: an invariant nothing was measured against was
+  #    not tested.
+  #
+  #    Only contactor_state is named, so only its bits are compared: the two
+  #    current limits in this message move with temperature and would make an
+  #    unmasked comparison wrong for reasons that are not about the contactor.
+  - expect_always:
+      id: 0x602
+      signals:
+        contactor_state: OPEN
+      for_ms: 400
+      label: "the contactor is open on every frame, and there were frames"
