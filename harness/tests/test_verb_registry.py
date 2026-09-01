@@ -411,13 +411,16 @@ class TestHowManyVerbsAreAFileAndNothingElse(unittest.TestCase):
             "template-only verbs are now %s -- update this test and STATUS.md "
             "rather than leaving the count stale" % (template_only,))
         # Thirteen migrated from source, four power-class verbs added in 3.2,
-        # two ordering verbs added in 3.3.
+        # two ordering verbs added in 3.3, and expect_latched in 3.3b.
         #
-        # A third ordering verb, expect_latched, was planned and did not ship:
-        # its negative control went red, in that expect_no_can catches the
-        # defect it was built for. It is 3.3b, in the value-anchored form, and
-        # the count here stays 19 until it lands.
-        self.assertEqual(len(REGISTRY), 19)
+        # expect_latched was planned as the third ordering verb and REFUSED at
+        # that gate: in the fixed-value form its negative control went red,
+        # because expect_no_can catches the defect it was built for. It landed
+        # in 3.3b in the VALUE-ANCHORED form, where the thing it adds is not
+        # catching a defect at all -- an invariant naming the right value
+        # catches that too, and was measured doing so -- but not FAILING
+        # CORRECT FIRMWARE that resolves a contract-silent tie the other way.
+        self.assertEqual(len(REGISTRY), 20)
 
 
 if __name__ == "__main__":

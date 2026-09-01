@@ -9,6 +9,10 @@
   "expect_flash": {
     "node_is_scripted": "test-scenario.yml: step 1: node 'motor' is a frame player and has no memory to read. This verb is for executed nodes only."
   },
+  "expect_latched": {
+    "no_signals": "test-scenario.yml: step 1: expect_latched: no signals named on 0x600, so the anchor would be the whole payload and any rolling counter in it would break the latch on the very next frame.\n  Name the signals whose value must be held with   signals: [ <signal> ]\n  This verb takes NAMES ONLY -- the value is whatever the firmware publishes first, which is the entire point of it.",
+    "signals_have_values": "test-scenario.yml: step 1: expect_latched: signals were given as   { <signal>: <value> }  , but a value fixed when the scenario was written is the thing this verb exists to avoid.\n  Write   signals: [ <signal> ]   and the anchor is taken from the firmware's own first frame.\n  If you really do mean a value the contract pins, that assertion is   expect_always: { id: 0x600, signals: { <signal>: <value> } }."
+  },
   "expect_order": {
     "sequence_entry_not_a_mapping": "test-scenario.yml: step 1: expect_order: entry 1 of 'sequence' is the text '0x600', not a mapping. Each entry describes one frame, the same way expect_can does: an id, and optionally the signals that narrow it.",
     "sequence_not_a_list": "test-scenario.yml: step 1: expect_order: 'sequence' is the ordered list of frames, so it must be a list. It is a mapping.\n  Write it as   sequence: [ { id: ..., signals: {...} }, { id: ..., signals: {...} } ]   with the entries in the order they must first appear.",

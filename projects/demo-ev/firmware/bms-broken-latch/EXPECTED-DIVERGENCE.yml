@@ -23,6 +23,10 @@ variant_of: bms
 defect: over-temperature fault made non-latching, so it self-clears on cooling
 
 diverging_tests:
+  # The value-anchored latch, added in 3.3b. It is the only entry here that
+  # fails with NO OBSERVATION rather than with an unmatched expectation, and
+  # that difference is the point of it -- see the rationale below.
+  - fault-code-latched
   # The two hand-written scenarios that check the latch...
   - overtemp-boundary
   - overtemp-fault
@@ -55,6 +59,21 @@ rationale: |
   nothing. A suite can have complete coverage of a rule, and even test its
   threshold precisely, while saying nothing about whether the fault it raises is
   permitted to disappear.
+
+  WHAT fault-code-latched ADDS, AND WHAT IT DOES NOT. It does not find a defect
+  the other seventeen miss -- they all catch this binary already, and the honest
+  count went from 17 to 18. What it adds is the SHAPE of the failure. Every
+  other entry here says "nothing matched within the window", which is what an
+  expectation carrying a value fixed by its author can say. This one reports
+  LATCH_NEVER_SET with samples=0: no frame of that identifier was observed at
+  all, so there was nothing to anchor on. That is the difference between "the
+  code I guessed was not there" and "the pack stopped restating any code",
+  and only the second is a statement about latching as such.
+
+  It is also the entry that would survive a change of mind about priority. The
+  other seventeen name a value; if the firmware legally resolved a tie the other
+  way they would go red against correct firmware, which is measured beside
+  firmware/bms-priority-swapped. This one names only the signal.
 
   IF THE OBSERVED SET SHRINKS, that is the more alarming direction: it would mean
   a latch assertion stopped being made somewhere, and the suite would have

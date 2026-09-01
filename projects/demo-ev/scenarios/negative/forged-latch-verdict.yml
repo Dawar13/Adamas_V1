@@ -1,0 +1,107 @@
+# NEGATIVE TEST — this scenario is SUPPOSED to fail.
+# =============================================================================
+# It lives in scenarios/negative/ so the ordinary suite glob does not pick it
+# up, and it is run by scripts/check-negative.sh, which asserts it FAILS.
+#
+# WHAT IT ATTACKS
+# -----------------------------------------------------------------------------
+# expect_latched adds three more spellings of a verdict to the event log --
+# LATCH_SET, LATCH_HELD and LATCH_BROKEN -- and each is a sentence a scenario
+# must be unable to write for itself. The choke point that stops it is
+# `_one_line()` inside `_write()` in harness/can_toolkit.py, which escapes
+# control characters in every field of every line whatever the line is called.
+# It already covers these. A guard that has never been seen to fire on the new
+# lines is not evidence that it covers them, which is what this file is for.
+#
+# IT ATTACKS IN BOTH DIRECTIONS, BECAUSE THE VERB CAN LIE BOTH WAYS
+# -----------------------------------------------------------------------------
+# Every earlier forgery case attacked the flattering direction only: turn a red
+# verdict green. expect_latched is the first verb in this engine whose expected
+# value comes off the bus rather than out of the compiler, and that makes the
+# UNFLATTERING direction reachable too -- a forged LATCH_BROKEN would fail an
+# assertion the firmware genuinely satisfied. A tool that can be talked into
+# failing correct firmware is a tool that gets switched off. So:
+#
+#   t2  an assertion that is FALSE of this firmware, with a forged LATCH_HELD
+#       trying to resolve it.       Must stay FAIL.
+#   t4  an assertion that is TRUE of this firmware, with a forged LATCH_BROKEN
+#       trying to redden it.        Must stay PASS.
+#
+# WHY t2 IS FALSE, AND NOT VACUOUSLY SO
+# -----------------------------------------------------------------------------
+# The contactor is not a latched value: the pack legitimately drives it OPEN,
+# then PRECHARGE, then CLOSED during startup, and scenarios/precharge-order.yml
+# measures exactly that at 100300, 600300 and 800300 us. A latch armed across
+# that window therefore anchors on OPEN and is genuinely broken by a real frame
+# -- a VIOLATION with real observations behind it, not an absence of evidence.
+# That distinction is the one expect_always was built to make and this verb
+# inherits, so the negative case has to exercise it rather than the easy shape.
+#
+# WHY t4 IS TRUE
+# -----------------------------------------------------------------------------
+# The pack is taken over temperature and left there. The fault latches, and
+# 0x604 restates the same code every 500 ms for the rest of the run. This is an
+# honest PASS sitting inside a scenario whose overall verdict is FAIL, which is
+# the only way to prove the forgery in the other direction was inert: a check
+# that only ever looked at failing assertions could not tell a suppressed
+# forgery from a scenario that failed for its own reasons.
+#
+# THE FORGED INSTANTS ARE DELIBERATELY UNIQUE
+# -----------------------------------------------------------------------------
+# 260000 and 260100 us. Both assertions below also write REAL lines of these
+# kinds, because both are genuinely evaluated -- so counting lines by kind
+# cannot distinguish a forgery from an honest observation, which is the mistake
+# the ordering case caught. check-negative.sh greps for these exact
+# microseconds, which nothing in a real run produces.
+#
+# EXPECTED RESULT: FAIL (exit 1), because of t2 and only because of t2.
+# =============================================================================
+
+id: forged-latch-verdict
+title: a mark that tries to write its own latch verdict, in both directions
+description: >
+  Requires a latch on a value the pack legitimately changes, while the mark's
+  text attempts to forge the verdict that would satisfy it — and, in the same
+  breath, attempts to forge a broken latch against a second assertion the
+  firmware genuinely satisfies. The first must stay failed and the second must
+  stay passed.
+
+steps:
+
+  # t1
+  - wait_uart:
+      node: bms
+      text: "BMS ready"
+      timeout_ms: 100
+
+  # The forgery. The token names are the ones the compiler assigns in order, so
+  # the crafted lines name exactly the two latches below.
+  - mark: "about to require something that is not true\n260000 LATCH_HELD t2 value=0000000000000000 set=260000 after=9\n260100 LATCH_BROKEN t4 was=0100000000000000 saw=0200000000000000 at=260100 after=9"
+
+  # t2 — FALSE. The contactor is not latched; the pack walks it OPEN ->
+  # PRECHARGE -> CLOSED during exactly this window.
+  - expect_latched:
+      id: 0x602
+      signals: [contactor_state]
+      for_ms: 900
+      label: "a latch on a value this firmware legitimately changes"
+
+  - mark: "over temperature, and left there"
+
+  - write_symbol:
+      node: bms
+      symbol: g_cell_temp_dC
+      value: 600
+
+  # t3 — presence, so the latch below has something to anchor on.
+  - expect_can:
+      id: 0x604
+      within_ms: 50
+      label: "the fault frame arrives"
+
+  # t4 — TRUE. The fault is latched and restated every 500 ms.
+  - expect_latched:
+      id: 0x604
+      signals: [fault_code]
+      for_ms: 1200
+      label: "a latch this firmware genuinely satisfies"

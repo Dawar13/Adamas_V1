@@ -1,0 +1,138 @@
+# fault-code-latched — the latched code is the firmware's to choose, and its to keep.
+# =============================================================================
+# THIS FILE IS PROJECT DATA. Ids and signal names come from catalog.yml, node
+# names from network.yml, and the window from the firmware's rebroadcast period.
+#
+# WHAT IT ASSERTS, AND WHY NO OTHER SPELLING SAYS IT
+# -----------------------------------------------------------------------------
+# The pack is taken over BOTH limits in the same 10 ms tick, and then brought
+# back inside both. A correct pack has latched by then: the fault is terminal,
+# the contactor is open, and 0x604 goes on restating the code every 500 ms with
+# the conditions that raised it long gone.
+#
+# WHICH code it restates is NOT SOMETHING THIS FILE MAY ASSUME. When two rules
+# are true in the same tick the first one evaluated wins the published
+# fault_code, and which one that should be is documented in a COMMENT in
+# firmware/bms and NOWHERE ELSE. catalog.yml defines the fault_code signal and
+# its enum table and says nothing about which rule wins a tie. network.yml says
+# nothing. No pattern says anything. A scenario is written against the contract,
+# so this scenario CANNOT KNOW IT -- and the two obvious spellings
+#
+#     expect_always: { signals: { fault_code: OVERTEMP } }
+#     expect_always: { signals: { fault_code: OVERVOLT } }
+#
+# are exactly equally justified by every artefact in this project. Writing
+# either one down would be writing down its author's guess and calling it a
+# requirement. firmware/bms-priority-swapped exists to make that concrete: it is
+# the shipping BMS with rule 2 evaluated before rule 1 and nothing else changed,
+# it is NOT DEFECTIVE, and the first of those two spellings fails it.
+#
+# expect_latched names the SIGNAL and no value. The anchor is whatever this
+# firmware published first, on this run, so both conformant builds pass and the
+# requirement that is actually being tested -- that the code does not MOVE --
+# is the only thing asserted.
+#
+# WHY THE CONDITIONS ARE REMOVED BEFORE THE WINDOW IS ARMED
+# -----------------------------------------------------------------------------
+# Two reasons, and both are load-bearing.
+#
+# 1. IT IS THE POINT OF THE WORD "LATCHED". A code held while the pack is still
+#    too hot is not a latch, it is a live reading. The assertion only means
+#    anything over an interval in which the cause is gone, and this file arms it
+#    exactly there.
+#
+# 2. IT IS WHAT MAKES THE WINDOW SAFE. expect_latched anchors on the first frame
+#    it sees and assumes that code was LATCHED -- see the false alarm documented
+#    in harness/verbs/expect_latched.yml, where a non-latching charge-loss
+#    recovery reddens this verb on firmware with no defect at all. Choosing the
+#    window is the author's responsibility. Here nothing non-latching can occur:
+#    the pack is in a terminal FAULT state before the window opens, both
+#    stimuli have been withdrawn, and no charge session exists to lose.
+#
+# WHY THE WINDOW IS 1200 ms
+# -----------------------------------------------------------------------------
+# BMS_TX_PERIOD_FAULT_MS is 500. A window shorter than one period could see a
+# single frame, and a latch that saw one frame has an anchor and nothing that
+# corroborates it -- LATCH_HELD with after=0, which is true but weak. 1200 ms
+# guarantees at least two frames whatever the rebroadcast phase, so the verdict
+# rests on an observation that was actually repeated.
+#
+# WHAT THE PRESENCE CHECK IS FOR
+# -----------------------------------------------------------------------------
+# The expect_can below names NO signals on purpose. It is a claim about
+# PRESENCE -- a fault frame arrived at all -- which is the one thing this file
+# can honestly demand of both builds before it knows which code either chose.
+# Naming a code there would reintroduce the guess this whole file is written to
+# avoid.
+# =============================================================================
+
+id: fault-code-latched
+title: Whatever fault code the pack raised first, it must keep reporting that one
+description: >
+  Take the pack over its temperature AND its voltage limit in the same tick, so
+  which fault code it publishes is decided by a priority order the contract does
+  not state. Bring both readings back inside their limits, and require that the
+  code the pack chose is still the code it reports — anchored on the value the
+  firmware itself published rather than on a value this file guessed.
+
+steps:
+
+  # 1. Nothing is asserted until the device under test says it is up.
+  - wait_uart:
+      node: bms
+      text: "BMS ready"
+      timeout_ms: 500
+
+  - mark: "pack nominal, watching the fault identifier"
+
+  # 2. The control: quiet on 0x604 while the pack is inside both limits, so a
+  #    fault frame afterwards can only be the one these injections caused.
+  - expect_no_can:
+      id: 0x604
+      for_ms: 100
+      label: "no fault frame while the pack is within both limits"
+
+  - mark: "both limits crossed in the same tick"
+
+  # 3. THE TIE. Two writes with no window between them land in the same virtual
+  #    instant, so the pack sees both conditions become true on one 10 ms tick
+  #    and its own rule order decides which code it publishes.
+  - write_symbol:
+      node: bms
+      symbol: g_cell_temp_dC
+      value: 600
+
+  - write_symbol:
+      node: bms
+      symbol: g_pack_mv
+      value: 84500
+
+  # 4. Presence only. Which code it carries is the firmware's to choose, and
+  #    this file does not look.
+  - expect_can:
+      id: 0x604
+      within_ms: 50
+      label: "a fault frame arrives, whichever code the pack chose"
+
+  - mark: "both readings back inside their limits: the code must not move"
+
+  # 5. Both causes withdrawn. A correct pack has latched and does not care.
+  - write_symbol:
+      node: bms
+      symbol: g_cell_temp_dC
+      value: 250
+
+  - write_symbol:
+      node: bms
+      symbol: g_pack_mv
+      value: 72000
+
+  # 6. The assertion. No value: the anchor is the first frame in this window,
+  #    published by the firmware, and every later frame must carry the same
+  #    fault_code. fault_counter rolls on every transmission and is outside the
+  #    mask, so it cannot break the latch.
+  - expect_latched:
+      id: 0x604
+      signals: [fault_code]
+      for_ms: 1200
+      label: "the pack keeps reporting whatever code it first raised"

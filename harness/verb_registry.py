@@ -129,6 +129,14 @@ ARG_TYPES = (
     # expect_can's own arguments have, so the type is not a new grammar --
     # it is the existing one, repeated and given an order that matters.
     "sequence",
+    # A list of signal NAMES, with no values. `signals` is a mapping because
+    # every verb before this one compares against a value the scenario wrote
+    # down; expect_latched compares against a value the FIRMWARE wrote down, so
+    # the scenario has a name to give and nothing else. The names still resolve
+    # through the contract's own Signal objects -- same catalog, same bit
+    # layout, same refusal for a name the message does not define -- so this is
+    # the existing grammar with the value half removed, not a second one.
+    "signal_names",
 )
 
 #: Which node kinds a verb applies to. Section 10.7 item 1: a verb works on both

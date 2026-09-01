@@ -158,6 +158,8 @@ _ORDERS = {}         # ordered sequences: token -> dict(terms, ...)
 _ORDER_KEYS = []
 _ALWAYS = {}         # invariants: token -> dict(id, value, mask, samples, ...)
 _ALWAYS_KEYS = []
+_LATCHES = {}        # value-anchored latches: token -> dict(id, mask, anchor, ...)
+_LATCH_KEYS = []
 
 _UARTS = {}          # node -> dict(tail, keep)
 
@@ -1492,7 +1494,7 @@ def _feed(us, msg_id, data, kind):
 # ordered nothing.
 
 def _feed_ordering(us, msg_id, data, kind):
-    """Offer one bus frame to the sequence and invariant matchers."""
+    """Offer one bus frame to the sequence, invariant and latch matchers."""
     if kind not in FIRMWARE_KINDS:
         return
     for tok in _ORDER_KEYS:
@@ -1519,6 +1521,25 @@ def _feed_ordering(us, msg_id, data, kind):
             a['broken_us'] = us
             a['broken_data'] = _hex_of(data)
             _write(us, 'ALWAYS_BROKEN', '%s %d %s' % (tok, us, _hex_of(data)))
+    for tok in _LATCH_KEYS:
+        l = _LATCHES[tok]
+        if us > l['deadline'] or l['resolved'] or msg_id != l['id']:
+            continue
+        l['samples'] = l['samples'] + 1
+        seen = _masked_hex(data, l['mask'])
+        if l['anchor'] is None:
+            # THE ANCHOR. Not a value the scenario wrote down -- the value this
+            # firmware published first, inside this window, on this run.
+            l['anchor'] = seen
+            l['anchor_us'] = us
+            _write(us, 'LATCH_SET', '%s %s %d' % (tok, seen, us))
+        else:
+            l['after'] = l['after'] + 1
+            if seen != l['anchor'] and l['changed_us'] is None:
+                l['changed_us'] = us
+                l['changed_saw'] = seen
+                _write(us, 'LATCH_CHANGED', '%s was=%s saw=%s %d' % (
+                    tok, l['anchor'], seen, us))
 
 
 def mc_bench_expect_order(token, terms, within_ms, label):
@@ -1680,6 +1701,94 @@ def mc_bench_always_resolve(token):
             tok, a['broken_us'], a['broken_data'], a['samples']))
     else:
         _write(us, 'ALWAYS_HELD', '%s samples=%d' % (tok, a['samples']))
+
+
+def _masked_hex(data, mask):
+    """(data & mask) as a hex string, over the mask's length.
+
+    The SAME masked comparison _match() makes; the only difference is that the
+    thing being compared against came off the bus rather than out of the
+    compiler. Bytes past the end of a short payload read as 0, exactly as
+    _match treats them."""
+    out = []
+    i = 0
+    while i < len(mask):
+        b = data[i] if i < len(data) else 0
+        out.append(b & mask[i])
+        i = i + 1
+    return _hex_of(out)
+
+
+def mc_bench_expect_latched(token, msg_id, mask_hex, for_ms, label):
+    """bench_expect_latched "<tok>" "<id>" "<mask>" "<for ms>" "<label>"
+
+    THERE IS NO VALUE ARGUMENT, and that is the whole verb. The first frame of
+    this id inside the window sets the anchor to its own (data & mask); every
+    later frame must present the same (data & mask).
+
+    This is the only matcher in this file whose expected value is not known
+    when the run starts. It needs no signal decoder to do it: the compiler
+    already turns the named signals into a MASK, and masked equality against a
+    captured value is the identical comparison every other matcher makes."""
+    tok = _s(token)
+    if tok == '':
+        _fail('bench_expect_latched', 'empty-token')
+    if tok in _LATCHES:
+        _fail('bench_expect_latched', 'token-reused:' + tok)
+    mask = _bytes_from_hex(mask_hex, 'mask')
+    # AN EMPTY MASK ANCHORS ON NOTHING: every frame would present the same
+    # zero, so the latch would hold however the firmware behaved. Refused here
+    # as well as in the compiler, because this file is reachable without it.
+    constrains = False
+    for byte in mask:
+        if byte != 0:
+            constrains = True
+    if not constrains:
+        _fail('bench_expect_latched', 'empty-mask-anchors-nothing')
+    window = _int(for_ms, 'for_ms')
+    us = _now_us()
+    _LATCHES[tok] = {'id': _int(msg_id, 'id'), 'mask': mask,
+                     'armed_us': us, 'deadline': us + window * 1000,
+                     'anchor': None, 'anchor_us': None, 'samples': 0,
+                     'after': 0, 'changed_us': None, 'changed_saw': None,
+                     'resolved': False}
+    _LATCH_KEYS.append(tok)
+    _write(us, 'LATCH_ARM', '%s %x %s %d %s' % (
+        tok, _LATCHES[tok]['id'], _hex_of(mask), window * 1000, _text(label)))
+
+
+def mc_bench_latch_resolve(token):
+    """bench_latch_resolve "<token>"
+
+    Answer one armed latch, at the end of its window. Writes exactly one of:
+
+      LATCH_HELD       <tok> value=<hex> set=<us> after=<n>
+      LATCH_BROKEN     <tok> was=<hex> saw=<hex> at=<us> after=<n>
+      LATCH_NEVER_SET  <tok> samples=0
+
+    NEVER_SET IS A FAILURE. A latch that never saw a frame has proved nothing,
+    and reporting that as held would be the same confidently-wrong verdict
+    expect_always was built to stop.
+
+    "after" is the number of frames judged AGAINST the anchor, which is one
+    less than the samples: the frame that sets the anchor cannot also
+    corroborate it. A held latch with after=0 saw exactly one frame."""
+    tok = _s(token)
+    if tok not in _LATCHES:
+        _fail('bench_latch_resolve', 'no-such-token:' + tok)
+    l = _LATCHES[tok]
+    if l['resolved']:
+        _fail('bench_latch_resolve', 'already-resolved:' + tok)
+    l['resolved'] = True
+    us = _now_us()
+    if l['anchor'] is None:
+        _write(us, 'LATCH_NEVER_SET', '%s samples=0' % tok)
+    elif l['changed_us'] is not None:
+        _write(us, 'LATCH_BROKEN', '%s was=%s saw=%s at=%d after=%d' % (
+            tok, l['anchor'], l['changed_saw'], l['changed_us'], l['after']))
+    else:
+        _write(us, 'LATCH_HELD', '%s value=%s set=%d after=%d' % (
+            tok, l['anchor'], l['anchor_us'], l['after']))
 
 
 def mc_bench_expect(token, msg_id, value_hex, mask_hex, within_ms, label):

@@ -1150,6 +1150,29 @@ class Compiler:
         payload, _ = self._encode(message, step.get("signals") or {}, where)
         return payload
 
+    def _mask_of_names(self, names, message, where):
+        """The mask covering the named signals, with NO value.
+
+        Every other assertion asks the contract's encoder for (value, mask)
+        together, because it has a value to state. expect_latched has only
+        names: the value is whatever the firmware publishes first. So the mask
+        is built from the SAME catalog.Signal objects the encoder uses -- same
+        bit layout, same refusal for a name the message does not define -- with
+        the value half simply absent. It is not a second encoder; it is the
+        same one with nothing to pack."""
+        mask = 0
+        for name in names:
+            if not isinstance(name, str):
+                raise CompileError(
+                    "%s: 'signals' must be a list of signal names, and %r is "
+                    "not a name" % (where, name)
+                )
+            try:
+                mask |= message.signal(name).bit_mask
+            except contract.CatalogError as exc:
+                raise CompileError("%s: %s" % (where, exc)) from None
+        return _hex_bytes(mask.to_bytes(message.dlc, "little"))
+
     def _matcher_for(self, step, message, msg_id):
         """(value, mask) for an assertion, straight from the contract's encoder.
 
@@ -1410,6 +1433,52 @@ class Compiler:
         self.result.tokens.append(
             Token(token, step.verb, label, step.index, None, window,
                   {"sequence": detail})
+        )
+
+    def _verb_expect_latched(self, step):
+        """The signal never changed from the first value the FIRMWARE published.
+
+        The only assertion in this engine whose expected value is not known
+        when the run starts. See harness/verbs/expect_latched.yml for what that
+        buys, and for the false alarm it costs -- a non-latching rule inside
+        the window reddens this on firmware with no defect."""
+        where = step.where
+        message, msg_id = self._message_for(step.need("id"), where, need_contract=True)
+        window = _as_window_ms(step.need("for_ms"), "%s: for_ms" % where)
+
+        names = step.get("signals")
+        # A MAPPING IS THE MISTAKE THIS VERB EXISTS TO PREVENT, so it is named
+        # rather than coerced: a mapping carries a value fixed when the
+        # scenario was written, which is the guess expect_latched removes.
+        if isinstance(names, dict):
+            self._refuse(step, "signals_have_values", verb=step.verb, message_id=msg_id)
+        if not names:
+            self._refuse(step, "no_signals", verb=step.verb, message_id=msg_id)
+        if isinstance(names, str):
+            names = [names]
+        mask_hex = self._mask_of_names(names, message, where)
+        # Belt and braces with the emitted refusal above: a signal really
+        # declared as zero-width would produce an empty mask from a non-empty
+        # list, and a latch on no bits holds however the firmware behaves.
+        if not any(int(mask_hex[i:i + 2], 16) for i in range(0, len(mask_hex), 2)):
+            self._refuse(step, "no_signals", verb=step.verb, message_id=msg_id)
+
+        label = step.get("label") or (
+            "0x%X holds whatever it first published" % msg_id)
+        token = self._token()
+        self._emit(
+            'bench_expect_latched "%s" "0x%X" "%s" "%d" "%s"'
+            % (token, msg_id, mask_hex, window,
+               self._text_arg(label, "%s: label" % where))
+        )
+        self._run_window(window)
+        # AFTER the window, like every other whole-window verb: a latch that
+        # has not changed yet may still change before the window ends.
+        self._emit('bench_latch_resolve "%s"' % token)
+        self.result.tokens.append(
+            Token(token, step.verb, label, step.index, "0x%X" % msg_id, window,
+                  {"signals": list(names),
+                   "message": message.name if message else None})
         )
 
     def _verb_expect_always(self, step):

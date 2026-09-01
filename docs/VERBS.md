@@ -19,6 +19,7 @@ operator sees are the words on this page.
 | [`expect_boots`](#expect-boots) | assert | real | yes | Demand that the device came back up |
 | [`expect_can`](#expect-can) | assert | real, scripted | yes | Demand a frame, with signal values, within a deadline |
 | [`expect_flash`](#expect-flash) | assert | real | yes | Demand that non-volatile memory holds particular bytes |
+| [`expect_latched`](#expect-latched) | assert | real, scripted | yes | Demand that a signal never changed from the first value the firmware itself published |
 | [`expect_no_can`](#expect-no-can) | assert | real, scripted | yes | Demand the absence of a frame for a whole window |
 | [`expect_order`](#expect-order) | assert | real, scripted | yes | Demand that one frame was seen before another, over one window |
 | [`expect_symbol`](#expect-symbol) | assert | real | yes | Demand that a variable holds a value |
@@ -34,7 +35,7 @@ operator sees are the words on this page.
 | [`wait_uart`](#wait-uart) | observe | real | yes | Wait for text to appear on a node's console |
 | [`write_symbol`](#write-symbol) | stimulus | real | yes | Write a value into a running node's memory |
 
-19 verbs: 7 stimulus (make something happen), 2 power (cut, restore, reset), 1 time (let virtual time pass), 1 observe (wait for something), 7 assert (demand something, or forbid it), 1 book (record, annotate, checkpoint).
+20 verbs: 7 stimulus (make something happen), 2 power (cut, restore, reset), 1 time (let virtual time pass), 1 observe (wait for something), 8 assert (demand something, or forbid it), 1 book (record, annotate, checkpoint).
 
 ---
 
@@ -266,6 +267,128 @@ window. There is no deadline to miss.
 
 ```
 node {node!r} is a frame player and has no memory to read. This verb is for executed nodes only.
+```
+
+---
+
+## expect_latched
+
+*Demand that a signal never changed from the first value the firmware itself published*
+
+| | |
+|---|---|
+| class | `assert`, polarity `expect` |
+| applies to | real, scripted |
+| writes to the event log | `LATCH_ARM` |
+| answered by | `LATCH_HELD` |
+| explained by | `LATCH_BROKEN`, `LATCH_NEVER_SET` |
+| compiled by | a handler, `_verb_expect_latched` |
+
+**Arguments**
+
+| Name | Type | Required | Notes |
+|---|---|---|---|
+| `id` | `message_id` | yes |  |
+| `signals` | `signal_names` | yes | the signals whose first observed value must not change -- names only, no values |
+| `for_ms` | `window_ms` | yes | how long the value must be held |
+| `label` | `label` | no | what this latch means |
+
+The verb for "whatever it first raised, it must keep reporting that same
+one". Every other matcher in this engine carries a value fixed when the
+scenario was WRITTEN; this one carries a value observed at RUN TIME, from
+the firmware's own transmission, and holds every later frame against it.
+
+WHY A FIXED VALUE CANNOT SAY THIS. A latched status is whichever value the
+device raised first, and which one that is may be decided by a priority
+order THE CONTRACT DOES NOT STATE. A contract that defines a signal and its
+enumeration need say nothing about which of two simultaneously true
+conditions wins, and in general it does not. A scenario is written against
+the contract, so a scenario cannot know it -- and an author who writes an
+invariant naming one of the two values has written down a GUESS and called
+it a requirement. The mirror spelling, naming the other value, is exactly as
+well justified by the contract, and nothing forces the choice.
+
+So the failure being prevented is a CONFORMANT DEVICE FAILED FOR A CHOICE
+THE CONTRACT LEFT OPEN. Two suppliers may resolve such a tie differently and
+both be correct; a fixed-value invariant passes one and fails the other, and
+the test cannot say which of them is wrong because nothing in the contract
+can. This verb names the SIGNAL and no value, so both pass and the
+requirement that is actually under test -- that the value does not MOVE --
+is the only thing asserted.
+
+IT IS NOT FOR CATCHING AN OVERWRITTEN VALUE. An invariant naming the right
+value catches that too, and was measured doing so before this verb was
+written. What this adds is the direction above, and that is the whole of the
+claim.
+
+THE FALSE ALARM THIS VERB HAS. Read this before arming one. The verb assumes
+THE FIRST VALUE IT OBSERVES IS A LATCHED ONE. Where a device also has a
+NON-LATCHING condition on the same signal -- one raised while some external
+cause is present and cleared by itself when it goes away, with no reset and
+no defect -- a window spanning that recovery anchors on a value that was
+never latched, and reports a broken latch when a later genuine fault
+arrives. This has been measured against correct firmware, and the project
+that measured it records the run.
+
+That is not an implementation defect to be fixed later; it is the BOUNDARY
+OF THE SENTENCE this verb can express. The direction of the error is the
+UNFLATTERING one -- it invents a failure rather than hiding one -- which is
+the safer direction to be wrong in but still a wrong answer about correct
+firmware. So: arm this only over a window you know contains no non-latching
+transition of the named signals. Choosing that window is the author's
+responsibility, and it is the only part of this verb that is.
+
+WHY IT IS WORTH HAVING WITH THAT LIMIT. The two spellings fail in DISJOINT
+directions, and neither is safe in both:
+
+    a legal PRIORITY choice        a fixed value false-alarms, this holds
+    a legal NON-LATCHING clear     this false-alarms, a fixed value holds
+
+Both are stated, both were measured, and neither is presented as the safe
+one. A verb whose limit is documented is usable; one whose limit is
+discovered in the field is not.
+
+ONLY WHAT A NODE TRANSMITTED COUNTS. A frame the harness injected can
+neither set the anchor nor break it. An anchor taken from our own injection
+would make the tool measure itself.
+
+NO VALUE IS DECODED. The anchor is (data & mask) captured from the first
+frame of this identifier in the window, and every later frame is compared
+the same masked way -- the identical comparison every other matcher makes,
+with the value coming from the bus instead of from the compiler. There is no
+signal decoder inside the emulator and this verb does not need one. That
+also means any rolling counter the same message carries is outside the mask
+and cannot break the latch.
+
+IT IS A STATEMENT ABOUT OBSERVED FRAMES, NOT ABOUT THE DEVICE'S VARIABLES.
+A change that begins and ends between two transmissions of a periodic
+message is invisible here, and the direction of that inaccuracy is that we
+UNDER-REPORT changes -- the flattering direction, stated here rather than
+left to be discovered.
+
+ZERO OBSERVATIONS IS A FAILURE, NOT A PASS. A latch that never saw a frame
+has proved nothing, and it is reported as such. It is the same rule the
+invariant verb carries, and for the same reason: a verdict that is
+confidently wrong is worse than one that is missing. A window shorter than
+the message's own period can hold a single frame, which gives an anchor with
+nothing corroborating it -- held, truthfully, on one observation.
+
+**Refuses**
+
+`no_signals` — exit 2
+
+```
+{verb}: no signals named on 0x{message_id:X}, so the anchor would be the whole payload and any rolling counter in it would break the latch on the very next frame.
+  Name the signals whose value must be held with   signals: [ <signal> ]
+  This verb takes NAMES ONLY -- the value is whatever the firmware publishes first, which is the entire point of it.
+```
+
+`signals_have_values` — exit 2
+
+```
+{verb}: signals were given as   {{ <signal>: <value> }}  , but a value fixed when the scenario was written is the thing this verb exists to avoid.
+  Write   signals: [ <signal> ]   and the anchor is taken from the firmware's own first frame.
+  If you really do mean a value the contract pins, that assertion is   expect_always: {{ id: 0x{message_id:X}, signals: {{ <signal>: <value> }} }}.
 ```
 
 ---

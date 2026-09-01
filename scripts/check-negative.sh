@@ -64,6 +64,13 @@ expect_exit 2 "$BENCH_PROJECT/scenarios/negative/zero-length-window.yml" \
 #     does, rather than the assumption.
 expect_exit 1 "$BENCH_PROJECT/scenarios/negative/forged-ordering-verdict.yml" 	"a forged ordering verdict must not resolve either token"
 
+
+# 1 = the scenario ran and FAILED, and it must fail for ONE of its two
+#     assertions and not the other. expect_latched adds LATCH_SET, LATCH_HELD
+#     and LATCH_BROKEN to the log, and it is the first verb whose expected
+#     value comes off the bus rather than out of the compiler -- so a forgery
+#     can attack it in BOTH directions, and this case attacks in both.
+expect_exit 1 "$BENCH_PROJECT/scenarios/negative/forged-latch-verdict.yml" 	"a forged latch verdict must neither resolve nor redden a token"
 # ---------------------------------------------------------------------------
 # The forgery deserves more than an exit code: prove nothing leaked through.
 # ---------------------------------------------------------------------------
@@ -122,6 +129,43 @@ print('%d of %d' % (len(passed), len(ordering)))" 2>/dev/null || echo "?")"
 	printf '  %-42s %s
 ' "ordering assertions that passed (want 0 of 2)" "$verdicts"
 	[ "$verdicts" = "0 of 2" ] || fails=$((fails + 1))
+else
+	echo "  (no event log to inspect -- the scenario did not get far enough)"
+	fails=$((fails + 1))
+fi
+
+# ---------------------------------------------------------------------------
+# The latch forgery, in BOTH directions. Every case above this one asks only
+# whether a red verdict could be forged green. expect_latched makes the other
+# direction reachable too -- a forged LATCH_BROKEN against an assertion the
+# firmware genuinely satisfies -- and a tool that can be talked into failing
+# correct firmware is a tool that gets switched off. So both are asserted, and
+# the honest PASS is asserted BY NAME: a check that only looked at failing
+# assertions could not tell a suppressed forgery from a scenario that failed
+# for its own reasons.
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- the forged latch verdict moved nothing, in either direction ---"
+FORGED_LATCH="$OUT/forged-latch-verdict"
+if [ -f "$FORGED_LATCH/events.log" ]; then
+	# BY INSTANT, NOT BY KIND -- the lesson the ordering case taught. Both
+	# latches below write real LATCH_SET/LATCH_HELD/LATCH_BROKEN lines of their
+	# own, so counting kinds cannot separate a forgery from an observation.
+	leaked="$(grep -cE '^(260000 LATCH_HELD|260100 LATCH_BROKEN)' "$FORGED_LATCH/events.log" || true)"
+	printf '  %-42s %s
+' "forged lines parsed as events (want 0)" "$leaked"
+	[ "$leaked" -eq 0 ] || fails=$((fails + 1))
+
+	latched="$("$BENCH_VENV/bin/python" -c "
+import json,io
+d=json.load(io.open(r'$FORGED_LATCH/results.json',encoding='utf-8'))
+by={a['token']: a['verdict'] for a in d['assertions'] if a['verb'] == 'expect_latched'}
+# t2 is false of the firmware and carries a forged LATCH_HELD: it must stay FAIL.
+# t4 is true of the firmware and carries a forged LATCH_BROKEN: it must stay PASS.
+print('%s/%s' % (by.get('t2'), by.get('t4')))" 2>/dev/null || echo "?")"
+	printf '  %-42s %s
+' "false latch / true latch (want FAIL/PASS)" "$latched"
+	[ "$latched" = "FAIL/PASS" ] || fails=$((fails + 1))
 else
 	echo "  (no event log to inspect -- the scenario did not get far enough)"
 	fails=$((fails + 1))
