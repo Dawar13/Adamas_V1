@@ -27,6 +27,9 @@ diverging_tests:
   # fails with NO OBSERVATION rather than with an unmatched expectation, and
   # that difference is the point of it -- see the rationale below.
   - fault-code-latched
+  # The post-latch scenario written for firmware/bms-broken-wrongcode. It
+  # catches this build too, and NOT for that build's reason -- see the rationale.
+  - fault-code-not-overwritten
   # The two hand-written scenarios that check the latch...
   - overtemp-boundary
   - overtemp-fault
@@ -74,6 +77,22 @@ rationale: |
   other seventeen name a value; if the firmware legally resolved a tie the other
   way they would go red against correct firmware, which is measured beside
   firmware/bms-priority-swapped. This one names only the signal.
+
+  WHY fault-code-not-overwritten IS HERE, AND WHY IT IS NOT A DUPLICATE. That
+  scenario was written for firmware/bms-broken-wrongcode, where the latch HOLDS
+  and only the identity of the fault moves. It catches this binary as well, and
+  the honest count went from 18 to 19 -- but the mechanism is the opposite one.
+  There, a latched pack re-evaluates its rules and republishes a second
+  condition over the first. Here the fault never latched at all: the code clears
+  when the pack cools, and the over-voltage injected afterwards raises a fresh
+  fault into the space it left. Both end with fault_code reading OVERVOLT where
+  OVERTEMP was required, and the instant separates them -- 650300 us against
+  that build, 660400 us against this one, because a self-clearing fault has to
+  clear before the later rule can be reached.
+
+  That is worth having twice. A test that reddens against two builds for two
+  different reasons is not redundant with itself; it is one assertion with two
+  distinct failure paths, and losing either build would still leave it honest.
 
   IF THE OBSERVED SET SHRINKS, that is the more alarming direction: it would mean
   a latch assertion stopped being made somewhere, and the suite would have

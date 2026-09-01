@@ -1,0 +1,82 @@
+# What this defective build is expected to change, and nothing else.
+# =============================================================================
+# Written from the divergence gate's own report. The list below is OBSERVED,
+# never predicted.
+#
+# The gate fails if the observed set differs from this list in EITHER direction.
+# A test that diverges and is not here means the binary differs in more ways
+# than it admits, or something non-deterministic is leaking into a run.
+#
+# An entry may name one test or a family of them; see
+# firmware/bms-broken/EXPECTED-DIVERGENCE.yml for why, and for why a wildcard
+# cannot absorb a surprise.
+# =============================================================================
+
+# WHICH BUILD THIS IS A DEFECTIVE COPY OF
+# -----------------------------------------------------------------------------
+# The directory beside this one holding the good firmware. This level holds the
+# builds of more than one device, and sitting beside a build is not the same as
+# being a defective version of it -- without this line the gate for every device
+# on the level would be offered this binary as one of its own.
+variant_of: bms
+
+defect: safety rules keep running after the latch, so a later condition overwrites the fault code
+
+diverging_tests:
+  # The only test in the suite that introduces a SECOND condition after a fault
+  # has already latched. That is the whole of this binary's visibility -- see
+  # the rationale for why the other 93 cannot see it, and for why this file
+  # being one line long is a fact about the suite rather than about the defect.
+  - fault-code-not-overwritten
+
+rationale: |
+  THIS LIST WAS EMPTY, AND THE EMPTY LIST WAS TRUE. When this binary was first
+  declared, the gate ran it against all 93 tests then in the suite and it was
+  caught by NONE of them: every test scored it exactly as it scored the good
+  firmware. That is recorded here rather than quietly fixed, because it is the
+  more useful half of what this build proved.
+
+  WHY NOTHING SAW IT. The latch itself still holds here. fault_latched stays
+  set, the state machine stays in its terminal FAULT state, the main contactor
+  stays open, and the frame count on the bus is unchanged. Every one of those is
+  correct and every one is what a test of a latch looks at. What moves is only
+  WHICH FAULT the pack says it has, and a code can only be overwritten if some
+  rule runs after the latch and finds a condition true. Every scenario in the
+  suite either holds a fault's cause or removes it, so after the latch no rule
+  was ever true, nothing was ever called, and nothing was ever overwritten. The
+  defect was real and dormant in all 93.
+
+  WHAT CLOSED IT. fault-code-not-overwritten latches an over-temperature fault,
+  withdraws its cause, and then takes the pack over the VOLTAGE limit while it
+  sits latched -- a condition arising after the verdict rather than before it.
+  The good firmware never re-evaluates and reports OVERTEMP throughout; this
+  binary re-evaluates, finds over-voltage true, and republishes the fault as
+  OVERVOLT 0.3 ms later. Observed: ALWAYS_FAILED at=650300 saw fault_code 0x02
+  where 0x01 was required, over 3 samples.
+
+  WHY IT IS NOT expect_latched THAT CATCHES THIS. The header of this build's
+  safety.c says it exists to justify that verb in its value-anchored form, and
+  puts the claim on trial rather than assuming it. The trial was held and the
+  claim did not survive: a stimulus cannot be issued inside an assertion window,
+  and no rule this firmware evaluates in the FAULT state fires on a timeout, so
+  the overwrite can never be made to land between the anchor and the end of the
+  window. Measured, against this binary: PASS, anchored on 0x01 and held. The
+  verb keeps the ground it does hold -- a priority tie the contract does not
+  fix, which is fault-code-latched beside firmware/bms-priority-swapped -- and
+  an ordinary invariant naming the code catches this one, exactly as the
+  safety.c header predicted it would.
+
+  ONE TEST CARRIES THIS WHOLE PROOF, and the gate warns about it by name. That
+  is a statement about how narrow the behaviour is, not a weakness to paper
+  over: only two of the five rules are evaluated at all in the FAULT state, and
+  only one of them can be reached without a state this scenario cannot enter. If
+  that single file is deleted or its second condition is dropped, this binary
+  goes back to being invisible and the suite returns a clean sweep over a
+  defect it cannot see. The warning is left standing rather than silenced.
+
+  IF THE OBSERVED SET GROWS, a test began to notice something this file does not
+  claim, and the binary differs in more ways than it admits -- or a verdict moved
+  for a reason unrelated to the defect, which would mean something
+  non-deterministic is leaking in. IF IT SHRINKS TO NOTHING, the suite has lost
+  its only view of a pack that re-diagnoses itself after the fact, and the gate
+  reports that as a build caught by nothing rather than as a clean run.

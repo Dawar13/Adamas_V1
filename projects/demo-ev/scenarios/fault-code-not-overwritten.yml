@@ -1,0 +1,147 @@
+# fault-code-not-overwritten — a condition arising after the latch must not re-diagnose it.
+# =============================================================================
+# THIS FILE IS PROJECT DATA. Ids and signal names come from catalog.yml, node
+# names from network.yml, and every duration below is derived from a period or
+# a timeout declared in the firmware's own header.
+#
+# WHAT GAP THIS FILLS, AND HOW THE GAP WAS FOUND
+# -----------------------------------------------------------------------------
+# firmware/bms-broken-wrongcode keeps evaluating the safety rules after a fault
+# has latched, so a condition arising LATER overwrites the code the first fault
+# raised. The latch itself still holds: fault_latched stays set, the state stays
+# FAULT, the contactor stays open. Only the IDENTITY of the fault moves.
+#
+# The divergence gate ran that binary against all 93 tests and it was caught by
+# NONE of them — an observed gap, not a predicted one. The reason is uniform:
+# every scenario that raises a fault either holds its cause or removes it, and
+# with no rule true afterwards the defective build calls nothing, overwrites
+# nothing, and is scored exactly as the good firmware is. Nothing in the suite
+# asked what happens when a SECOND, different rule comes true while the pack
+# sits latched. This file asks it.
+#
+# WHY THIS IS NOT expect_latched, WHICH IS THE VERB THAT SOUNDS RIGHT
+# -----------------------------------------------------------------------------
+# firmware/bms-broken-wrongcode says it exists to justify expect_latched in its
+# value-anchored form, and puts that claim ON TRIAL rather than assuming it. The
+# trial was held here, and the claim does not survive it. Two reasons, both
+# structural rather than incidental:
+#
+# 1. THE OVERWRITE CANNOT BE PUT INSIDE THE WINDOW. expect_latched anchors on
+#    the first frame in its window and every whole-window verb runs the
+#    emulation for its own duration. A stimulus written before the verb happens
+#    before the anchor is taken — so the defective build has already changed the
+#    code and the anchor is simply the NEW value, which then holds. A stimulus
+#    written after it happens after the window has closed. There is no third
+#    place to put it.
+#
+# 2. NO POST-LATCH RULE FIRES ON A TIMEOUT, so the effect cannot be made to
+#    arrive late on its own. That was tried first: node_silence on the VCU puts
+#    the stimulus outside the window and its effect 300 ms inside it. It does
+#    not work here, and the firmware says why — rule 4 is RUNNING-only, and a
+#    latched pack is in FAULT. Of the five rules, only over-temperature and
+#    over-voltage are evaluated in the FAULT state at all, and both read a
+#    symbol that changes the instant it is written. The measured run against
+#    the defective build was PASS, latch anchored at 0x01 and held: a green
+#    verdict proving nothing, which is the outcome this file exists to avoid.
+#
+# So the value-anchored verb cannot reach this defect, and the firmware's own
+# header already named the instrument that can: "A scenario that knows it
+# injected over-temperature can name OVERTEMP and catch this with an ordinary
+# expectation." That is what is written below. expect_latched keeps the ground
+# it actually holds — a tie whose winner the contract does not fix, which is
+# fault-code-latched and firmware/bms-priority-swapped — and does not claim this.
+#
+# WHY NAMING OVERTEMP HERE IS NOT THE GUESS expect_latched EXISTS TO REMOVE
+# -----------------------------------------------------------------------------
+# The guess that verb removes is a guess about PRIORITY: which of two rules that
+# are true in the SAME TICK wins the published code, which is fixed by a comment
+# in firmware/bms and by no contract. This file never creates that tie. Exactly
+# one rule is true when the fault is raised, so the code the pack must publish
+# is fixed by catalog.yml's own enum and by the condition this file injected —
+# and it is the same value overtemp-fault already names, for the same reason.
+# The second condition is introduced only AFTER the first fault has latched and
+# been observed, so it can never race the first for the code.
+#
+# WHAT A FAILURE HERE MEANS
+# -----------------------------------------------------------------------------
+# The invariant reddens naming the frame that broke it. Not "nothing matched
+# within the window" — the pack is talking, the contactor is open and the state
+# never left FAULT, all of which is correct and all of which a coarser check
+# would accept. The one thing that moved is the identity of the fault, which on
+# a vehicle is a technician replacing a charger while the cell that actually
+# overheated goes back into service uninspected.
+# =============================================================================
+
+id: fault-code-not-overwritten
+title: A condition arising after the latch must not rewrite the code the latch holds
+description: >
+  Latch an over-temperature fault, withdraw its cause, and then take the pack
+  over a DIFFERENT limit while it sits latched. The code the pack published
+  first must survive it — a latched pack may not re-diagnose itself after the
+  fact.
+
+steps:
+
+  # 1. Nothing is asserted until the device under test says it is up.
+  - wait_uart:
+      node: bms
+      text: "BMS ready"
+      timeout_ms: 500
+
+  - mark: "pack nominal, inside every limit"
+
+  # 2. The control: quiet on 0x604 while the pack is healthy, so a fault frame
+  #    afterwards can only be the one this file caused.
+  - expect_no_can:
+      id: 0x604
+      for_ms: 100
+      label: "no fault frame while the pack is healthy"
+
+  - mark: "injecting 60.0 C: over-temperature is the ONLY rule true"
+
+  # 3. One condition, and one only. No tie is created, so which code the pack
+  #    publishes is not a priority question and this file may name it.
+  - write_symbol:
+      node: bms
+      symbol: g_cell_temp_dC
+      value: 600
+
+  - expect_can:
+      id: 0x604
+      signals:
+        fault_code: OVERTEMP
+      within_ms: 50
+      label: "fault frame reports OVERTEMP within 50 ms"
+
+  - mark: "temperature back to normal, pack sits latched on OVERTEMP"
+
+  # 4. The cause is withdrawn. A correct pack has latched and does not
+  #    re-evaluate; the defective one now has no true rule to short-circuit on,
+  #    which is what makes the condition below reachable at all.
+  - write_symbol:
+      node: bms
+      symbol: g_cell_temp_dC
+      value: 250
+
+  - mark: "a NEW condition after the latch: the pack reads high, open-circuit"
+
+  # 5. THE SECOND CONDITION. 84.5 V is over the pack limit, and it arises long
+  #    after the fault that actually mattered. Over-voltage carries no state
+  #    qualifier, so it is one of only two rules a latched pack could still
+  #    evaluate — which is exactly why this is the one that exposes the defect.
+  - write_symbol:
+      node: bms
+      symbol: g_pack_mv
+      value: 84500
+
+  # 6. The assertion. EVERY frame of 0x604 from here on must still carry the
+  #    code the first fault raised. The window is BMS_TX_PERIOD_FAULT_MS * 2
+  #    plus margin, so the verdict rests on a restatement that was actually
+  #    repeated rather than on a single frame. fault_counter rolls on every
+  #    transmission and is not named, so it cannot break the invariant.
+  - expect_always:
+      id: 0x604
+      signals:
+        fault_code: OVERTEMP
+      for_ms: 1200
+      label: "the code survives a condition that arose after the latch"
