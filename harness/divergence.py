@@ -54,9 +54,12 @@ moved verdict lands in the unexpected-divergence set, which fails the run.
 HOW A DEFECTIVE BUILD IS FOUND -- A PRINCIPLE, NOT A LIST
 -----------------------------------------------------------------------------
 A build is a declared defective variant of the device under test when it sits
-beside the device under test's own build tree and carries a marker file named
+beside the device under test's own build tree, carries a marker file named
 
     EXPECTED-DIVERGENCE.yml
+
+and that marker names the device under test's own build directory as the build
+it is defective with respect to.
 
 Nothing else makes it one: no glob over a naming convention, no list in this
 file. The variant level is DERIVED -- walk up from the device under test's own
@@ -68,6 +71,23 @@ ambiguity and are refused rather than resolved by preference.
     <level>/<the device under test>/... /<binary>     the baseline
     <level>/<a variant>/EXPECTED-DIVERGENCE.yml       what makes it declared
     <level>/<a variant>/... /<binary>                 run at the same sub-path
+
+WHY THE MARKER NAMES ITS BASELINE, AND DOES NOT JUST SIT BESIDE IT
+-----------------------------------------------------------------------------
+Sibling-hood alone was the whole of the rule, and one level can hold the builds
+of more than one device. As soon as it does, every marker on it is offered to
+every gate on it: a defective build of one device handed to another device's
+gate as one of its own. That comparison runs a binary no test in that suite can
+distinguish, and the gate correctly reports a build caught by nothing -- a true
+statement about a question nobody asked.
+
+So `variant_of` names a directory beside the marker -- a directory, not a node
+id, because a directory can be checked. A name that does not exist at the level
+is REFUSED, in every gate on that level, because a marker belonging to no device
+is a proof that runs nowhere and reads exactly like one that was never written.
+A marker naming a different device is not run here and is NAMED in the report
+and in the record, so a level's markers are all accounted for by exactly one
+gate rather than quietly by none.
 
 -----------------------------------------------------------------------------
 WHAT IT REFUSES, AND WHY EVERY ONE IS LOUD
@@ -149,7 +169,7 @@ MARKER_NAME = "EXPECTED-DIVERGENCE.yml"
 #: The keys a marker may carry. Unknown keys are refused rather than ignored --
 #: a misspelled key that is skipped is a documented expectation that silently
 #: stopped being asserted.
-MARKER_REQUIRED_KEYS = ("defect", "diverging_tests", "rationale")
+MARKER_REQUIRED_KEYS = ("variant_of", "defect", "diverging_tests", "rationale")
 
 #: The characters that turn an entry of diverging_tests from one test's name
 #: into a family of them. Taken from the shell-glob vocabulary the rest of this
@@ -255,6 +275,24 @@ def _plural(count: int, one: str, many: str) -> str:
     return one if count == 1 else many
 
 
+def _report_foreign(foreign, out) -> None:
+    """Name the markers at this level that belong to another device.
+
+    Printed on every run that finds any, and never as a footnote to a green
+    headline. A marker excluded silently is the shape of every defect this
+    module exists to catch: if the name in one of these lines is a typo, no
+    gate anywhere is running that build, and the only way anybody learns is by
+    reading a line that says so.
+    """
+    if not foreign:
+        return
+    out("")
+    out("  not run here -- declared beside this device, defective with respect")
+    out("  to another. Each is a variant in that device's own gate:")
+    for entry in foreign:
+        out("      %-24s a defective %s" % (entry.name, entry.baseline_name))
+
+
 # ---------------------------------------------------------------------------
 # the marker file
 # ---------------------------------------------------------------------------
@@ -286,10 +324,12 @@ class Expectation:
     than passing quietly.
     """
 
-    __slots__ = ("path", "defect", "diverging_tests", "rationale")
+    __slots__ = ("path", "variant_of", "defect", "diverging_tests", "rationale")
 
-    def __init__(self, path: Path, defect: str, diverging_tests, rationale: str):
+    def __init__(self, path: Path, variant_of: str, defect: str,
+                 diverging_tests, rationale: str):
         self.path = Path(path)
+        self.variant_of = variant_of
         self.defect = defect
         self.diverging_tests = tuple(diverging_tests)
         self.rationale = rationale
@@ -329,6 +369,24 @@ class Expectation:
                 % (where, _plural(len(unknown), "key", "keys"),
                    ", ".join(repr(k) for k in sorted(unknown)),
                    ", ".join(MARKER_REQUIRED_KEYS))
+            )
+
+        variant_of = data["variant_of"]
+        if not isinstance(variant_of, str) or not variant_of.strip():
+            raise DivergenceError(
+                "%s: 'variant_of' must name the build directory beside this one\n"
+                "that holds the GOOD firmware this is a defective copy of; it\n"
+                "holds %r" % (where, variant_of)
+            )
+        variant_of = variant_of.strip()
+        if ("/" in variant_of or "\\" in variant_of
+                or variant_of in (".", "..")):
+            raise DivergenceError(
+                "%s: 'variant_of' is %r. It names ONE directory sitting beside\n"
+                "this one, not a path: a defective build and the build it is\n"
+                "defective with respect to are siblings, and a marker able to\n"
+                "reach elsewhere could claim a baseline in another project."
+                % (where, variant_of)
             )
 
         defect = data["defect"]
@@ -381,7 +439,7 @@ class Expectation:
                 "by hand against a report it no longer matches."
                 % (where, ", ".join(repr(d) for d in duplicates))
             )
-        return cls(path, defect.strip(), names, rationale)
+        return cls(path, variant_of, defect.strip(), names, rationale)
 
     def resolve(self, test_ids) -> tuple:
         """(the tests this build is expected to diverge on, entries matching none).
@@ -405,6 +463,28 @@ class Expectation:
 # ---------------------------------------------------------------------------
 # discovering the defective builds
 # ---------------------------------------------------------------------------
+
+
+class Foreign:
+    """A declared defective build of some OTHER device, at this same level.
+
+    It is not a variant of the device under test and is never run here. It is
+    carried out of discovery and named in the report anyway, because the
+    alternative is a marker that a gate silently walks past -- and a proof that
+    silently stops happening is the failure this whole module is about. A
+    `variant_of` typo shows up as a line in every gate run naming a baseline
+    nothing is testing.
+    """
+
+    __slots__ = ("name", "root", "baseline_name")
+
+    def __init__(self, name, root, baseline_name):
+        self.name = name
+        self.root = Path(root)
+        self.baseline_name = baseline_name
+
+    def __repr__(self) -> str:
+        return "Foreign(%r -> %r)" % (self.name, self.baseline_name)
 
 
 class Variant:
@@ -444,9 +524,35 @@ def discover_variants(baseline_binary: Path, repo_root: Path = None,
                       require_binary: bool = True) -> list:
     """Every declared defective sibling of the device under test's own build.
 
+    The variants only. See `discover_declarations` for the markers at the same
+    level that are declared for a DIFFERENT device: a caller that reports to a
+    human should name those, and this one exists for the caller that is asking
+    only what this device's documented defects are.
+    """
+    return discover_declarations(baseline_binary, repo_root, require_binary)[0]
+
+
+def discover_declarations(baseline_binary: Path, repo_root: Path = None,
+                          require_binary: bool = True) -> tuple:
+    """(defective builds of THIS device, markers here declared for another).
+
     The level at which variants live is derived from where the markers are, not
     from a naming convention. Markers at two levels are an ambiguity and are
     refused: resolving it by preference would silently drop one set of proofs.
+
+    WHY A MARKER NAMES ITS BASELINE
+    -----------------------------------------------------------------------
+    One level can hold the builds of several devices. A defective build of one
+    of them is not a defective build of its neighbour -- but it IS a sibling of
+    it, and sibling-hood was the whole of what made a build a variant. Handed
+    to the neighbour's gate it produces a binary no test in that suite can
+    distinguish, reported as a gap in a suite that has no reason to close it.
+
+    So a marker names the build it is defective WITH RESPECT TO, and it names
+    a directory beside itself rather than a node id -- because a directory can
+    be checked. A `variant_of` that does not exist at this level is refused, so
+    a typo is loud in every gate run rather than quietly removing a proof from
+    all of them.
 
     `require_binary` is true for anything that will EXECUTE these builds, and
     that is not a default to reach past casually: an unbuilt variant refused
@@ -510,8 +616,35 @@ def discover_variants(baseline_binary: Path, repo_root: Path = None,
     baseline_sha = _sha256(baseline_binary)
 
     variants = []
+    foreign = []
     for root in roots:
         expectation = Expectation.load(root / MARKER_NAME)
+        named = root.parent / expectation.variant_of
+        if not named.is_dir():
+            raise DivergenceError(
+                "%s says it is a defective copy of %r, and there is no such\n"
+                "build beside it.\n\n"
+                "Refused rather than skipped. A marker naming a baseline that\n"
+                "does not exist belongs to no device, so no gate would ever run\n"
+                "it -- and a proof that runs nowhere is indistinguishable from\n"
+                "one that was never written. Beside it are: %s."
+                % (_relative(root / MARKER_NAME, repo_root),
+                   expectation.variant_of,
+                   ", ".join(sorted(c.name for c in root.parent.iterdir()
+                                    if c.is_dir())) or "nothing")
+            )
+        if named.resolve() == root.resolve():
+            raise DivergenceError(
+                "%s declares itself the build it is a defective copy of.\n\n"
+                "A binary compared with itself cannot diverge, and the gate\n"
+                "would report a clean run having proved nothing."
+                % _relative(root / MARKER_NAME, repo_root)
+            )
+        if named.resolve() != anchor.resolve():
+            # A defective build of a different device, sharing this level. Not
+            # this gate's to run, and not this gate's to hide either.
+            foreign.append(Foreign(root.name, root, expectation.variant_of))
+            continue
         binary = root / inner
         if not binary.is_file() and not require_binary:
             # Declared, not built, and nothing here will run it. The expectation
@@ -565,7 +698,22 @@ def discover_variants(baseline_binary: Path, repo_root: Path = None,
                         for sha, names in sorted(twins.items()))
         )
 
-    return variants
+    if not variants:
+        raise DivergenceError(
+            "%d defective %s declared beside %s, and not one of them is a\n"
+            "defective copy of it:\n%s\n\n"
+            "This level holds the builds of more than one device, and every\n"
+            "marker here names a different baseline. There is nothing to compare\n"
+            "this device's suite against, and a green run would carry no\n"
+            "evidence that the engine reads the binary at all."
+            % (len(foreign), _plural(len(foreign), "build", "builds"),
+               _relative(anchor, repo_root),
+               "\n".join("  %s is a defective %s"
+                         % (f.name, f.baseline_name)
+                         for f in foreign))
+        )
+
+    return variants, foreign
 
 
 # ---------------------------------------------------------------------------
@@ -591,7 +739,7 @@ def _fingerprint(net) -> dict:
 
 
 def repoint_topology(source: Path, destination: Path, binary: Path,
-                     repo_root: Path = None):
+                     repo_root: Path = None, elf_root: Path = None):
     """A copy of the topology with the device under test's binary replaced.
 
     The repository's own topology file is never touched. Exactly one assignment
@@ -613,7 +761,13 @@ def repoint_topology(source: Path, destination: Path, binary: Path,
             "compiled file." % _relative(source, repo_root)
         )
 
-    wanted = Path(binary).resolve().relative_to(repo_root.resolve()).as_posix()
+    # A node's elf path is written relative to the PROJECT, because that is
+    # what resolves it when the scenario runs. Writing one relative to the
+    # repository produces a path the engine then resolves a second time against
+    # the project and cannot find -- reported as "no binary", which is a true
+    # sentence about a path this function invented.
+    elf_root = Path(elf_root) if elf_root else repo_root
+    wanted = Path(binary).resolve().relative_to(elf_root.resolve()).as_posix()
     text = source.read_text(encoding="utf-8")
     current = str(dut.elf)
     pattern = re.compile(
@@ -939,8 +1093,16 @@ class Runner:
     """
 
     def __init__(self, engine: Path, interpreter=None, workers=None,
-                 timeout=None, repo_root=None, echo=None, reuse=False):
+                 timeout=None, repo_root=None, echo=None, reuse=False,
+                 contract=None):
         self.engine = Path(engine)
+        # A topology and the contract its frames are described by are ONE
+        # world. The gate can already be pointed at a topology that is not the
+        # project's default; pointing at one without its contract compiles
+        # every test against the wrong description of the bus, and the engine
+        # refuses -- which arrives here as a whole suite that produced no
+        # verdict rather than as a comparison.
+        self.contract = Path(contract) if contract else None
         self.interpreter = list(interpreter) if interpreter else [sys.executable]
         self.workers = int(workers) if workers else 1
         self.timeout = timeout
@@ -964,6 +1126,8 @@ class Runner:
             "--out", str(out_dir),
             "--topology", str(topology_path),
         ]
+        if self.contract:
+            argv += ["--contract", str(self.contract)]
         if coverage:
             # Only ever the baseline arm. Coverage is a statement about the
             # binary under test, and tracing every arm would pay the host cost
@@ -1311,7 +1475,7 @@ def _failure_lines(comparisons) -> list:
 
 def as_document(baseline: Arm, comparisons, suite: Suite, dut_node_id: str,
                 workers: int, held: bool, failures, warnings,
-                baseline_runs=None, baseline_traced=False) -> dict:
+                baseline_runs=None, baseline_traced=False, foreign=()) -> dict:
     return {
         "schema": DIVERGENCE_SCHEMA,
         "verdict": "PASS" if held else "FAIL",
@@ -1346,6 +1510,7 @@ def as_document(baseline: Arm, comparisons, suite: Suite, dut_node_id: str,
         "variants": [
             {
                 "name": c.variant.name,
+                "variant_of": c.variant.expectation.variant_of,
                 "root": _relative(c.variant.root),
                 "binary": _relative(c.variant.binary),
                 "sha256": c.variant.sha256,
@@ -1368,6 +1533,15 @@ def as_document(baseline: Arm, comparisons, suite: Suite, dut_node_id: str,
                 "measurement_only": [dict(item) for item in c.measurement_only],
             }
             for c in comparisons
+        ],
+        # Declared at this level, defective with respect to another device, so
+        # not run here. Recorded rather than dropped: a reader comparing two
+        # gates' records can see that every marker on the level is accounted for
+        # by exactly one of them.
+        "declared_elsewhere": [
+            {"name": f.name, "root": _relative(f.root),
+             "variant_of": f.baseline_name}
+            for f in foreign
         ],
         "warnings": list(warnings),
         "failures": list(failures),
@@ -1412,8 +1586,16 @@ def build_parser() -> argparse.ArgumentParser:
                              "discrimination comes from")
     parser.add_argument("--list", action="store_true",
                         help="print the plan and execute nothing")
+    parser.add_argument("--contract", default=None,
+                        help="the contract file the topology's frames are "
+                             "described by (default: the project's own)")
     parser.add_argument("--quiet", action="store_true",
                         help="write the record, print no report")
+    # The same --project spelling every other entry point has. It was missing
+    # here while this module already read the project's topology through
+    # project.network_path(), so the flag existed in every command around this
+    # one and not in this one.
+    project.add_argument(parser)
     return parser
 
 
@@ -1433,7 +1615,7 @@ def main(argv=None) -> int:
     tests_dir = Path(args.tests) if args.tests else (
         REPO_ROOT / ".generated" / "tests")
     # The topology is the PROJECT's, not the repository's.
-    topology_path = project.network_path(args.topology)
+    topology_path = project.network_path(args.topology, args.project)
     out_root = Path(args.out) if args.out else (
         REPO_ROOT / "harness" / "out" / "divergence")
     workers = None
@@ -1452,12 +1634,18 @@ def main(argv=None) -> int:
                 "%s: the device under test declares no binary, so there is no\n"
                 "firmware for this gate to be about."
                 % _relative(topology_path))
-        baseline_binary = (REPO_ROOT / str(dut.elf)).resolve()
+        # A node's elf path is relative to the PROJECT, the same root the
+        # topology came from -- not to the repository. Resolving it here
+        # against the repository root made this gate unrunnable from the
+        # moment the project moved into projects/, and it failed as "the
+        # binary is not built", which is a true sentence about the wrong path.
+        baseline_binary = (project.project_root(args.project)
+                           / str(dut.elf)).resolve()
         if not baseline_binary.is_file():
             raise DivergenceError(
                 "the device under test's binary is not built: %s"
                 % _relative(baseline_binary))
-        variants = discover_variants(baseline_binary)
+        variants, foreign = discover_declarations(baseline_binary)
         if len(variants) < int(args.require):
             raise DivergenceError(
                 "%d declared defective %s, and %d %s required.\n\n"
@@ -1493,6 +1681,7 @@ def main(argv=None) -> int:
             out("      expects  %s"
                 % (", ".join(variant.expectation.diverging_tests) or "nothing"))
             out("")
+        _report_foreign(foreign, out)
         out("  %d suite %s would execute: %d %s in total"
             % (len(variants) + 1, _plural(len(variants) + 1, "run", "runs"),
                (len(variants) + 1) * len(suite),
@@ -1501,12 +1690,14 @@ def main(argv=None) -> int:
         return EXIT_LISTED
 
     runner = Runner(REPO_ROOT / "harness" / "run_scenarios.py", workers=workers,
-                    timeout=args.timeout, echo=out, reuse=args.reuse)
+                    timeout=args.timeout, echo=out, reuse=args.reuse,
+                    contract=args.contract)
     out("")
     out("  %d suite %s on %d %s: the good binary and %d declared defective %s"
         % (len(variants) + 1, _plural(len(variants) + 1, "run", "runs"),
            workers, _plural(workers, "worker", "workers"), len(variants),
            _plural(len(variants), "build", "builds")))
+    _report_foreign(foreign, out)
 
     try:
         out("")
@@ -1529,7 +1720,8 @@ def main(argv=None) -> int:
             out("    %s  %s" % (variant.name, _relative(variant.binary)))
             copied = repoint_topology(
                 topology_path, out_root / "topology" / ("%s.yml" % variant.name),
-                variant.binary)
+                variant.binary,
+                elf_root=project.project_root(args.project))
             arm = runner.run(variant.name, suite, copied, out_root / variant.name,
                              dut.id, variant.binary, variant.sha256)
             comparisons.append(compare(baseline, variant, arm, suite))
@@ -1563,7 +1755,7 @@ def main(argv=None) -> int:
     record.write_text(
         json.dumps(as_document(baseline, comparisons, suite, dut.id, workers,
                                held, failures, warnings,
-                               out_root / "baseline", args.coverage),
+                               out_root / "baseline", args.coverage, foreign),
                    indent=2, sort_keys=False) + "\n",
         encoding="utf-8", newline="\n")
 

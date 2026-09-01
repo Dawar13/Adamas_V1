@@ -147,6 +147,7 @@ raise SystemExit(int(script.get("say_exit", 0 if verdict == "PASS" else 1)))
 
 
 MARKER = """\
+variant_of: {variant_of}
 defect: {defect}
 diverging_tests:
 {listed}
@@ -156,9 +157,11 @@ rationale: |
 """
 
 
-def marker_text(defect="one thing was changed", diverging=()):
+def marker_text(defect="one thing was changed", diverging=(),
+                variant_of="good"):
     listed = "\n".join("  - %s" % name for name in diverging) or "  []"
-    return MARKER.format(defect=defect, listed=listed)
+    return MARKER.format(defect=defect, listed=listed,
+                         variant_of=variant_of)
 
 
 class Workspace:
@@ -188,11 +191,12 @@ class Workspace:
         return path
 
     def variant(self, name: str, defect="one thing was changed", diverging=(),
-                text=None, build=True) -> Path:
+                text=None, build=True, variant_of="good") -> Path:
         root = self.builds / name
         root.mkdir(parents=True, exist_ok=True)
         (root / divergence.MARKER_NAME).write_text(
-            text if text is not None else marker_text(defect, diverging),
+            text if text is not None
+            else marker_text(defect, diverging, variant_of),
             encoding="utf-8", newline="\n")
         if build:
             self.binary(name)
@@ -283,7 +287,7 @@ class TestExpectationLoads(WorkspaceCase):
 
     def test_order_and_whitespace_do_not_change_the_set(self):
         expectation = self.load(
-            "defect: x\ndiverging_tests:\n  - '  padded  '\nrationale: y\n")
+            "variant_of: good\ndefect: x\ndiverging_tests:\n  - '  padded  '\nrationale: y\n")
         self.assertEqual(expectation.diverging_tests, ("padded",))
 
     def test_a_missing_key_is_named(self):
@@ -307,7 +311,7 @@ class TestExpectationLoads(WorkspaceCase):
         self.assertIn("silently", message)
 
     def test_a_multi_line_defect_is_refused(self):
-        text = ("defect: |\n  one thing\n  and another thing\n"
+        text = ("variant_of: good\ndefect: |\n  one thing\n  and another thing\n"
                 "diverging_tests: [alpha]\nrationale: because\n")
         with self.assertRaises(divergence.DivergenceError) as caught:
             self.load(text)
@@ -316,28 +320,28 @@ class TestExpectationLoads(WorkspaceCase):
     def test_a_blank_defect_is_refused(self):
         for value in ("''", "'   '", "null", "7"):
             with self.assertRaises(divergence.DivergenceError):
-                self.load("defect: %s\ndiverging_tests: []\nrationale: why\n"
+                self.load("variant_of: good\ndefect: %s\ndiverging_tests: []\nrationale: why\n"
                           % value)
 
     def test_a_blank_rationale_is_refused(self):
         for value in ("''", "null", "3"):
             with self.assertRaises(divergence.DivergenceError):
-                self.load("defect: x\ndiverging_tests: []\nrationale: %s\n"
+                self.load("variant_of: good\ndefect: x\ndiverging_tests: []\nrationale: %s\n"
                           % value)
 
     def test_a_blank_list_is_refused_but_an_empty_one_is_not(self):
         with self.assertRaises(divergence.DivergenceError) as caught:
-            self.load("defect: x\ndiverging_tests:\nrationale: why\n")
+            self.load("variant_of: good\ndefect: x\ndiverging_tests:\nrationale: why\n")
         self.assertIn("explicit empty list", str(caught.exception))
 
     def test_a_list_that_is_not_a_list_is_refused(self):
         with self.assertRaises(divergence.DivergenceError):
-            self.load("defect: x\ndiverging_tests: alpha\nrationale: why\n")
+            self.load("variant_of: good\ndefect: x\ndiverging_tests: alpha\nrationale: why\n")
 
     def test_a_non_identifier_entry_is_refused(self):
         for entry in ("7", "''", "{}"):
             with self.assertRaises(divergence.DivergenceError):
-                self.load("defect: x\ndiverging_tests: [%s]\nrationale: why\n"
+                self.load("variant_of: good\ndefect: x\ndiverging_tests: [%s]\nrationale: why\n"
                           % entry)
 
     def test_a_repeated_entry_is_refused(self):
@@ -351,7 +355,7 @@ class TestExpectationLoads(WorkspaceCase):
 
     def test_broken_yaml_is_refused_naming_the_file(self):
         with self.assertRaises(divergence.DivergenceError) as caught:
-            self.load("defect: [unclosed\n")
+            self.load("variant_of: good\ndefect: [unclosed\n")
         self.assertIn(divergence.MARKER_NAME, str(caught.exception))
 
     def test_a_missing_file_is_refused(self):
@@ -394,6 +398,58 @@ class TestDiscovery(WorkspaceCase):
         (self.space.builds / "spare" / "out" / "image.bin").write_bytes(b"spare")
         self.space.variant("bent")
         self.assertEqual([v.name for v in self.discover()], ["bent"])
+
+    # -- which device a marker belongs to ---------------------------------
+    #
+    # One level can hold the builds of several devices. Sibling-hood alone made
+    # every marker on the level a variant of whatever device was under test,
+    # so a defective updater sitting beside the powertrain builds was offered
+    # to the BMS gate as a defective BMS.
+
+    def test_a_marker_for_another_device_is_excluded_and_named(self):
+        self.space.variant("bent", diverging=["alpha"])
+        self.space.variant("other-bent", variant_of="other")
+        (self.space.builds / "other").mkdir(parents=True, exist_ok=True)
+        variants, foreign = divergence.discover_declarations(
+            self.good, self.space.root)
+        self.assertEqual([v.name for v in variants], ["bent"])
+        self.assertEqual([(f.name, f.baseline_name) for f in foreign],
+                         [("other-bent", "other")])
+
+    def test_a_variant_of_naming_nothing_is_refused_in_every_gate(self):
+        # The failure this prevents is silent: a typo here belongs to no
+        # device, so no gate runs it and the proof disappears from all of them.
+        self.space.variant("bent")
+        self.space.variant("stray", variant_of="goob")
+        with self.assertRaises(divergence.DivergenceError) as caught:
+            self.discover()
+        message = str(caught.exception)
+        self.assertIn("goob", message)
+        self.assertIn("runs nowhere", message)
+
+    def test_a_marker_naming_itself_as_its_own_baseline_is_refused(self):
+        self.space.variant("bent", variant_of="bent")
+        with self.assertRaises(divergence.DivergenceError) as caught:
+            self.discover()
+        self.assertIn("defective copy of", str(caught.exception))
+
+    def test_variant_of_may_not_reach_outside_the_level(self):
+        self.space.variant("bent", variant_of="../good")
+        with self.assertRaises(divergence.DivergenceError) as caught:
+            self.discover()
+        self.assertIn("names ONE directory", str(caught.exception))
+
+    def test_a_level_where_nothing_names_this_device_is_refused(self):
+        # Not "no markers", which is already refused: markers exist here and
+        # every one of them is about somebody else. A clean report would claim
+        # a comparison that never happened.
+        (self.space.builds / "other").mkdir(parents=True, exist_ok=True)
+        self.space.variant("other-bent", variant_of="other")
+        with self.assertRaises(divergence.DivergenceError) as caught:
+            self.discover()
+        message = str(caught.exception)
+        self.assertIn("not one of them", message)
+        self.assertIn("other-bent", message)
 
     def test_no_marker_anywhere_is_refused_rather_than_reported_clean(self):
         with self.assertRaises(divergence.DivergenceError) as caught:
@@ -799,8 +855,8 @@ class FakeSuite:
 
 def variant_for(name, diverging, defect="one thing"):
     expectation = divergence.Expectation(
-        Path("%s/%s" % (name, divergence.MARKER_NAME)), defect, diverging,
-        "because")
+        Path("%s/%s" % (name, divergence.MARKER_NAME)), "good", defect,
+        diverging, "because")
     return divergence.Variant(name, Path(name), Path("%s/image.bin" % name),
                               "othersha", expectation)
 
@@ -1087,8 +1143,13 @@ class EndToEndCase(WorkspaceCase):
         self.space.manifest(["alpha", "beta", "gamma"])
 
     def run_gate(self, *extra):
+        # The workspace IS the project here: a node's elf path is resolved
+        # against the project root, which is the same distinction that made
+        # this gate unrunnable once the real project moved out of the
+        # repository root.
         argv = ["--tests", str(self.space.tests),
                 "--topology", str(self.space.topology_path),
+                "--project", str(self.space.root),
                 "--out", str(self.space.root / "out"),
                 "--workers", "3", "--require", "1"] + list(extra)
         stdout, stderr = io.StringIO(), io.StringIO()
@@ -1458,7 +1519,7 @@ class TestExpectationResolvesAgainstTheSuite(unittest.TestCase):
 
     def expectation(self, entries):
         return divergence.Expectation(
-            Path("nowhere.yml"), "a defect", entries, "why " * 20)
+            Path("nowhere.yml"), "good", "a defect", entries, "why " * 20)
 
     def test_an_exact_name_matches_only_itself(self):
         matched, barren = self.expectation(["alpha"]).resolve(

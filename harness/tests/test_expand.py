@@ -494,6 +494,108 @@ class TestBoundaryOmissionIsRefused(ExpandTestCase):
 # ---------------------------------------------------------------------------
 
 
+class TestSweptRange(ExpandTestCase):
+    """`through` declares two ends and the generator walks between them.
+
+    A typed list of readings is a claim about where the interesting ones are.
+    That is the right claim for a sweep that crosses a limit, and the wrong one
+    for a sweep whose expectation is `invariant`, where the product is a map and
+    a gap between two listed values is a stretch nobody looked at.
+
+    A range buys no leniency: the values it produces go through the same grid,
+    band and boundary-pair checks as a list somebody typed.
+    """
+
+    def plan_through(self, low, high, params=STRICT_PARAMS):
+        self.ws.pattern(STRICT_PATTERN).swept_scenario(
+            params=params,
+            sweep="  through: { from: %s, to: %s }\n" % (low, high))
+        return self.ws.plan()
+
+    def test_every_value_between_the_ends_is_a_variant(self):
+        plan = self.plan_through(548, 553)
+        sweep = plan.expansions[0].sweep
+        self.assertEqual([expand._axis_scalar(v) for v in sweep.values],
+                         [548, 549, 550, 551, 552, 553])
+        self.assertEqual(len(plan.tests), 6)
+
+    def test_the_ends_are_inclusive(self):
+        sweep = self.plan_through(550, 551).expansions[0].sweep
+        self.assertEqual([expand._axis_scalar(v) for v in sweep.values],
+                         [550, 551])
+
+    def test_the_expectations_still_flip_at_the_boundary(self):
+        plan = self.plan_through(549, 552)
+        sides = {t.id: t.provenance["expected"] for t in plan.tests}
+        self.assertEqual(sides, {
+            "thing-549": "legal", "thing-550": "legal",
+            "thing-551": "fault", "thing-552": "fault",
+        })
+
+    def test_a_range_is_not_a_default_and_says_so(self):
+        sweep = self.plan_through(548, 553).expansions[0].sweep
+        self.assertFalse(sweep.defaults_used)
+        self.assertEqual(
+            [expand._axis_scalar(v) for v in sweep.walked_range], [548, 553])
+
+    def test_the_manifest_records_the_range_and_the_count(self):
+        plan = self.plan_through(548, 553)
+        walked = plan.manifest()["expansions"][0]["walked_range"]
+        self.assertEqual(walked["from"], "548")
+        self.assertEqual(walked["to"], "553")
+        self.assertEqual(walked["step"], "1")
+        self.assertEqual(walked["variants"], 6)
+
+    def test_the_generated_file_says_it_was_walked_not_chosen(self):
+        plan = self.plan_through(548, 553)
+        header = [t for t in plan.tests if t.id == "thing-550"][0].text()
+        self.assertIn("WALKED BY THE GENERATOR", header)
+        self.assertIn("548", header)
+        self.assertIn("553", header)
+
+    def test_a_range_that_omits_the_boundary_pair_is_refused(self):
+        with self.assertRaises(expand.ExpandError) as caught:
+            self.plan_through(552, 556)
+        self.assertIn("boundary pair", str(caught.exception))
+
+    def test_an_end_off_the_grid_is_refused(self):
+        # The step is what the firmware can resolve. An end off it would put
+        # every value in the range off it too.
+        self.ws.pattern(NON_STRICT_PATTERN).swept_scenario(
+            pattern="window-elapsed", params=NON_STRICT_PARAMS,
+            sweep="  through: { from: 495ms, to: 501ms }\n")
+        with self.assertRaises(expand.ExpandError) as caught:
+            self.ws.plan()
+        self.assertIn("not on the axis", str(caught.exception))
+
+    def test_a_range_that_walks_backwards_is_refused(self):
+        with self.assertRaises(expand.ExpandError) as caught:
+            self.plan_through(553, 548)
+        self.assertIn("backwards", str(caught.exception))
+
+    def test_a_range_of_one_value_is_refused_as_a_list_in_disguise(self):
+        with self.assertRaises(expand.ExpandError) as caught:
+            self.plan_through(550, 550)
+        self.assertIn("one value", str(caught.exception))
+
+    def test_declaring_both_a_list_and_a_range_is_refused(self):
+        self.ws.pattern(STRICT_PATTERN).swept_scenario(
+            sweep="  values: [550, 551]\n"
+                  "  through: { from: 550, to: 551 }\n")
+        with self.assertRaises(expand.ExpandError) as caught:
+            self.ws.plan()
+        self.assertIn("both", str(caught.exception))
+
+    def test_a_range_may_not_carry_its_own_step(self):
+        # The step is the pattern's: it is what the firmware can tell apart,
+        # and one project widening it would walk an axis nothing can resolve.
+        self.ws.pattern(STRICT_PATTERN).swept_scenario(
+            sweep="  through: { from: 548, to: 553, step: 1 }\n")
+        with self.assertRaises(expand.ExpandError) as caught:
+            self.ws.plan()
+        self.assertIn("exactly the keys", str(caught.exception))
+
+
 class TestDefaultSweepValues(ExpandTestCase):
     """Absent values get the boundary pair plus a spread -- never silently.
 

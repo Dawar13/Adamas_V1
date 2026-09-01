@@ -54,6 +54,32 @@ it did so -- in the summary, in the manifest, and in the generated file's own
 header. Never silently.
 
 -----------------------------------------------------------------------------
+A LIST, A RANGE, OR NOTHING -- AND ALL THREE ARE RECORDED
+-----------------------------------------------------------------------------
+A scenario says where its variants go in one of three ways:
+
+    sweep.values   the readings to visit, chosen and typed out
+    sweep.through  the two ENDS; every representable value between them is a
+                   variant, on the step the pattern declares
+    neither        the boundary pair plus a small spread, generated
+
+`values` is right for a sweep that walks a limit: the boundary pair carries the
+discrimination and the rest is confirmation, so which further readings appear is
+a judgement worth writing down.
+
+`through` is for the sweep whose expectation is `invariant`, where there is no
+boundary and the product is a MAP -- which instants behaved and which did not. A
+typed list of ten instants says nothing about the instants between them, and the
+gaps in it were chosen by whoever typed it. Handing the ends to the generator
+removes the gaps and the choice at once.
+
+It buys no leniency. A range's values are checked against the grid, the
+indeterminate band and the boundary pair exactly as a typed list is, and the
+number of variants a range produces is a consequence of the pattern's step and
+the distance between the ends -- reported in the summary, the manifest and every
+generated file, and never a target to widen a range towards.
+
+-----------------------------------------------------------------------------
 BACKWARD COMPATIBILITY
 -----------------------------------------------------------------------------
 A scenario that declares its own steps and no swept dimension is already a test.
@@ -419,7 +445,8 @@ PATTERN_SWEEP_KEYS = {
 PARAMETER_KEYS = {"name", "type", "doc"}
 
 SCENARIO_KEYS = {"id", "title", "description", "steps", "pattern", "params", "sweep"}
-SCENARIO_SWEEP_KEYS = {"values", "at"}
+SCENARIO_SWEEP_KEYS = {"values", "through", "at"}
+SCENARIO_THROUGH_KEYS = {"from", "to"}
 
 _PLACEHOLDER = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
 
@@ -950,6 +977,7 @@ class ScenarioSource:
         "pattern_id",
         "raw_params",
         "raw_values",
+        "raw_through",
         "raw_at",
         "has_sweep_block",
         "steps",
@@ -1010,6 +1038,7 @@ class ScenarioSource:
                 )
 
         self.raw_values = None
+        self.raw_through = None
         self.raw_at = None
         if self.has_sweep_block:
             if not isinstance(sweep, dict):
@@ -1025,6 +1054,7 @@ class ScenarioSource:
                        ", ".join(sorted(SCENARIO_SWEEP_KEYS)))
                 )
             self.raw_values = sweep.get("values")
+            self.raw_through = sweep.get("through")
             self.raw_at = sweep.get("at")
             for key, value in (("values", self.raw_values), ("at", self.raw_at)):
                 if value is None:
@@ -1032,6 +1062,33 @@ class ScenarioSource:
                 if not isinstance(value, list) or not value:
                     raise ExpandError(
                         "%s: sweep.%s must be a non-empty list" % (self.source, key)
+                    )
+            if self.raw_values is not None and self.raw_through is not None:
+                raise ExpandError(
+                    "%s: the sweep declares both 'values' and 'through'. One says "
+                    "which readings to visit and the other says to visit every "
+                    "one between two ends; two answers to that is two sweeps "
+                    "wearing one name, and which one ran would be a property of "
+                    "this generator rather than of the file." % self.source
+                )
+            if self.raw_through is not None:
+                if not isinstance(self.raw_through, dict):
+                    raise ExpandError(
+                        "%s: sweep.through must be a mapping with %s"
+                        % (self.source,
+                           " and ".join(sorted(SCENARIO_THROUGH_KEYS)))
+                    )
+                if set(self.raw_through) != SCENARIO_THROUGH_KEYS:
+                    raise ExpandError(
+                        "%s: sweep.through needs exactly the keys %s; it has %s.\n"
+                        "The step between the ends is the PATTERN's to declare -- "
+                        "a range that carried its own step could walk an axis the "
+                        "firmware cannot resolve, which is what the pattern's step "
+                        "exists to prevent."
+                        % (self.source,
+                           ", ".join(sorted(SCENARIO_THROUGH_KEYS)),
+                           ", ".join(repr(k) for k in sorted(self.raw_through))
+                           or "nothing")
                     )
 
     def is_literal(self) -> bool:
@@ -1104,6 +1161,7 @@ class BoundarySweep:
         "band_high",
         "values",
         "defaults_used",
+        "walked_range",
     )
 
     def __init__(self, pattern: Pattern, params: dict, where: str):
@@ -1205,6 +1263,7 @@ class BoundarySweep:
 
         self.values = []
         self.defaults_used = False
+        self.walked_range = None
 
     # -- placing the variants ---------------------------------------------
 
@@ -1232,6 +1291,72 @@ class BoundarySweep:
         self._check_boundary_pair(seen, where)
         self.values = [seen[p] for p in sorted(seen)]
         self.defaults_used = False
+        return self.values
+
+    def positions_through(self, raw_through, where: str) -> list:
+        """Every representable value between two ends, inclusive.
+
+        A HAND-WRITTEN LIST IS A CLAIM ABOUT WHERE THE INTERESTING VALUES ARE.
+        -------------------------------------------------------------------
+        For a sweep that walks a limit that is fine: the interesting values are
+        the boundary pair, and the rest are confirmation. It is not fine for a
+        sweep whose expectation is `invariant`, where there is no boundary and
+        the answer is a MAP -- which instants behaved and which did not. A list
+        of ten instants chosen by hand cannot report anything about the instants
+        between them, and the gaps are chosen by whoever typed the list.
+
+        So the ends are the scenario's to declare and every value between them
+        is the generator's to produce, on the grid the PATTERN declares. That is
+        the same grid `positions_from` checks explicit values against, and the
+        values produced here go through exactly the same three checks -- the
+        grid, the indeterminate band, and the boundary pair -- because a
+        generated list has no more right to skip the boundary than a typed one.
+
+        The count is therefore a consequence of the pattern's step and the
+        distance between the ends, and it is reported. It is never a target: a
+        range widened to reach a number would be padding a report with variants
+        that all answer the same question.
+        """
+        limit_pos = _axis_scalar(self.limit)
+        step = abs(self.delta)
+        ends = {}
+        for key in ("from", "to"):
+            spot = "%s: sweep.through.%s" % (where, key)
+            value = _parse_typed(raw_through[key], _type_of(self.limit), spot)
+            position = _axis_scalar(value)
+            if position is None:
+                raise ExpandError(
+                    "%s: %s is not a position on the swept axis"
+                    % (spot, _text_of(value))
+                )
+            if (position - limit_pos) % step:
+                raise ExpandError(
+                    "%s: %s is not on the axis this sweep can represent.\n"
+                    "The smallest step here is %s, measured from %s = %s. An end "
+                    "off the grid would put every value in the range off it too."
+                    % (spot, _text_of(value), _text_of(self.step),
+                       self.parameter, _text_of(self.limit))
+                )
+            ends[key] = position
+
+        low, high = ends["from"], ends["to"]
+        if low >= high:
+            raise ExpandError(
+                "%s: sweep.through runs from %s to %s, which walks backwards or "
+                "not at all.\nA range that contains one value is one value: write "
+                "it as sweep.values, where it is visibly a choice."
+                % (where, _text_of(_axis_like(self.limit, low)),
+                   _text_of(_axis_like(self.limit, high)))
+            )
+
+        seen = {p: _axis_like(self.limit, p)
+                for p in range(low, high + step, step)}
+        self._check_grid(seen, where)
+        self._check_band(seen, where)
+        self._check_boundary_pair(seen, where)
+        self.values = [seen[p] for p in sorted(seen)]
+        self.defaults_used = False
+        self.walked_range = (self.values[0], self.values[-1])
         return self.values
 
     def default_positions(self) -> list:
@@ -1669,6 +1794,12 @@ class Plan:
                             for a in e.at_values]
                            if e.at_values else None),
                     "default_values_used": bool(e.sweep and e.sweep.defaults_used),
+                    "walked_range": (
+                        {"from": _text_of(e.sweep.walked_range[0]),
+                         "to": _text_of(e.sweep.walked_range[1]),
+                         "step": _text_of(e.sweep.step),
+                         "variants": len(e.sweep.values)}
+                        if e.sweep and e.sweep.walked_range else None),
                 }
                 for e in self.expansions
             ],
@@ -1790,16 +1921,21 @@ def _expand_one(scenario: ScenarioSource, patterns: dict,
     at_values = _bind_at(scenario, pattern)
 
     if pattern.sweep is None:
-        if scenario.has_sweep_block and scenario.raw_values is not None:
-            raise ExpandError(
-                "%s: pattern %r declares no swept dimension, so there is nothing "
-                "for sweep.values to vary" % (scenario.source, pattern.id)
-            )
+        for key, declared in (("values", scenario.raw_values),
+                              ("through", scenario.raw_through)):
+            if scenario.has_sweep_block and declared is not None:
+                raise ExpandError(
+                    "%s: pattern %r declares no swept dimension, so there is "
+                    "nothing for sweep.%s to vary"
+                    % (scenario.source, pattern.id, key)
+                )
         tests = [_pattern_test(scenario, pattern, params, None, None, None, net)]
         return Expansion(scenario, pattern, None, tests, at_values)
 
     sweep = BoundarySweep(pattern, params, scenario.source)
-    if scenario.raw_values is None:
+    if scenario.raw_through is not None:
+        sweep.positions_through(scenario.raw_through, scenario.source)
+    elif scenario.raw_values is None:
         sweep.default_positions()
     else:
         sweep.positions_from(scenario.raw_values, scenario.source)
@@ -1986,6 +2122,7 @@ def _literal_test(scenario: ScenarioSource) -> GeneratedTest:
         "expected": None,
         "at": None,
         "default_values_used": False,
+        "walked_range": None,
         "verbatim_copy": True,
     }
     test = GeneratedTest(scenario.id, scenario, None, None, scenario.text,
@@ -2087,6 +2224,12 @@ def _pattern_test(scenario, pattern, params, sweep, value, at,
         "at": _text_of(at_ms) if at is not None else None,
         "at_state": at.state if at is not None else None,
         "default_values_used": bool(sweep and sweep.defaults_used),
+        "walked_range": (
+            {"from": _text_of(sweep.walked_range[0]),
+             "to": _text_of(sweep.walked_range[1]),
+             "step": _text_of(sweep.step),
+             "variants": len(sweep.values)}
+            if sweep and sweep.walked_range else None),
         "verbatim_copy": False,
     }
     test = GeneratedTest(test_id, scenario, pattern, document, None, provenance,
@@ -2191,6 +2334,18 @@ def _pattern_header(scenario, pattern, sweep, value, at, side_name,
     if moment is not None and moment.state is not None:
         lines.append("# witnessed   the device reports %s at that instant"
                      % moment.state)
+    if sweep is not None and sweep.walked_range is not None:
+        lines += [
+            "#",
+            "# ONE OF %d VARIANTS WALKED BY THE GENERATOR. The scenario declared"
+            % len(sweep.values),
+            "# the two ends %s and %s; every representable value between them is"
+            % (_text_of(sweep.walked_range[0]),
+               _text_of(sweep.walked_range[1])),
+            "# a variant, on the pattern's own step of %s. Nobody chose the gaps,"
+            % _text_of(sweep.step),
+            "# because there are none.",
+        ]
     if sweep is not None and sweep.defaults_used:
         lines += [
             "#",
@@ -2404,6 +2559,14 @@ def report(plan: Plan, out, wrote: bool) -> None:
                       a.text() if a.state is None
                       else "%s (%s)" % (a.text(), a.state)
                       for a in expansion.at_values), file=out)
+        if sweep.walked_range is not None:
+            print(pad + "walked %s through %s on the pattern's step of %s -- "
+                        "every value"
+                  % (_text_of(sweep.walked_range[0]),
+                     _text_of(sweep.walked_range[1]),
+                     _text_of(sweep.step)), file=out)
+            print(pad + "between the ends is a variant, and there are %d of them."
+                  % len(sweep.values), file=out)
         if sweep.defaults_used:
             print(pad + "DEFAULT VALUES USED -- the scenario declared none, so "
                         "the boundary pair", file=out)

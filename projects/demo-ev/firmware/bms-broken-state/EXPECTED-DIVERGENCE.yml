@@ -9,6 +9,14 @@
 # firmware/bms-broken/EXPECTED-DIVERGENCE.yml for why.
 # =============================================================================
 
+# WHICH BUILD THIS IS A DEFECTIVE COPY OF
+# -----------------------------------------------------------------------------
+# The directory beside this one holding the good firmware. This level holds the
+# builds of more than one device, and sitting beside a build is not the same as
+# being a defective version of it -- without this line the gate for every device
+# on the level would be offered this binary as one of its own.
+variant_of: bms
+
 defect: under-voltage rule lost its state qualifier and fires in every state
 
 diverging_tests:

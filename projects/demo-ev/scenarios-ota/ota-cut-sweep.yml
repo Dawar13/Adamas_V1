@@ -4,10 +4,11 @@
 # THIS FILE IS PROJECT DATA. The shape comes from patterns/power-lost-during-
 # update.yml; everything below binds it to this device.
 #
-# The values are chosen to cross every phase the update has: before the erase
-# finishes, early in the payload, through the middle of it, and past the last
-# chunk where the header has been written and the image is complete. A sweep
-# that only sampled one phase would report a single answer many times.
+# The range crosses every phase the update has: before the erase finishes,
+# early in the payload, through the middle of it, and past the last chunk where
+# the header has been written and the image is complete. Nothing inside it is
+# skipped -- the ends are declared here and the generator walks between them, so
+# there is no instant this sweep passes over because nobody thought of it.
 
 id: ota-cut-sweep
 title: Power lost at each instant across a firmware update
@@ -30,7 +31,27 @@ params:
   return_window: 400ms
 
 sweep:
-  # Virtual milliseconds after the update is commanded. Measured, not guessed:
-  # a full update on this device takes about 8 ms of virtual time, so this walks
-  # from before the erase completes to past the final header write.
-  values: [1ms, 2ms, 3ms, 4ms, 5ms, 6ms, 7ms, 8ms, 9ms, 12ms]
+  # THE ENDS ARE THE CHOICE HERE, AND THE GENERATOR MAKES THE REST.
+  #
+  # This sweep's expectation is `invariant`: there is no boundary, and what it
+  # produces is a MAP of which instants leave a device that recovered. A typed
+  # list of ten instants reports nothing about the instants between them, and
+  # the gaps in such a list are chosen by whoever typed it. So only the two ends
+  # are declared, and every representable value between them is a variant, on
+  # the pattern's own step of 1 ms.
+  #
+  # THE ENDS ARE MEASURED. A full update on this device takes about 10 ms of
+  # virtual time -- 0 chunks written at 1 ms, 124 of 128 at 9 ms, complete with
+  # a valid header by 12 ms. `from` is the first instant after the update is
+  # commanded; `to` is far enough past completion that the plateau where the
+  # image is whole is walked rather than sampled once.
+  #
+  # WHY THIS IS SIXTEEN AND NOT FIVE HUNDRED. The step is the pattern's, and the
+  # pattern's step is 1 ms because `run_for` takes whole milliseconds by
+  # contract -- a finer step is refused by the duration parser rather than
+  # rounded. Cutting between two adjacent milliseconds is an instruction-
+  # addressed cut, which is §10.5's `run_to_instruction`, and it is not built.
+  # Sixteen is the whole of what this machinery can resolve across this update;
+  # widening the range past the plateau would add variants that all answer the
+  # same question.
+  through: { from: 1ms, to: 16ms }

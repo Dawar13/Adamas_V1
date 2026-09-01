@@ -3,11 +3,18 @@
 #
 #     ./scripts/check-divergence.sh [options passed to the gate]
 #
+# A project can hold more than one (topology, contract, scenarios) triple, and
+# each is its own gate over its own device. Name all three together or the gate
+# compares one world's suite against another world's bus:
+#
+#     ./scripts/check-divergence.sh #         --scenarios <project>/scenarios-<other>  --tests .generated/<other> #         --topology  <project>/network-<other>.yml #         --contract  <project>/catalog-<other>.yml
+#
 # THIS SCRIPT CONTAINS NO PROJECT DATA. No identifier, threshold, node name,
 # board name, symbol name, directory name or peripheral name appears below.
 # Which node is under test comes from the topology; which builds are defective
-# comes from the marker file each defective build carries; which tests exist
-# comes from the expansion manifest.
+# comes from the marker file each defective build carries, INCLUDING which
+# device each one is defective with respect to; which tests exist comes from
+# the expansion manifest.
 #
 # WHAT IT PROVES
 #   That a verdict comes from executing the binary, and not from replaying a
@@ -22,9 +29,14 @@
 #      the suite the generator currently produces and not a stale copy;
 #   2. runs every test against the good binary -- this arm IS a full suite run,
 #      over every test the manifest declares;
-#   3. runs every test again against each declared defective build, by copying
-#      the topology and repointing the device under test's binary. The
-#      repository's own topology file is never modified;
+#   3. runs every test again against each declared defective build -- each one
+#      being a build whose marker names THIS device under test's own build
+#      directory as the thing it is defective with respect to. A level that
+#      holds the builds of several devices therefore hands each gate its own
+#      markers and nobody else's, and the ones belonging elsewhere are named in
+#      the report rather than dropped. The arm is run by copying the topology
+#      and repointing the device under test's binary; the repository's own
+#      topology file is never modified;
 #   4. asserts the verdict sets DIFFER, and that the tests that differ are
 #      EXACTLY the ones documented beside that binary. Divergence in an
 #      undocumented test fails the run rather than being absorbed: it means
@@ -79,7 +91,17 @@ usage() {
 	    --coverage         trace the baseline arm and report coverage beside
 	                       the discrimination, joined to this run's record
 
+	  Options this script acts on, because expansion and comparison have to
+	  agree about which suite is being run:
+	    --scenarios DIR    the scenarios to expand (default: the project's own)
+	    --tests DIR        where the expansion lands and what the gate compares
+
 	  Useful options, passed straight to the gate:
+	    --topology F       a topology other than the project's own
+	    --contract F       the contract that topology's frames are described
+	                       by. A topology and its contract are one world, so
+	                       moving one without the other compiles every test
+	                       against the wrong description of the bus
 	    --list             print the plan and execute nothing
 	    --workers N        concurrent tests (default: derived from this host)
 	    --reuse            reuse a result whose recorded binary and test hashes
@@ -98,11 +120,40 @@ expand=1
 coverage=0
 out=""
 take_out=0
+# The scenarios to expand, and where the expansion lands. Both default to the
+# project's own, and both are named here rather than only forwarded: the gate
+# must compare the suite that was just expanded, and a script that expanded one
+# directory and pointed the gate at another would report a gate held over tests
+# nothing regenerated.
+scenarios=""
+take_scenarios=0
+take_tests=0
+# Remembered as well as forwarded: the topology decides which entry-point texts
+# the generated tests wait for, so the expansion has to be made for the same
+# topology the gate is about to run.
+topology=""
+take_topology=0
 forwarded=()
 for argument in "$@"; do
 	if [ "$take_out" -eq 1 ]; then
 		out="$argument"
 		take_out=0
+		forwarded+=("$argument")
+		continue
+	fi
+	if [ "$take_scenarios" -eq 1 ]; then
+		scenarios="$argument"
+		take_scenarios=0
+		continue
+	fi
+	if [ "$take_tests" -eq 1 ]; then
+		tests_dir="$argument"
+		take_tests=0
+		continue
+	fi
+	if [ "$take_topology" -eq 1 ]; then
+		topology="$argument"
+		take_topology=0
 		forwarded+=("$argument")
 		continue
 	fi
@@ -113,6 +164,26 @@ for argument in "$@"; do
 			;;
 		--no-expand)
 			expand=0
+			;;
+		--scenarios)
+			take_scenarios=1
+			;;
+		--scenarios=*)
+			scenarios="${argument#--scenarios=}"
+			;;
+		--tests)
+			take_tests=1
+			;;
+		--tests=*)
+			tests_dir="${argument#--tests=}"
+			;;
+		--topology)
+			take_topology=1
+			forwarded+=("$argument")
+			;;
+		--topology=*)
+			topology="${argument#--topology=}"
+			forwarded+=("$argument")
 			;;
 		--coverage)
 			coverage=1
@@ -190,7 +261,10 @@ cd "$repo" || exit 2
 if [ "$expand" -eq 1 ]; then
 	echo ""
 	echo "--- expanding the scenarios ---"
-	if ! "${python_cmd[@]}" "$generator" --out "$tests_dir"; then
+	generate=("$generator" --out "$tests_dir")
+	[ -n "$scenarios" ] && generate+=(--scenarios "$scenarios")
+	[ -n "$topology" ] && generate+=(--topology "$topology")
+	if ! "${python_cmd[@]}" "${generate[@]}"; then
 		echo "" >&2
 		echo "ERROR: expansion failed, so there is no suite to compare." >&2
 		echo "" >&2

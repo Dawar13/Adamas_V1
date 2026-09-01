@@ -1,0 +1,58 @@
+# What this defective build is expected to change, and nothing else.
+# =============================================================================
+# Written from the divergence gate's own report. The list below is OBSERVED,
+# never predicted: the gate ran the whole OTA suite against this binary and
+# against the good one and recorded which verdicts moved.
+#
+# The gate fails if the observed set differs from this list in EITHER direction.
+# An entry may name one test or a family of them; see
+# firmware/bms-broken/EXPECTED-DIVERGENCE.yml for why, and for why a wildcard
+# cannot absorb a surprise.
+# =============================================================================
+
+# WHICH BUILD THIS IS A DEFECTIVE COPY OF
+# -----------------------------------------------------------------------------
+# The updater, not a powertrain node. This line is the whole reason this file
+# can exist here at all: the level it sits on holds the BMS builds too, and
+# until the gate read a declared baseline, dropping this marker beside them
+# offered a defective updater to the BMS gate as a defective BMS.
+variant_of: updater
+
+defect: the image header is written before the payload it vouches for
+
+diverging_tests:
+  # ONE test, and that is the finding rather than a shortfall. Every other test
+  # in this suite reaches its verdict through expect_boots, and the boot verdict
+  # cannot tell these two firmwares apart.
+  - ota-header-written-last
+
+rationale: |
+  Both firmwares refuse the image at the next boot after an interrupted update.
+  The good one refuses it because there is no header yet; this one refuses it
+  because the header's CRC cannot match a payload that is not all there. The
+  device comes back, judges its own flash, and comes to rest in both cases, so
+  every variant of `ota-cut-sweep` passes against BOTH binaries and so does
+  `ota-power-cut`. A suite built only on expect_boots reports a clean sweep for
+  a firmware that leaves a valid-looking header over a half-written image.
+
+  What differs is what is IN the flash at the instant power is lost, and
+  `ota-header-written-last` is the one test that looks. It cuts mid-payload and
+  requires the header word to still be erased; against this binary it is already
+  written. That single test is the entire argument for `expect_flash` shipping
+  beside `expect_boots` rather than being implied by it.
+
+  THE GATE REPORTS THIS AS A WARNING, AND IT SHOULD. One test carrying a whole
+  proof is the fragility the gate exists to make visible, and it is visible here
+  rather than absorbed into a headline. The honest way to strengthen it is a
+  second scenario that inspects the flash at a different instant of the same
+  update -- never a second assertion bolted onto this one, which would still be
+  one test.
+
+  IF THE OBSERVED SET GROWS, the extra entry is the thing to investigate. This
+  build differs from the good updater in the ORDER of two writes and in nothing
+  else, so a verdict moving anywhere that does not inspect flash contents would
+  mean either a second defect or something non-deterministic leaking into a run.
+
+  IF IT SHRINKS TO NOTHING, the suite has lost its only sight of what an
+  interrupted update leaves behind, and the gate reports a build caught by
+  nothing -- which is the most valuable finding it can produce.

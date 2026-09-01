@@ -1524,88 +1524,317 @@ untouched: changing it would change what every existing scenario asserts.
 
 207 µs after the arm, and 1392 bytes of a previous life discarded.
 
+### The 90-test suite was re-run, and the divergence gate with it
+
+Stage A said the compiled scripts were identical before and after the OTA work.
+That is a strong statement about the **compiler** and says nothing about the
+judge, the event-log parser or the results writer, all of which run after the
+emulator does. So the suite was run.
+
+```
+  90 of 90 passed across 4 shard(s)
+  firmware: bms 1b4fa4b6159f, charger f184762a62c1, vcu 7bc621120b65
+  stored as projects/demo-ev/runs/2026-09-01-0843
+```
+
+Four shards of 23, 23, 22, 22, at 4m 46s, 4m 45s, 4m 44s and 4m 26s on four
+workers each.
+
+Then the whole thing again through the gate, which runs the suite once against
+the good binary and once against each defective build. **The three defective BMS
+builds were not compiled on this machine and had to be built** — the gate refuses
+a declared variant with no binary rather than skipping it, which is how that was
+discovered rather than quietly passed over.
+
+```
+  DISCRIMINATION · 90 tests · 3 defective binaries
+
+  bms-broken          caught by 4 of 90   ok
+  bms-broken-latch    caught by 17 of 90  ok
+  bms-broken-state    caught by 5 of 90   ok
+
+  not run here -- declared beside this device, defective with respect
+  to another. Each is a variant in that device's own gate:
+      updater-broken           a defective updater
+
+  gate held · 3 of 3 documented divergences observed exactly · 0 warnings
+```
+
+Baseline arm 1058 s, green, over all 90. Every documented divergence observed
+exactly, in both directions, and `updater-broken` named as belonging to the other
+gate rather than silently absent from this one.
+
+**912 unit tests green** — the 895 that existed, plus 12 for the swept range and
+5 for which device a marker belongs to.
+
 ### The demo
 
-Ten cut points across one update, plus the hand-written scenario. **11 of 11
-passed in 55 s** on four workers.
+Sixteen cut points across one update, plus the two hand-written scenarios.
+**18 of 18 passed** against the good updater.
+
+The cut points are not a list any more. The scenario declares two ends and the
+generator walks every value between them on the pattern's own 1 ms step, so
+there is no instant in that range the sweep passes over because nobody thought
+of it:
+
+```yaml
+sweep:
+  through: { from: 1ms, to: 16ms }
+```
 
 | cut at | chunks written | boots | what the device said about its flash |
 |---|---|---|---|
-| 1 ms | 0 | yes | INVALID no-header, magic=`00000000` (erase not finished) |
-| 2 ms | 0 | yes | INVALID no-header, magic=`00000000` |
-| 3 ms | 9 | yes | INVALID no-header, magic=`ffffffff` (erased) |
-| 4 ms | 28 | yes | INVALID no-header |
-| 5 ms | 48 | yes | INVALID no-header |
-| 6 ms | 67 | yes | INVALID no-header |
-| 7 ms | 86 | yes | INVALID no-header |
-| 8 ms | 105 | yes | INVALID no-header |
-| 9 ms | 124 | yes | INVALID no-header |
-| 12 ms | 128 | yes | **VALID** length=4096 crc=`c2401773` |
+| 1 ms | 0 | yes | INVALID `no-header`, magic=`00000000` (erase not finished) |
+| 2 ms | 0 | yes | INVALID `no-header`, magic=`00000000` |
+| 3 ms | 9 | yes | INVALID `no-header`, magic=`ffffffff` (erased) |
+| 4 ms | 28 | yes | INVALID `no-header` |
+| 5 ms | 47 | yes | INVALID `no-header` |
+| 6 ms | 67 | yes | INVALID `no-header` |
+| 7 ms | 86 | yes | INVALID `no-header` |
+| 8 ms | 105 | yes | INVALID `no-header` |
+| 9 ms | 124 | yes | INVALID `no-header` |
+| 10 ms | 128 | yes | **VALID** length=4096 crc=`c2401773` |
+| 11 ms | 128 | yes | **VALID** |
+| 12 ms | 128 | yes | **VALID** |
+| 13 ms | 128 | yes | **VALID** |
+| 14 ms | 128 | yes | **VALID** |
+| 15 ms | 128 | yes | **VALID** |
+| 16 ms | 128 | yes | **VALID** |
 
-Ten of ten recovered — every one booted and told the truth about what it held.
-That is the correct answer for an updater that writes its header last, and the
-console shows the cut mid-sentence: `ota chunk 67/12` and then a fresh banner.
+Sixteen of sixteen recovered — every one booted and told the truth about what it
+held. The console shows the cut mid-sentence: `ota chunk 67/12` and then a fresh
+banner.
 
-Determinism: the same cut point run twice produced byte-identical event logs and
-identical results.
+**The walked range answered a question the list could not.** The ten hand-picked
+instants stepped 9 ms → 12 ms, so "when does the update actually finish" had no
+answer between them; the report simply said complete by 12 ms. Walking every
+millisecond puts the transition **between 9 ms and 10 ms** — 124 of 128 chunks at
+9 ms, whole and CRC-valid at 10 — and then walks six more points across the
+plateau rather than sampling it once.
 
-### Why `expect_flash` exists, demonstrated rather than argued
+**Determinism, across sessions and across a code change.** Every cut point this
+sweep shares with the earlier ten-point run produced the identical chunk count,
+weeks apart, on either side of the generator change: 9, 28, 47, 67, 86, 105, 124,
+128. (The earlier table in this document said 48 at 5 ms. The run said 47 then
+and says 47 now — the table was mistyped, the emulator was not.)
 
-Run the same ten cut points against `updater-broken` and **it also passes 11 of
-11.** Both firmwares refuse the image at the next boot — one because there is no
-header, the other because the header's CRC cannot match a payload that is not
-all there:
-
-| cut at | GOOD updater | BROKEN updater |
-|---|---|---|
-| 5 ms | INVALID `no-header` magic=`ffffffff` | INVALID `crc-mismatch` stored=`c2401773` |
-| 9 ms | INVALID `no-header` magic=`ffffffff` | INVALID `crc-mismatch` stored=`c2401773` |
-
-**The boot verdict cannot tell them apart.** What differs is what is left in
-flash, and `expect_flash` is the verb that sees it. One scenario,
-`ota-header-written-last`, run against both binaries:
+**Why sixteen and not five hundred.** The step is the pattern's, and the
+pattern's step is 1 ms because `run_for` takes whole milliseconds *by contract*.
+That is measured, not assumed — a pattern step of `100us` is refused before
+anything runs:
 
 ```
-good    verdict=PASS    expect_flash PASS   expect_boots PASS
-broken  verdict=FAIL    expect_flash FAIL   expect_boots PASS
+REFUSED: a duration reaching the emitted document: 1100us is not a whole number
+of milliseconds, and every window and deadline in the verbs is stated in
+milliseconds. A rounded window is a silently different deadline.
 ```
 
-That is the whole argument for `expect_flash` shipping beside `expect_boots`
-rather than being implied by it.
+Cutting between two adjacent milliseconds is an instruction-addressed cut —
+§10.5's `run_to_instruction`, still not built. Sixteen is the whole of what this
+machinery can resolve across an update that takes ten milliseconds, and widening
+the range further would add variants that all answer the same question. The
+number in PROJECT-V2 §1.6 remains a target this does not reach, and the reason is
+now a named missing verb rather than wall clock.
 
-`expect_boots` has its own negative control: a scenario that cuts power and never
-restores it **fails** with *"nothing matched within the window"*, so the
-assertion is one that can fail.
+### `through`: the ends are the choice, the values are the generator's
+
+A scenario says where its variants go in one of three ways, and all three are
+recorded in the summary, the manifest and every generated file:
+
+| | |
+|---|---|
+| `sweep.values` | the readings to visit, chosen and typed out |
+| `sweep.through` | the two **ends**; every representable value between them is a variant |
+| neither | the boundary pair plus a spread, generated and marked as nobody's choice |
+
+`values` is right for a sweep that walks a limit: the boundary pair carries the
+discrimination and everything further out is confirmation, so which readings
+appear is a judgement worth writing down. `through` is for the sweep whose
+expectation is `invariant`, where there is no boundary and the product is a
+**map** — a typed list of ten instants says nothing about the instants between
+them, and the gaps in it were chosen by whoever typed the list.
+
+**A range buys no leniency.** Its values go through the same three checks an
+explicit list does — the grid, the indeterminate band, and the boundary pair —
+and each refusal is exercised by a test:
+
+```
+sweep.through.from: 1500us is not on the axis this sweep can represent.
+sweep.through runs from 16ms to 1ms, which walks backwards or not at all.
+sweep.through needs exactly the keys from, to; it has 'from', 'step', 'to'.
+the sweep declares both 'values' and 'through'.
+the sweep omits the boundary pair, so it is refused.
+```
+
+The step stays the pattern's. A range carrying its own step could walk an axis
+the firmware cannot resolve, which is the one thing the pattern's step exists to
+prevent.
+
+### `updater-broken` is in the divergence gate, and one line made that possible
+
+It was outside the gate because a build became a defective variant by *sitting
+beside* the device under test's own build directory — and this project's
+`firmware/` level holds the powertrain nodes and the updater together. Dropping a
+marker beside them offered `updater-broken` to the BMS gate as a defective BMS: a
+binary no BMS test can distinguish, correctly reported as a **gap**, for a
+comparison nobody asked for.
+
+So a marker now names the build it is defective **with respect to**:
+
+```yaml
+variant_of: updater
+```
+
+A directory, not a node id, because a directory can be checked. Three refusals
+fall out of that, and each closes a way the proof could have disappeared quietly:
+
+- a `variant_of` naming nothing at this level is **refused in every gate on the
+  level** — a typo would otherwise belong to no device, be run by nobody, and
+  read exactly like a marker that was never written;
+- a marker naming itself as its own baseline is refused;
+- a level where markers exist and **none** of them names this device is refused,
+  rather than reported as a clean run of zero comparisons.
+
+A marker for another device is not run here and is **named in the report and in
+the record**, so every marker on a level is accounted for by exactly one gate
+instead of quietly by none:
+
+```
+  not run here -- declared beside this device, defective with respect
+  to another. Each is a variant in that device's own gate:
+      bms-broken               a defective bms
+      bms-broken-latch         a defective bms
+      bms-broken-state         a defective bms
+```
+
+`network-ota-broken.yml` is **deleted**. It existed only because the gate could
+not express this, and a second way to make the same comparison is a second source
+of truth about what was proved.
+
+### The gate's answer, which is the argument for `expect_flash`
+
+```
+  DISCRIMINATION · 18 tests · 1 defective binary
+
+  updater-broken      caught by 1 of 18  WARNING  ota-header-written-last
+
+      ota-header-written-last  PASS -> FAIL
+          the header is still erased while the payload is being written
+            -> nothing matched within the window
+
+  gate held · 1 of 1 documented divergence observed exactly · 1 warning
+```
+
+**Caught by one test of eighteen, and that is the finding rather than a
+shortfall.** Every other test in the suite reaches its verdict through
+`expect_boots`, and the boot verdict cannot tell these two firmwares apart —
+measured now at every one of the sixteen cut points, not at two of them:
+
+| cut at | GOOD updater | BROKEN updater | boots |
+|---|---|---|---|
+| 1–3 ms | INVALID `no-header` | INVALID `no-header` | both |
+| 4–9 ms | INVALID `no-header` | INVALID `crc-mismatch` | both |
+| 10–16 ms | VALID | VALID | both |
+
+Both refuse the image; both come back; both come to rest. Sixteen variants that
+disagree about nothing. What differs is what is **in the flash** at the instant
+power is lost, and `ota-header-written-last` is the one test that looks. That
+single test is the whole argument for `expect_flash` shipping beside
+`expect_boots` rather than being implied by it — and the gate reports it as a
+WARNING, because one file carrying a whole proof is exactly the fragility the
+gate exists to make visible.
+
+The honest way to strengthen it is a second scenario that inspects the flash at a
+different instant of the same update. Not a second assertion bolted onto this
+one, which would still be one test.
+
+### Three defects the gate had been hiding behind
+
+None was found by reasoning. All three were found by running something that had
+not been run.
+
+**The gate had been unrunnable since the project moved.** `divergence.py`
+resolved the device under test's binary against the *repository* root, while a
+node's `elf:` is relative to the **project**. Since `projects/demo-ev/` exists,
+every invocation died with:
+
+```
+ERROR: the device under test's binary is not built: firmware/bms/build/zephyr/zephyr.elf
+```
+
+A true sentence about a path nothing writes to. Fixed, and `--project` — the flag
+every other entry point already had — now exists here too.
+
+**The repointed topology wrote the wrong kind of path.** `repoint_topology` wrote
+the variant's binary relative to the repository, and the engine then resolved it
+against the project a second time:
+
+```
+ERROR: topology node 'updater': no binary at
+  .../projects/demo-ev/projects/demo-ev/firmware/updater-broken/build/zephyr/zephyr.elf
+```
+
+Doubled. It now writes a project-relative path, which is what the topology format
+means.
+
+**The gate could not carry a contract.** It accepted `--topology` but had no
+`--contract`, so pointing it at a second world compiled every test in that world
+against the first world's bus and the engine refused all eighteen:
+
+```
+ERROR: catalog message 0x600 (bms_status): sender 'bms' is not a node in
+network-ota.yml; known nodes are updater
+```
+
+A topology and the contract its frames are described by are one world.
+`--contract` now exists on the gate, and `scripts/check-divergence.sh` takes
+`--scenarios` and `--tests` beside it, so a second world's gate is one command
+rather than a sequence somebody has to get right:
+
+```
+./scripts/check-divergence.sh \
+    --scenarios projects/demo-ev/scenarios-ota  --tests .generated/ota \
+    --topology  projects/demo-ev/network-ota.yml \
+    --contract  projects/demo-ev/catalog-ota.yml --require 1
+```
 
 ### Nothing that already existed changed
 
-The OTA work is a second (topology, contract, scenarios) triple beside the
-first, not an addition to it. Adding the updater to `network.yml` would have put
-a fourth machine into every existing test, and putting `ota_status` into
+The OTA work is a second (topology, contract, scenarios) triple beside the first,
+not an addition to it. Adding the updater to `network.yml` would have put a
+fourth machine into every existing test, and putting `ota_status` into
 `catalog.yml` would have broken that file's own rule that every sender is a node
 in the topology.
 
-All 90 existing tests compile **byte-for-byte identically** before and after
-this work (`scripts/compiled-snapshot.py`). 895 unit tests green.
+All 90 existing tests compile **byte-for-byte identically** before and after the
+OTA work (`scripts/compiled-snapshot.py`).
+
+The generator change is checked the same way and more directly: the previous
+`expand.py` and this one were both run over the powertrain scenarios into
+separate directories, and **all 90 generated test files are byte-identical**.
+The only difference anywhere is one key in the expansion manifest —
+`"walked_range": null` beside `"default_values_used"` on every scenario that
+declares no range. Adding a way to place variants did not move a variant that
+was already placed.
 
 ### What has NOT been run
 
-- **The full 90-test suite since this work.** Stage A shows the compiled scripts
-  are identical, which is a strong statement about the compiler and says nothing
-  about the judge; the suite has not been re-run to confirm the verdicts.
-- **`updater-broken` in the divergence gate.** It is exercised by a direct
-  comparison instead. The gate discovers defective builds as siblings of the
-  device under test's own directory, and the powertrain firmwares already occupy
-  that level — wiring this in beside them would offer `updater-broken` to the
-  BMS gate as a defective BMS.
 - **Instruction-exact cutting.** `Step N` was proven exact in the spike, and the
   verbs cut on virtual time instead. An instruction-addressed cut is what §10.5's
-  `run_to_instruction` is for and it is not built.
+  `run_to_instruction` is for and it is not built — and it is now the named
+  reason the cut sweep is sixteen points rather than hundreds, rather than a
+  loose ambition.
 - **`reset`, `brownout`, `power_restore` without a preceding cut.** Three of
   §10.5's five power verbs are not built; the two that unlock the wedge are.
-- **A sweep of the size the demo script quotes.** Ten cut points, not five
-  hundred. Nothing prevents five hundred except wall clock; the number in
-  PROJECT-V2 §1.6 is a target and this is not it.
+- **A second test that inspects the flash.** `updater-broken` is caught by
+  exactly one test, and the gate says so as a WARNING on its own line. One file
+  carries that whole proof.
+- **The OTA gate is not wired into any scheduled run.** It is one command and it
+  holds, but nothing calls it on a schedule the way `check-divergence.sh` with no
+  arguments is called for the powertrain suite. A proof that runs only when
+  somebody types it is a proof that can stop happening.
+- **Coverage over the OTA arm.** `--coverage` joins coverage to a gate record and
+  was not asked for on this run.
 
 ## Known findings
 
