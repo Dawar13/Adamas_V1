@@ -1,0 +1,42 @@
+# ota-header-written-last — the assertion the boot verdict cannot make.
+#
+# THIS FILE IS PROJECT DATA.
+#
+# Interrupted partway through, BOTH the good updater and updater-broken refuse
+# the image at the next boot: one because there is no header, the other because
+# the header's CRC cannot match a payload that is not all there. Their boot
+# verdicts are identical, and a suite built only on expect_boots reports eleven
+# passes for both.
+#
+# The difference is in the flash. A device that writes the header last leaves
+# that word ERASED while the payload is going down; one that writes it first
+# leaves a header claiming a complete image. expect_flash is what sees it, and
+# this scenario is why that verb exists rather than being implied by
+# expect_boots.
+#
+# The address is the start of the slot the board's own devicetree declares
+# (slot1_partition, "image-1", at flash offset 0x80000).
+
+id: ota-header-written-last
+title: The image header must not appear before the image
+description: >
+  Power is lost partway through an update, while payload chunks are still being
+  written. At that instant the header must still be erased: a header present
+  before the payload it vouches for is a claim the flash cannot support.
+
+steps:
+  - wait_uart: { node: updater, text: "updater ready", timeout_ms: 400 }
+  - write_symbol: { node: updater, symbol: g_ota_command, value: 1 }
+
+  # Mid-payload: past the erase, well short of the last chunk.
+  - run_for: { ms: 6 }
+  - power_cut: updater
+
+  - expect_flash:
+      node: updater
+      address: 0x08080000
+      equals: "ffffffff"
+      label: "the header is still erased while the payload is being written"
+
+  - power_restore: updater
+  - expect_boots: { node: updater, within_ms: 400, label: "and it still boots" }

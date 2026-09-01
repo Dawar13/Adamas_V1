@@ -1,0 +1,42 @@
+# network-ota-broken.yml — the same device, with one defect in its firmware
+#
+# Identical to network-ota.yml except for the binary it points at. The defect
+# is in the firmware, not here: updater-broken writes the header that vouches
+# for an image BEFORE writing the image.
+#
+# It is a topology of its own rather than an entry in the divergence gate
+# because that gate discovers defective builds as SIBLINGS of the device under
+# test's own directory, and the powertrain firmwares already occupy that level.
+# Wiring this in beside them would offer updater-broken to the BMS gate as a
+# defective BMS. The comparison is made directly instead, and STATUS.md says so.
+# =============================================================================
+# THIS FILE IS PROJECT DATA, NOT ENGINE CODE.
+#
+# One node on one bus. That is not a simplification of the powertrain topology;
+# it is the shape of the problem these scenarios are about. A device losing
+# power partway through installing its own firmware is a question about that
+# device, and adding peers would add machines to boot without adding anything
+# to the question.
+#
+# It is a second topology beside network.yml rather than an addition to it, so
+# that the six-node suite is untouched by this work — checked by compiling all
+# ninety of its tests before and after and requiring the scripts to be
+# byte-identical.
+# =============================================================================
+
+buses:
+  - { id: ota, type: can, bitrate: 500000 }
+
+nodes:
+
+  - id: updater
+    type: real
+    dut: true
+    board: ota_ecu
+    elf: firmware/updater-broken/build/zephyr/zephyr.elf
+    # What this firmware prints once it is up. expect_boots reads it from HERE
+    # rather than from a scenario, so no scenario can weaken a boot check by
+    # quoting a shorter string.
+    boot_text: "updater ready"
+    buses: [ota]
+    position: { x: 0, y: 0 }

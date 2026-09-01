@@ -1,0 +1,52 @@
+# power_cut -- PROJECT-V2 section 10.2. This file IS the verb: its arguments,
+# its refusals and their exact words, and its documentation.
+verb: power_cut
+class: power
+summary: Stop the device dead. Keep flash, lose RAM, hold it powered off
+args:
+  node:
+    type: node_ref
+    required: true
+    must_be: real
+    doc: the device losing power
+bare_arg: node
+applies_to: [real]
+requires_capabilities: [power_control]
+emits: STIM
+handler: power_cut
+doc: |
+  The verb the bootloader and OTA family rests on. It stops execution at this
+  instant, wipes every RAM region the board declares, resets the machine, and
+  holds the core halted until power_restore.
+
+  IT IS NOT A RESET, AND THE DIFFERENCE IS MEASURED RATHER THAN ASSERTED. A
+  reset leaves memory alone -- writing a sentinel into RAM, resetting, and
+  reading it back returns the sentinel. That is correct behaviour for a reset
+  and wrong for a power failure, so the RAM is wiped explicitly and `reset`
+  stays a different verb.
+
+  NOTHING IS RELOADED. What the device holds afterwards is exactly what it had
+  finished writing to flash. A restore path that re-loaded the binary would
+  heal every corrupted image and report that every cut point recovered, which
+  is the most flattering possible lie a test like this could tell.
+
+  The regions to wipe come from the board file, like every other address. A
+  board that declares none is refused: a power cut that wiped nothing would
+  leave RAM intact across the cut, and the scenario would report PASS having
+  tested a warm reset.
+refusals:
+  - if: node_is_scripted
+    exit: 2
+    message: |-
+        node {node!r} is a frame player, so it has no power to cut. There is no core, no RAM and no flash behind a player.
+          To model a device losing power here, give the node firmware (type: real) in the topology file. No scenario changes.
+  - if: board_names_no_core
+    exit: 2
+    message: |-
+        board {board!r} does not name the core, so there is nothing to stop. Add   cpu_peripheral: <name>   to that board in {boards_file}.
+  - if: board_names_no_ram
+    exit: 2
+    message: |-
+        board {board!r} declares no RAM regions, so a power cut here would wipe nothing and leave every byte of state intact across it.
+          Add   ram_regions: [{{ base: <hex>, size: <hex> }}, ...]   to that board in {boards_file}.
+          The engine must not guess where a customer's part keeps its RAM: a guess that wiped nothing would turn every power_cut into a warm reset, and the scenario would still report PASS.

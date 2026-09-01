@@ -1,0 +1,15 @@
+# Symbols the harness may write into this node's running memory.
+#
+# Read twice from this one file: CMakeLists.txt turns each into
+# -Wl,--undefined=<sym> so the linker cannot garbage-collect it, and
+# scripts/build-firmware.sh asserts each name is present in the built ELF.
+#
+# g_ota_command is the ONE the harness writes. The rest are read back by
+# expect_symbol, and every one of them is genuinely written by the firmware on
+# its own path -- a retained address with nothing behind it would be only
+# marginally better than no symbol at all.
+
+g_ota_command
+g_ota_state
+g_ota_chunks_written
+g_ota_image_valid

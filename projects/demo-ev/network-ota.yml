@@ -1,0 +1,32 @@
+# network-ota.yml — the device that writes its own flash
+# =============================================================================
+# THIS FILE IS PROJECT DATA, NOT ENGINE CODE.
+#
+# One node on one bus. That is not a simplification of the powertrain topology;
+# it is the shape of the problem these scenarios are about. A device losing
+# power partway through installing its own firmware is a question about that
+# device, and adding peers would add machines to boot without adding anything
+# to the question.
+#
+# It is a second topology beside network.yml rather than an addition to it, so
+# that the six-node suite is untouched by this work — checked by compiling all
+# ninety of its tests before and after and requiring the scripts to be
+# byte-identical.
+# =============================================================================
+
+buses:
+  - { id: ota, type: can, bitrate: 500000 }
+
+nodes:
+
+  - id: updater
+    type: real
+    dut: true
+    board: ota_ecu
+    elf: firmware/updater/build/zephyr/zephyr.elf
+    # What this firmware prints once it is up. expect_boots reads it from HERE
+    # rather than from a scenario, so no scenario can weaken a boot check by
+    # quoting a shorter string.
+    boot_text: "updater ready"
+    buses: [ota]
+    position: { x: 0, y: 0 }

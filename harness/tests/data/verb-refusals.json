@@ -1,4 +1,11 @@
 {
+  "expect_boots": {
+    "node_declares_no_banner": "test-scenario.yml: step 1: node 'updater' declares no boot_text in the topology, so there is nothing that would prove it came back.\n  Add   boot_text: \"<the line this firmware prints once it is up>\"   to that node in the topology file.\n  The engine must not guess: a boot check that matched nothing would pass the moment the window closed, and a bricked device would read as a healthy one.",
+    "node_is_scripted": "test-scenario.yml: step 1: node 'motor' is a frame player, so there is nothing to boot. A player has no firmware and never says anything it was not scripted to say."
+  },
+  "expect_flash": {
+    "node_is_scripted": "test-scenario.yml: step 1: node 'motor' is a frame player and has no memory to read. This verb is for executed nodes only."
+  },
   "expect_symbol": {
     "node_is_scripted": "test-scenario.yml: step 1: node 'motor' has no firmware behind it, so it has no memory to read"
   },
@@ -21,6 +28,16 @@
     "node_does_not_emit": "test-scenario.yml: step 1: node 'motor' does not emit 0x200, so there is no payload to change",
     "signal_not_bound": "test-scenario.yml: step 1: node 'vcu' binds no symbol for signal 'not_a_bound_signal'. Bound signals: drive_state",
     "signals_missing": "test-scenario.yml: step 1: needs 'signals' with at least one entry"
+  },
+  "power_cut": {
+    "board_names_no_core": "test-scenario.yml: step 1: board 'ota_ecu' does not name the core, so there is nothing to stop. Add   cpu_peripheral: <name>   to that board in test-boards.yml.",
+    "board_names_no_ram": "test-scenario.yml: step 1: board 'ota_ecu' declares no RAM regions, so a power cut here would wipe nothing and leave every byte of state intact across it.\n  Add   ram_regions: [{ base: <hex>, size: <hex> }, ...]   to that board in test-boards.yml.\n  The engine must not guess where a customer's part keeps its RAM: a guess that wiped nothing would turn every power_cut into a warm reset, and the scenario would still report PASS.",
+    "node_is_scripted": "test-scenario.yml: step 1: node 'motor' is a frame player, so it has no power to cut. There is no core, no RAM and no flash behind a player.\n  To model a device losing power here, give the node firmware (type: real) in the topology file. No scenario changes."
+  },
+  "power_restore": {
+    "board_names_no_core": "test-scenario.yml: step 1: board 'ota_ecu' does not name the core, so there is nothing to start. Add   cpu_peripheral: <name>   to that board in test-boards.yml.",
+    "board_names_no_reset_vector": "test-scenario.yml: step 1: board 'ota_ecu' does not say where its reset vector is, so this device cannot be told where to start.\n  Add   reset_vector_address: <hex>   to that board in test-boards.yml.\n  On an ordinary Cortex-M part that is the start of flash. The engine must not guess: a guessed address that pointed at nothing would halt the core, and a halted core is indistinguishable from a device that was genuinely bricked -- which is the one thing this verb exists to measure.",
+    "node_is_scripted": "test-scenario.yml: step 1: node 'motor' is a frame player, so it has no power to restore. There is no core behind a player to start."
   },
   "wait_uart": {
     "node_is_scripted": "test-scenario.yml: step 1: node 'motor' has no firmware behind it, so it has no console to wait on"

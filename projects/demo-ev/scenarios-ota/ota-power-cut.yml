@@ -1,0 +1,51 @@
+# ota-power-cut — power dies partway through a firmware update.
+#
+# THIS FILE IS PROJECT DATA. It is the question a customer cannot ask on a
+# bench: cut power at a chosen instant during an update, hundreds of times, and
+# find out which instants leave a device that still boots.
+#
+# The shape of it:
+#
+#   1  wait for the device to come up
+#   2  command an update
+#   3  let it run for a while -- THIS is the cut point
+#   4  cut power: RAM gone, flash as the device left it
+#   5  power back
+#   6  ask whether it boots, and what it says about the image it holds
+#
+# Step 3's duration is the swept parameter. Everything else is fixed, so the
+# only thing that differs between one test and the next is the instant power
+# died.
+
+id: ota-power-cut
+title: Power lost partway through a firmware update
+description: >
+  The device is commanded to install an image, loses power part of the way
+  through, and is powered back up. It must come back, and it must be honest
+  about whether the image it now holds is usable.
+
+steps:
+  - wait_uart: { node: updater, text: "updater ready", timeout_ms: 400 }
+  - mark: "device up, image not yet installed"
+
+  - write_symbol: { node: updater, symbol: g_ota_command, value: 1 }
+  - mark: "update commanded"
+
+  # The cut point. Everything before this is identical in every variant.
+  - run_for: { ms: 6 }
+
+  - power_cut: updater
+  - mark: "power lost"
+  - power_restore: updater
+
+  # It has to come back. A bricked device fails here by silence.
+  - expect_boots: { node: updater, within_ms: 400, label: "device boots after the cut" }
+
+  # And it has to be honest about what it holds. Whichever way this goes, the
+  # device must have DECIDED -- g_ota_image_valid is written on every boot
+  # before anything else happens.
+  - expect_symbol:
+      node: updater
+      symbol: g_ota_state
+      equals: 0
+      label: "the reboot validated its flash and stopped, rather than resuming"

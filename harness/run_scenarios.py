@@ -1487,6 +1487,148 @@ class Compiler:
                1 if halt else 0)
         )
 
+    # -- power ------------------------------------------------------------
+
+    def _arg(self, step, name):
+        """A step's argument, accepting the bare form its manifest allows.
+
+        `- power_cut: updater` and `- power_cut: { node: updater }` are the same
+        step. Which argument a bare value binds to is declared in the manifest,
+        so this reads it there rather than knowing it here.
+        """
+        verb = self.registry[step.verb]
+        if verb.bare_arg == name and not isinstance(step.params, dict):
+            return step.params
+        return step.need(name)
+
+    def _powered_node(self, step):
+        """The node, its board and its core, for a verb that controls power."""
+        where = step.where
+        node = self._node(self._arg(step, "node"), where)
+        if not node.is_real():
+            self._refuse(step, "node_is_scripted", node=node.id)
+        board = self.boards.board(node.board, where)
+        core = board.get("cpu_peripheral")
+        if not core:
+            self._refuse(step, "board_names_no_core", board=node.board,
+                         boards_file=self.boards.source)
+        return node, board, core
+
+    def _verb_power_cut(self, step):
+        """Stop dead, lose RAM, keep flash, hold the core off.
+
+        The regions wiped are the board's own. A power cut that wiped nothing
+        would be a warm reset wearing this verb's name, and the scenario would
+        still report PASS -- which is why an undeclared region list is refused
+        rather than defaulted.
+        """
+        where = step.where
+        node, board, core = self._powered_node(step)
+        regions = board.get("ram_regions")
+        if not regions:
+            self._refuse(step, "board_names_no_ram", board=node.board,
+                         boards_file=self.boards.source)
+        if not isinstance(regions, list):
+            raise CompileError(
+                "%s: %s: ram_regions must be a list of { base, size } entries"
+                % (where, self.boards.source))
+
+        parts = []
+        for index, entry in enumerate(regions):
+            if not isinstance(entry, dict) or "base" not in entry or "size" not in entry:
+                raise CompileError(
+                    "%s: %s: ram_regions[%d] must be { base: <hex>, size: <hex> }, "
+                    "got %r" % (where, self.boards.source, index, entry))
+            base = _as_int(entry["base"], "%s: ram_regions[%d].base" % (where, index))
+            size = _as_int(entry["size"], "%s: ram_regions[%d].size" % (where, index))
+            if size <= 0:
+                raise CompileError(
+                    "%s: %s: ram_regions[%d] has size %d. A region of no bytes "
+                    "wipes nothing, and a list of them would make this verb a "
+                    "reset." % (where, self.boards.source, index, size))
+            parts.append("%x:%x" % (base, size))
+
+        self._emit(
+            'bench_power_cut "%s" "%s" "%s"'
+            % (_safe_name(node.id, where),
+               _safe_name(core, "%s: cpu_peripheral" % where),
+               ",".join(parts)))
+
+    def _verb_power_restore(self, step):
+        """Power returns. The core starts from the vector table as flash has it."""
+        where = step.where
+        node, board, core = self._powered_node(step)
+        vector = board.get("reset_vector_address")
+        if vector is None:
+            self._refuse(step, "board_names_no_reset_vector", board=node.board,
+                         boards_file=self.boards.source)
+        base = _as_int(vector, "%s: reset_vector_address" % where)
+        # The ELF is handed over for its SYMBOL TABLE only. A machine reset
+        # clears the system bus's name lookup, so without this every
+        # symbol-based verb would stop resolving the moment a scenario cut
+        # power. The toolkit calls LoadSymbolsFrom, never LoadELF, and a test
+        # greps it to keep that true.
+        elf = (self.project_root / str(node.elf)).resolve()
+        self._emit(
+            'bench_power_restore "%s" "%s" "%x" "%s"'
+            % (_safe_name(node.id, where),
+               _safe_name(core, "%s: cpu_peripheral" % where), base,
+               self._path(elf)))
+
+    def _verb_expect_flash(self, step):
+        """What is in non-volatile memory right now."""
+        where = step.where
+        node = self._node(self._arg(step, "node"), where)
+        if not node.is_real():
+            self._refuse(step, "node_is_scripted", node=node.id)
+        address = _as_int(step.need("address"), "%s: address" % where)
+        wanted = _clean_hex(step.need("equals"), "%s: equals" % where)
+        label = step.get("label") or ("flash at 0x%X" % address)
+        token = self._token()
+        self._emit(
+            'bench_expect_flash "%s" "%s" "%x" "%s" "%s"'
+            % (token, _safe_name(node.id, where), address, wanted,
+               self._text_arg(label, "%s: label" % where)))
+        self.result.tokens.append(
+            Token(token, step.verb, label, step.index, None, 0,
+                  {"node": node.id, "address": address, "equals": wanted})
+        )
+
+    def _verb_expect_boots(self, step):
+        """Did it come back? The topology already says what that looks like."""
+        where = step.where
+        node = self._node(self._arg(step, "node"), where)
+        if not node.is_real():
+            self._refuse(step, "node_is_scripted", node=node.id)
+        banner = node.raw.get("boot_text")
+        if not banner:
+            self._refuse(step, "node_declares_no_banner", node=node.id)
+        window = _as_window_ms(step.need("within_ms"), "%s: within_ms" % where)
+        label = step.get("label") or ("%s boots" % node.id)
+        token = self._token()
+
+        # NOT bench_uart_expect. That one counts text printed BEFORE the arm,
+        # which is correct for waiting on a first boot and catastrophically
+        # wrong here: the banner from before a power cut is still in the
+        # console tail, and this assertion passed at the instant it armed while
+        # the device could have been bricked. Observed in a run that reported
+        # PASS. The _after variant drops the tail, so only a line the reboot
+        # actually produced can satisfy it.
+        #
+        # The awaited line is the one the TOPOLOGY declares for this node, not
+        # one the scenario repeated, so a scenario cannot weaken a boot check
+        # by quoting a shorter string.
+        self._emit(
+            'bench_uart_expect_after "%s" "%s" "%s" "%d" "%s"'
+            % (token, _safe_name(node.id, where),
+               self._text_arg(str(banner), "%s: boot_text" % where), window,
+               self._text_arg(label, "%s: label" % where)))
+        self.result.tokens.append(
+            Token(token, step.verb, label, step.index, None, window,
+                  {"node": node.id, "text": str(banner)})
+        )
+        self._run_window(window)
+
     # -- the whole script -------------------------------------------------
 
     #: Steps that only wait or annotate. A leading run of these is boot and

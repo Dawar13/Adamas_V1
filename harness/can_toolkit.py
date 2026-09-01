@@ -100,6 +100,7 @@
 
 import System
 
+from Antmicro.Renode.Core import Range
 from Antmicro.Renode.Core.CAN import CANMessageFrame
 from Antmicro.Renode.Time import ClockEntry
 
@@ -955,6 +956,259 @@ def mc_bench_freeze(node, cpu_path, halted):
     _write(_now_us(), 'STIM', 'node_freeze %s=%d' % (name, 1 if want else 0))
 
 
+# --- power -------------------------------------------------------------------
+#
+# THE ONE THING THESE COMMANDS MUST NEVER DO IS RELOAD THE BINARY.
+#
+# A power cut is only interesting because the device comes back up on whatever
+# is in its flash. If the restore path re-ran LoadELF, every corrupted image
+# would heal itself, every cut point would report "recovered", and the whole
+# measurement would be a picture of the ELF on the host rather than of the
+# device. There is no LoadELF anywhere in this file and a test asserts there
+# never is one.
+#
+# AND `machine Reset` ALONE IS NOT A POWER CUT.
+#
+# Measured, not assumed: writing a sentinel into RAM, calling machine.Reset()
+# and reading it back returns the sentinel. Renode's memories survive a reset,
+# which is correct -- a reset is not a power failure. So the RAM is wiped
+# explicitly, from the region list the BOARD declares, and `reset` and
+# `power_cut` stay two different verbs that do two different things.
+
+
+def _regions(spec, what):
+    """Parse "base:size,base:size" into a list of (base, size).
+
+    The list comes from the board file. This function refuses an empty or
+    unreadable one rather than defaulting to a guess: a power cut that wiped
+    nothing would leave RAM intact across the cut, and the scenario would still
+    report PASS while testing a warm reset."""
+    text = _s(spec)
+    if text == '':
+        _fail(what, 'no-ram-regions')
+    out = []
+    for piece in text.split(','):
+        piece = piece.strip()
+        if piece == '':
+            continue
+        bits = piece.split(':')
+        if len(bits) != 2:
+            _fail(what, 'bad-region:' + piece)
+        try:
+            base = int(bits[0], 16)
+            size = int(bits[1], 16)
+        except Exception:
+            _fail(what, 'bad-region:' + piece)
+        if size <= 0:
+            _fail(what, 'empty-region:' + piece)
+        out.append((base, size))
+    if not out:
+        _fail(what, 'no-ram-regions')
+    return out
+
+
+def _core(node, cpu_path, what):
+    name = _s(node)
+    mach = _node(name, what)['machine']
+    cp = _s(cpu_path)
+    if cp == '':
+        _fail(what, 'no-cpu-named:' + name)
+    try:
+        cpu = mach[cp]
+    except Exception, e:
+        _fail(what, 'no-such-peripheral:' + name + '/' + cp + ':' + str(e))
+    if cpu is None:
+        _fail(what, 'no-such-peripheral:' + name + '/' + cp)
+    return mach, cpu
+
+
+def mc_bench_power_cut(node, cpu_path, regions):
+    """bench_power_cut "<node>" "<cpu path>" "<base:size,...>"
+
+    Stop the core where it stands, lose every byte of RAM, and reset the
+    machine. Flash is untouched, which is the whole point: what the device
+    holds afterwards is what it had actually finished writing.
+
+    The core is halted rather than the machine paused, for the same reason
+    node_freeze halts: a paused machine stops reporting to the time barrier and
+    virtual time stops for every machine in the emulation, so a scenario with
+    other nodes on the bus would deadlock instead of producing a verdict."""
+    what = 'power_cut'
+    name = _s(node)
+    mach, cpu = _core(node, cpu_path, what)
+    wipe = _regions(regions, what)
+    bus = mach.SystemBus
+
+    # 1. Stop executing, at this instant.
+    try:
+        cpu.IsHalted = True
+    except Exception, e:
+        _fail(what, 'cannot-halt:' + name + ':' + str(e))
+
+    # 2. Lose RAM. Every declared region, and the count is reported so a board
+    #    that declared one region when it has four is visible in the log.
+    wiped = 0
+    for base, size in wipe:
+        try:
+            bus.ZeroRange(Range(System.UInt64(base), System.UInt64(size)))
+        except Exception, e:
+            _fail(what, 'cannot-wipe:%s @%x+%x:%s' % (name, base, size, str(e)))
+        wiped = wiped + size
+
+    # 3. Reset the machine. Peripherals return to their reset state; the
+    #    memories do not, which is why step 2 exists.
+    try:
+        mach.Reset()
+    except Exception, e:
+        _fail(what, 'cannot-reset:' + name + ':' + str(e))
+
+    # A reset may release the halt, so it is re-applied and read back. A core
+    # left running with PC=0 would execute nothing meaningful and log an
+    # emulator error that looks like our bug rather than a device with no
+    # power.
+    try:
+        cpu.IsHalted = True
+        got = bool(cpu.IsHalted)
+    except Exception, e:
+        _fail(what, 'cannot-hold-off:' + name + ':' + str(e))
+    if not got:
+        _fail(what, 'power-cut-did-not-take:' + name)
+
+    _write(_now_us(), 'STIM', 'power_cut %s regions=%d bytes=%d' % (
+        name, len(wipe), wiped))
+
+
+def mc_bench_power_restore(node, cpu_path, vector_base, symbols_from):
+    """bench_power_restore "<node>" "<cpu path>" "<hex vector>" "<elf path>"
+
+    Power comes back. The core takes its stack pointer and its entry point from
+    the vector table AS IT NOW STANDS IN FLASH, and runs.
+
+    Nothing is loaded. If the flash was left holding a half-written image, this
+    is where that shows: the device either comes up on it or does not, and both
+    are answers about the device rather than about the host."""
+    what = 'power_restore'
+    name = _s(node)
+    mach, cpu = _core(node, cpu_path, what)
+    text = _s(vector_base)
+    if text == '':
+        _fail(what, 'no-vector-address:' + name)
+    try:
+        base = int(text, 16)
+    except Exception:
+        _fail(what, 'bad-vector-address:' + text)
+
+    # Re-point the core at the reset vector. Renode reads the initial SP and PC
+    # out of memory when this is set, so the values come from flash rather than
+    # from anything remembered across the cut.
+    try:
+        cpu.VectorTableOffset = base
+    except Exception, e:
+        _fail(what, 'cannot-set-vector-table:%s @%x:%s' % (name, base, str(e)))
+
+    try:
+        cpu.IsHalted = False
+        got = bool(cpu.IsHalted)
+    except Exception, e:
+        _fail(what, 'cannot-resume:' + name + ':' + str(e))
+    if got:
+        _fail(what, 'power-restore-did-not-take:' + name)
+
+    # THE HOST'S MAP OF NAMES TO ADDRESSES, AND NOTHING ELSE.
+    #
+    # machine.Reset() clears the system bus's symbol lookup -- measured, not
+    # assumed: GetSymbolAddress on a symbol that resolved a moment earlier
+    # fails with "Could not find any address" straight after a reset. Without
+    # this, every symbol-based verb would stop working the instant a scenario
+    # cut power, which would quietly make the most interesting half of a
+    # power-loss test unwritable.
+    #
+    # LoadSymbolsFrom is NOT LoadELF and the difference is the whole of this
+    # verb's honesty. It restores the debugger's name table on the HOST; it
+    # writes nothing into the device. Measured the same way: a sentinel written
+    # into the update slot is still there, byte for byte, after this call. If
+    # this line ever became LoadELF, every corrupted image would heal itself
+    # and every cut point would report that the device recovered.
+    #
+    # The names it restores describe the ELF the host holds. That is correct
+    # while the RUNNING image is that ELF -- which is the case here, because
+    # the update stages into a slot rather than over the code that is
+    # executing. A device that overwrote its own running image would need its
+    # symbols treated with more suspicion than this.
+    path = _s(symbols_from)
+    if path == '':
+        _fail(what, 'no-symbol-source:' + name)
+    try:
+        # ELFSharp is Renode's own ELF reader. It is not referenced by default
+        # in this interpreter, so the assembly is pulled in explicitly rather
+        # than assumed present.
+        import clr
+        clr.AddReference('ELFSharp')
+        from ELFSharp.ELF import ELFReader
+        elf = ELFReader.Load(path)
+    except Exception, e:
+        _fail(what, 'cannot-read-symbols:%s:%s:%s' % (name, path, str(e)))
+    try:
+        mach.SystemBus.LoadSymbolsFrom(elf)
+    except Exception, e:
+        _fail(what, 'cannot-restore-symbols:%s:%s' % (name, str(e)))
+
+    _write(_now_us(), 'STIM', 'power_restore %s vector=%x' % (name, base))
+
+
+def mc_bench_expect_flash(token, node, address, expect_hex, label):
+    """bench_expect_flash "<token>" "<node>" "<hex addr>" "<hex bytes>" "<label>"
+
+    What is actually in the device's non-volatile memory, right now.
+
+    Read through the system bus, which is a debugger's view: it is not subject
+    to the flash controller's erase-before-write rule, and it is not meant to
+    be. The firmware's writes go through the controller and obey it; this reads
+    the result."""
+    what = 'expect_flash'
+    tok = _s(token)
+    if tok == '':
+        _fail(what, 'empty-token')
+    if tok in _EXPECTS:
+        _fail(what, 'token-reused:' + tok)
+
+    mach = _node(node, what)['machine']
+    bus = mach.SystemBus
+    try:
+        addr = int(_s(address), 16)
+    except Exception:
+        _fail(what, 'bad-address:' + _s(address))
+
+    wanted = _s(expect_hex)
+    if wanted == '' or (len(wanted) % 2) != 0:
+        _fail(what, 'bad-expected-bytes:' + wanted)
+    try:
+        want = [int(wanted[i:i + 2], 16) for i in range(0, len(wanted), 2)]
+    except Exception:
+        _fail(what, 'bad-expected-bytes:' + wanted)
+
+    got = []
+    for offset in range(len(want)):
+        try:
+            got.append(int(bus.ReadByte(addr + offset)) & 0xFF)
+        except Exception, e:
+            _fail(what, 'cannot-read:%s @%x:%s' % (_s(node), addr + offset, str(e)))
+
+    got_hex = ''.join(['%02x' % b for b in got])
+    us = _now_us()
+
+    # Registered like every other token, so a reuse is caught and the host has
+    # one table to read. The id is -1 and the window is already closed: this is
+    # a statement about now, and no later bus frame can be mistaken for a match.
+    met = us if got_hex.lower() == wanted.lower() else None
+    _EXPECTS[tok] = {'id': -1, 'value': [], 'mask': [], 'armed_us': us,
+                     'deadline': us, 'met_us': met}
+    _EXPECT_ORDER.append(tok)
+    _write(us, 'EXPECT_ARM', '%s %x %s %s %d %s' % (
+        tok, addr, got_hex, 'ff' * len(want), 0, _one_line(_text(label))))
+    if met is not None:
+        _write(us, 'EXPECT_MET', '%s %d' % (tok, us))
+
 # --- symbols -----------------------------------------------------------------
 
 def _resolve(node, symbol, what):
@@ -1336,5 +1590,66 @@ def mc_bench_uart_expect(token, node, text, within_ms, label):
         _EXPECTS[tok]['met_us'] = us
         _write(us, 'EXPECT_MET', '%s %d' % (tok, us))
 
+
+
+def mc_bench_uart_expect_after(token, node, text, within_ms, label):
+    """bench_uart_expect_after "<token>" "<node>" "<text>" "<within ms>" "<label>"
+
+    The same console watch as bench_uart_expect, with one difference that is
+    the whole reason it exists: TEXT ALREADY ON THE CONSOLE DOES NOT COUNT.
+
+    THIS WAS A FALSE PASS, FOUND BY READING THE EVENT LOG OF A SCENARIO WHOSE
+    VERDICT WAS PASS. `expect_boots` was built on bench_uart_expect, whose
+    documented and correct behaviour is that text printed before the arm still
+    satisfies the wait -- a wait describes what a node has said, not when the
+    harness looked.
+    That is right for waiting for a device to come up the first time.
+
+    It is exactly wrong after a power cut. The banner from BEFORE the cut was
+    still sitting in the console tail, so the assertion "the device boots after
+    the cut" was met at the very instant it armed:
+
+        406000 EXPECT_ARM t2 ... device boots after the cut
+        406000 EXPECT_MET t2 406000
+
+    A bricked device would have passed that check. The evidence for a reboot
+    has to be produced by the reboot, so this variant drops the tail at arm
+    time and only text written afterwards can satisfy it.
+
+    bench_uart_expect is deliberately left alone: changing it would change what
+    every existing scenario asserts."""
+    tok = _s(token)
+    what = 'bench_uart_expect_after'
+    if tok == '':
+        _fail(what, 'empty-token')
+    if tok in _EXPECTS:
+        _fail(what, 'token-reused:' + tok)
+    name = _s(node)
+    if name not in _UARTS:
+        _fail(what, 'no-console-watched-for-node:' + name)
+    want = _text(text)
+    if want == '':
+        _fail(what, 'empty-text')
+    within = _int(within_ms, 'within_ms')
+    us = _now_us()
+
+    st = _UARTS[name]
+    need = len(want)
+    if st['max'] < need:
+        st['max'] = need
+
+    # Everything this node said before now belonged to a previous life. The
+    # console FILE keeps all of it -- that is the record, and nothing here
+    # touches it. What is dropped is the matching buffer.
+    dropped = len(''.join(st['tail']))
+    st['tail'] = []
+
+    _EXPECTS[tok] = {'id': -1, 'value': [], 'mask': [], 'uart': name,
+                     'text': want, 'armed_us': us,
+                     'deadline': us + within * 1000, 'met_us': None}
+    _EXPECT_ORDER.append(tok)
+    _write(us, 'EXPECT_ARM', '%s %x %s %x %d %s' % (
+        tok, 0, _hex_of([ord(c) for c in want]), 0, within * 1000, _text(label)))
+    _write(us, 'STIM', 'console_reset %s dropped=%d' % (name, dropped))
 
 print 'can_toolkit loaded'

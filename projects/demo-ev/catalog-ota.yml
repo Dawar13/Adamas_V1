@@ -1,0 +1,52 @@
+# catalog-ota.yml — the CAN contract for the power-loss scenarios
+# =============================================================================
+# THIS FILE IS PROJECT DATA, NOT ENGINE CODE.
+#
+# A contract of its own, for a topology of its own, and that separation is
+# deliberate rather than tidy-minded.
+#
+# The wedge these scenarios serve is a SINGLE NODE that writes its own flash
+# (PROJECT-V2 §1.6). The rest of this project is a six-node powertrain bus.
+# Putting the updater into network.yml would have added a node every existing
+# test then had to boot, and putting ota_status into catalog.yml would have
+# broken that file's own rule — every `sender:` must be a node in the topology,
+# and the updater is not one there.
+#
+# So the OTA work is a second (topology, contract) pair beside the first. The
+# existing ninety tests compile byte-for-byte identically with this file
+# present, which is checked rather than hoped for.
+#
+# Layout convention is the same as catalog.yml: start_bit is the LSB position
+# inside a little-endian payload.
+# =============================================================================
+
+messages:
+
+  - id: 0x700                     # ota_status — the updater's running commentary
+    name: ota_status
+    dlc: 8
+    sender: updater
+    signals:
+      - { name: ota_state,      start_bit: 0,  length: 8 }    # enum ota_state
+      - { name: image_valid,    start_bit: 8,  length: 8 }    # enum image_valid
+      - { name: chunks_written, start_bit: 16, length: 16 }   # 0..128
+
+enums:
+
+  # ota_status.ota_state — where the updater is in its own sequence.
+  #
+  # The names matter to a reader of a failing run: "cut during WRITING with 74
+  # chunks down" is a sentence, and "state 2" is not.
+  ota_state:
+    0: BOOT
+    1: ERASING
+    2: WRITING
+    3: HEADER
+    4: DONE
+    5: FAILED
+
+  # ota_status.image_valid — the boot verdict, published on the bus so a test
+  # can assert it without reading the console.
+  image_valid:
+    0: INVALID
+    1: VALID

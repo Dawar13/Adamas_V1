@@ -15,7 +15,9 @@ operator sees are the words on this page.
 | Verb | Class | Applies to | Needs a handler | Summary |
 |---|---|---|---|---|
 | [`can_send`](#can-send) | stimulus | real, scripted | yes | Put one frame on a bus |
+| [`expect_boots`](#expect-boots) | assert | real | yes | Demand that the device came back up |
 | [`expect_can`](#expect-can) | assert | real, scripted | yes | Demand a frame, with signal values, within a deadline |
+| [`expect_flash`](#expect-flash) | assert | real | yes | Demand that non-volatile memory holds particular bytes |
 | [`expect_no_can`](#expect-no-can) | assert | real, scripted | yes | Demand the absence of a frame for a whole window |
 | [`expect_symbol`](#expect-symbol) | assert | real | yes | Demand that a variable holds a value |
 | [`flood`](#flood) | stimulus | real, scripted | yes | Put many frames on a bus in one tick, to load it or exhaust buffers |
@@ -24,11 +26,13 @@ operator sees are the words on this page.
 | [`node_resume`](#node-resume) | stimulus | real | yes | Let a frozen core execute again |
 | [`node_signal`](#node-signal) | stimulus | real, scripted | yes | Make a node say a particular signal value |
 | [`node_silence`](#node-silence) | stimulus | real, scripted | yes | Stop a node transmitting, or let it transmit again |
+| [`power_cut`](#power-cut) | power | real | yes | Stop the device dead. Keep flash, lose RAM, hold it powered off |
+| [`power_restore`](#power-restore) | power | real | yes | Power comes back. Run from the reset vector as flash now stands |
 | [`run_for`](#run-for) | time | real, scripted | yes | Advance virtual time by exactly this much |
 | [`wait_uart`](#wait-uart) | observe | real | yes | Wait for text to appear on a node's console |
 | [`write_symbol`](#write-symbol) | stimulus | real | yes | Write a value into a running node's memory |
 
-13 verbs: 7 stimulus (make something happen), 1 time (let virtual time pass), 1 observe (wait for something), 3 assert (demand something, or forbid it), 1 book (record, annotate, checkpoint).
+17 verbs: 7 stimulus (make something happen), 2 power (cut, restore, reset), 1 time (let virtual time pass), 1 observe (wait for something), 5 assert (demand something, or forbid it), 1 book (record, annotate, checkpoint).
 
 ---
 
@@ -64,6 +68,56 @@ measuring the tool's echo.
 
 ---
 
+## expect_boots
+
+*Demand that the device came back up*
+
+| | |
+|---|---|
+| class | `assert`, polarity `expect` |
+| applies to | real |
+| writes to the event log | `EXPECT_ARM` |
+| needs | `console` |
+| compiled by | a handler, `_verb_expect_boots` |
+
+**Arguments**
+
+| Name | Type | Required | Notes |
+|---|---|---|---|
+| `node` | `node_ref` | yes | the device that must boot; the node must be `real` |
+| `within_ms` | `window_ms` | yes | how long it has to say so |
+| `label` | `label` | no | what this boot means |
+
+Did it come back? The banner the topology already declares for this node is
+the evidence, so a scenario asking whether a device survived a power cut does
+not have to repeat a string the topology has said once.
+
+A bricked device fails this by silence: the core either halts on a vector
+table it cannot use, or runs code that never reaches its own banner. Both are
+the absence of the line, which is what makes this assertion honest -- there is
+nothing the engine can mistake for a boot that did not happen.
+
+The window runs to its end like every other window, so the elapsed time does
+not depend on the outcome.
+
+**Refuses**
+
+`node_declares_no_banner` — exit 2
+
+```
+node {node!r} declares no boot_text in the topology, so there is nothing that would prove it came back.
+  Add   boot_text: "<the line this firmware prints once it is up>"   to that node in the topology file.
+  The engine must not guess: a boot check that matched nothing would pass the moment the window closed, and a bricked device would read as a healthy one.
+```
+
+`node_is_scripted` — exit 2
+
+```
+node {node!r} is a frame player, so there is nothing to boot. A player has no firmware and never says anything it was not scripted to say.
+```
+
+---
+
 ## expect_can
 
 *Demand a frame, with signal values, within a deadline*
@@ -93,6 +147,49 @@ reasons that have nothing to do with the firmware.
 An assertion armed and never resolved is a FAILURE, not a pass.
 
 **Refuses** nothing of its own. Its arguments are still checked by the shared parsers, which refuse a missing or unreadable value.
+
+---
+
+## expect_flash
+
+*Demand that non-volatile memory holds particular bytes*
+
+| | |
+|---|---|
+| class | `assert`, polarity `expect` |
+| applies to | real |
+| writes to the event log | `EXPECT_ARM` |
+| needs | `flash_read` |
+| compiled by | a handler, `_verb_expect_flash` |
+
+**Arguments**
+
+| Name | Type | Required | Notes |
+|---|---|---|---|
+| `node` | `node_ref` | yes | whose flash to read; the node must be `real` |
+| `address` | `integer` | yes | absolute address, as the device's memory map has it |
+| `equals` | `hex_bytes` | yes | the bytes that must be there |
+| `label` | `label` | no | what this check means |
+
+What survived. This is the verb that can tell two devices apart when the boot
+verdict cannot: two firmwares interrupted at the same instant may both refuse
+to boot, and still have left completely different things in flash.
+
+Read through the system bus, which is a debugger's view of memory. That is
+deliberate and it is not a shortcut: the firmware's own writes go through the
+flash controller and are subject to its erase-before-write rule, while this
+reads the result of those writes without disturbing them.
+
+It is instantaneous, like expect_symbol: a statement about now, not about a
+window. There is no deadline to miss.
+
+**Refuses**
+
+`node_is_scripted` — exit 2
+
+```
+node {node!r} is a frame player and has no memory to read. This verb is for executed nodes only.
+```
 
 ---
 
@@ -406,6 +503,122 @@ A muted node and a hung node look identical to the device under test, which
 can only see the absence of frames - see node_freeze for the other one.
 
 **Refuses** nothing of its own. Its arguments are still checked by the shared parsers, which refuse a missing or unreadable value.
+
+---
+
+## power_cut
+
+*Stop the device dead. Keep flash, lose RAM, hold it powered off*
+
+| | |
+|---|---|
+| class | `power` |
+| applies to | real |
+| writes to the event log | `STIM` |
+| needs | `power_control` |
+| compiled by | a handler, `_verb_power_cut` |
+
+**Arguments**
+
+| Name | Type | Required | Notes |
+|---|---|---|---|
+| `node` | `node_ref` | yes | the device losing power; the node must be `real`; a bare value binds here |
+
+The verb the bootloader and OTA family rests on. It stops execution at this
+instant, wipes every RAM region the board declares, resets the machine, and
+holds the core halted until power_restore.
+
+IT IS NOT A RESET, AND THE DIFFERENCE IS MEASURED RATHER THAN ASSERTED. A
+reset leaves memory alone -- writing a sentinel into RAM, resetting, and
+reading it back returns the sentinel. That is correct behaviour for a reset
+and wrong for a power failure, so the RAM is wiped explicitly and `reset`
+stays a different verb.
+
+NOTHING IS RELOADED. What the device holds afterwards is exactly what it had
+finished writing to flash. A restore path that re-loaded the binary would
+heal every corrupted image and report that every cut point recovered, which
+is the most flattering possible lie a test like this could tell.
+
+The regions to wipe come from the board file, like every other address. A
+board that declares none is refused: a power cut that wiped nothing would
+leave RAM intact across the cut, and the scenario would report PASS having
+tested a warm reset.
+
+**Refuses**
+
+`board_names_no_core` — exit 2
+
+```
+board {board!r} does not name the core, so there is nothing to stop. Add   cpu_peripheral: <name>   to that board in {boards_file}.
+```
+
+`board_names_no_ram` — exit 2
+
+```
+board {board!r} declares no RAM regions, so a power cut here would wipe nothing and leave every byte of state intact across it.
+  Add   ram_regions: [{{ base: <hex>, size: <hex> }}, ...]   to that board in {boards_file}.
+  The engine must not guess where a customer's part keeps its RAM: a guess that wiped nothing would turn every power_cut into a warm reset, and the scenario would still report PASS.
+```
+
+`node_is_scripted` — exit 2
+
+```
+node {node!r} is a frame player, so it has no power to cut. There is no core, no RAM and no flash behind a player.
+  To model a device losing power here, give the node firmware (type: real) in the topology file. No scenario changes.
+```
+
+---
+
+## power_restore
+
+*Power comes back. Run from the reset vector as flash now stands*
+
+| | |
+|---|---|
+| class | `power` |
+| applies to | real |
+| writes to the event log | `STIM` |
+| needs | `power_control` |
+| compiled by | a handler, `_verb_power_restore` |
+
+**Arguments**
+
+| Name | Type | Required | Notes |
+|---|---|---|---|
+| `node` | `node_ref` | yes | the device powering up again; the node must be `real`; a bare value binds here |
+
+The other half of power_cut. The core takes its stack pointer and its entry
+point from the vector table as it now stands in flash, and runs.
+
+Nothing is loaded and nothing is repaired. If the flash was left holding a
+half-written image this is where that shows: the device either comes up on it
+or it does not, and both are answers about the device rather than about the
+host's copy of the binary.
+
+The vector address comes from the board file. On an ordinary Cortex-M part it
+is the start of flash; parts that boot elsewhere say so there.
+
+**Refuses**
+
+`board_names_no_core` — exit 2
+
+```
+board {board!r} does not name the core, so there is nothing to start. Add   cpu_peripheral: <name>   to that board in {boards_file}.
+```
+
+`board_names_no_reset_vector` — exit 2
+
+```
+board {board!r} does not say where its reset vector is, so this device cannot be told where to start.
+  Add   reset_vector_address: <hex>   to that board in {boards_file}.
+  On an ordinary Cortex-M part that is the start of flash. The engine must not guess: a guessed address that pointed at nothing would halt the core, and a halted core is indistinguishable from a device that was genuinely bricked -- which is the one thing this verb exists to measure.
+```
+
+`node_is_scripted` — exit 2
+
+```
+node {node!r} is a frame player, so it has no power to restore. There is no core behind a player to start.
+```
 
 ---
 

@@ -274,12 +274,19 @@ def shard_of(tests, shard: int, of: int):
 
 
 def run_one(python, test: Path, out_root: Path, timeout_s: int,
-            topology_file, coverage=False, cache=None) -> dict:
+            topology_file, coverage=False, cache=None, contract_file=None) -> dict:
     """Run one test in its own directory, and never lose it from the tally."""
     out_dir = out_root / test.stem
     command = python + [str(ENGINE), str(test), "--quiet", "--out", str(out_dir)]
     if topology_file:
         command += ["--topology", topology_file]
+    if contract_file:
+        # A topology of its own usually comes with a contract of its own: the
+        # OTA scenarios are a single node with a message no other node sends.
+        # Passing one without the other loads a topology against a contract
+        # that does not describe it, and the load refuses -- correctly, but for
+        # a reason that reads as the project being broken.
+        command += ["--contract", contract_file]
     if cache:
         # One flag, passed straight through. The runner does not decide what a
         # cache hit is, does not read the CACHED marker, and does not count a
@@ -416,6 +423,9 @@ def main(argv=None) -> int:
                         help="per-test timeout in seconds")
     parser.add_argument("--topology", default=None,
                         help="override the topology file, for a divergence run")
+    parser.add_argument("--contract", default=None,
+                        help="override the CAN contract, for a topology that "
+                             "comes with one of its own")
     parser.add_argument("--no-expand", action="store_true",
                         help="run what is already generated")
     parser.add_argument("--shard", type=int, default=None,
@@ -520,7 +530,8 @@ def main(argv=None) -> int:
                       else "--cache" if args.cache else None)
         futures = {
             pool.submit(run_one, python, test, out_root, args.timeout,
-                        args.topology, args.coverage, cache_flag): test
+                        args.topology, args.coverage, cache_flag,
+                        args.contract): test
             for test in tests
         }
         for future in concurrent.futures.as_completed(futures):

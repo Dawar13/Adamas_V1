@@ -139,6 +139,16 @@ class TestTheRefusalsAreTheOnesTheEngineUsedToEmit(unittest.TestCase):
                 with self.subTest(verb=name, condition=condition):
                     self.assertIn(condition, CAPTURED.get(name, {}))
 
+    #: The thirteen verbs that EXISTED before the registry. Only these can have
+    #: survived a migration; the power-class verbs were born as manifests, and
+    #: their refusals are evidenced by having been provoked through the real
+    #: compiler rather than by comparing two eras.
+    MIGRATED = (
+        "can_send", "expect_can", "expect_no_can", "expect_symbol", "flood",
+        "mark", "node_freeze", "node_resume", "node_signal", "node_silence",
+        "run_for", "wait_uart", "write_symbol",
+    )
+
     def test_the_wording_survived_the_migration(self):
         prefix = "test-scenario.yml: step 1: "
         values = {
@@ -148,6 +158,8 @@ class TestTheRefusalsAreTheOnesTheEngineUsedToEmit(unittest.TestCase):
             "boards_file": "test-boards.yml",
         }
         for verb, conditions in sorted(CAPTURED.items()):
+            if verb not in self.MIGRATED:
+                continue
             for condition, captured in sorted(conditions.items()):
                 with self.subTest(verb=verb, condition=condition):
                     local = dict(values, verb=verb)
@@ -398,7 +410,8 @@ class TestHowManyVerbsAreAFileAndNothingElse(unittest.TestCase):
             len(template_only), 0,
             "template-only verbs are now %s -- update this test and STATUS.md "
             "rather than leaving the count stale" % (template_only,))
-        self.assertEqual(len(REGISTRY), 13)
+        # Thirteen migrated from source, four power-class verbs added since.
+        self.assertEqual(len(REGISTRY), 17)
 
 
 if __name__ == "__main__":

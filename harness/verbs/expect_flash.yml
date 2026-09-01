@@ -1,0 +1,44 @@
+# expect_flash -- PROJECT-V2 section 10.2. This file IS the verb: its
+# arguments, its refusals and their exact words, and its documentation.
+verb: expect_flash
+class: assert
+polarity: expect
+summary: Demand that non-volatile memory holds particular bytes
+args:
+  node:
+    type: node_ref
+    required: true
+    must_be: real
+    doc: whose flash to read
+  address:
+    type: integer
+    required: true
+    doc: absolute address, as the device's memory map has it
+  equals:
+    type: hex_bytes
+    required: true
+    doc: the bytes that must be there
+  label:
+    type: label
+    doc: what this check means
+applies_to: [real]
+requires_capabilities: [flash_read]
+emits: EXPECT_ARM
+handler: expect_flash
+doc: |
+  What survived. This is the verb that can tell two devices apart when the boot
+  verdict cannot: two firmwares interrupted at the same instant may both refuse
+  to boot, and still have left completely different things in flash.
+
+  Read through the system bus, which is a debugger's view of memory. That is
+  deliberate and it is not a shortcut: the firmware's own writes go through the
+  flash controller and are subject to its erase-before-write rule, while this
+  reads the result of those writes without disturbing them.
+
+  It is instantaneous, like expect_symbol: a statement about now, not about a
+  window. There is no deadline to miss.
+refusals:
+  - if: node_is_scripted
+    exit: 2
+    message: |-
+        node {node!r} is a frame player and has no memory to read. This verb is for executed nodes only.

@@ -1,0 +1,13 @@
+// OTA ECU -- board layer, STM32H743 target.
+//
+// The same carrier as every other ECU in this project. It exists as a file of
+// its own because a board key is an ECU role, and this is the role that writes
+// its own flash while running.
+//
+// Nothing is added here. The flash controller this node depends on --
+// MTD.STM32H7_FlashController at 0x52002000, wired to flashBank1 and
+// flashBank2 -- comes from the stock STM32H743 description the platform below
+// inherits. It is Renode's model, not ours; scripts/check-flash-model.sh pins
+// the behaviour we rely on so that an emulator upgrade which changed it is
+// caught rather than silently changing every OTA verdict.
+using "../nucleo_h743zi_can.repl"

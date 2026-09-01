@@ -1,0 +1,110 @@
+# power-lost-during-update — the shape the OTA wedge is made of.
+# =============================================================================
+# A device is installing firmware into its own flash. Power dies at some instant
+# during the sequence. It is powered back on. Does it come back, and is it
+# honest about what it now holds?
+#
+# WHY THE SWEEP IS `invariant` AND NOT `flips`
+# -----------------------------------------------------------------------------
+# Every other sweep in this library walks a value across a limit, and the
+# required behaviour changes at the boundary: below it legal, at or past it a
+# fault. That is not this shape.
+#
+# There is no instant at which losing power is ALLOWED to brick the device. The
+# assertion is the same at every cut point — it boots, and it reports the truth
+# about its own flash — and what the sweep produces is a MAP rather than a
+# boundary: which instants left a device that recovered, and which did not.
+# `expectation: invariant` is that statement, and it is the reason a failing
+# variant here is a finding about the firmware rather than an expected flip.
+#
+# THE SWEPT PARAMETER IS AN INSTANT, NOT A READING
+# -----------------------------------------------------------------------------
+# `cut_at` is how long the update runs before power is lost. It is virtual time,
+# so it is exactly reproducible: the same value cuts at the same point of the
+# same sequence, every run, forever. That is the property that makes this
+# testable at all — on a bench the same wall-clock delay lands somewhere
+# different every attempt.
+#
+# WHAT THE DEVICE MUST DO, AND WHAT IT IS ALLOWED TO DO
+# -----------------------------------------------------------------------------
+# It must come back. It must decide about its image before doing anything else.
+# It is NOT required to hold a valid image: an update interrupted before its
+# last byte legitimately leaves an unusable one, and a device that says so is
+# behaving correctly. A device that claimed the image was fine would be the
+# defect, and that is what `updater-broken` demonstrates.
+# =============================================================================
+
+id: power-lost-during-update
+name: Power is lost while a device writes its own flash
+description: |
+  Command an update, let it run for a chosen length of virtual time, cut power,
+  restore it, and require the device to boot and to have judged its own flash.
+
+parameters:
+  - { name: node,          type: node,               doc: "the device installing the image" }
+  - { name: command_symbol, type: injectable_symbol, doc: "the global the harness writes to start an update" }
+  - { name: state_symbol,  type: injectable_symbol,  doc: "the global the firmware writes as it advances, so the post-cut state is readable without parsing a console" }
+  - { name: idle_state,    type: number,             doc: "the value that state holds on a boot which validated and stopped. A device that resumed an update by itself would not be at rest here" }
+  - { name: cut_at,        type: duration,           doc: "how long the update runs before power is lost. The swept parameter" }
+  - { name: boot_timeout,  type: duration,           doc: "how long the device may take to reach its entry point" }
+  - { name: return_window, type: duration,           doc: "how long it has to say it came back after power returns" }
+
+sweep:
+  around: cut_at
+  # Strict, but the choice barely matters here: nothing flips at the boundary,
+  # so neither side is 'the faulting one'. It is declared because the generator
+  # requires a comparison, and strict is the honest reading — `cut_at` is a
+  # duration that has elapsed, not a limit being crossed.
+  comparison: strict
+  # One millisecond of virtual time. Finer than this stops being resolvable
+  # against the device's own console cadence, and coarser skips whole phases of
+  # a short update.
+  step: 1ms
+  expectation: invariant
+
+# {{param}} is substituted per test; {{value}} is this variant's cut instant.
+# {{boot_text}} is the entry point the topology already declares for the node,
+# so it is not restated here — two spellings of one string is how two sources of
+# truth start.
+steps:
+  - wait_uart:
+      node: "{{node}}"
+      text: "{{boot_text}}"
+      timeout_ms: "{{boot_timeout}}"
+
+  - mark: "device up, image not yet installed"
+
+  # Start the update. The command lives in RAM, so a power cut erases it and the
+  # device that comes back does not resume — which is what makes the state after
+  # the cut observable rather than repaired.
+  - write_symbol:
+      node: "{{node}}"
+      symbol: "{{command_symbol}}"
+      value: 1
+
+  - mark: "update commanded"
+
+  # THE CUT POINT. Everything before this line is identical in every variant of
+  # this sweep; this is the only thing that differs between one test and the
+  # next.
+  - run_for: { ms: "{{value}}" }
+
+  - power_cut: "{{node}}"
+  - mark: "power lost"
+  - power_restore: "{{node}}"
+
+  # It must come back. A bricked device fails this by silence, and the check
+  # only accepts a line the reboot itself produced.
+  - expect_boots:
+      node: "{{node}}"
+      within_ms: "{{return_window}}"
+      label: "the device boots after power is lost at {{value}} ms"
+
+  # And it must have judged its own flash before doing anything else. A device
+  # found mid-update here would have resumed on its own, which would repair the
+  # very state this test exists to inspect.
+  - expect_symbol:
+      node: "{{node}}"
+      symbol: "{{state_symbol}}"
+      equals: "{{idle_state}}"
+      label: "it validated its flash and came to rest, rather than resuming"

@@ -1386,6 +1386,227 @@ run_suite.py --tier full                          90 of 90 passed, 17m 31s
 The three skips are the rule-pack dimension of Guard 4 and two that predate this
 work.
 
+## Phase 3 §3.2 — the power verbs ✓
+
+2026-09-01, branch `v2-phase1`. PROJECT-V2 §10.5 POWER & LIFECYCLE, §10.6, §1.6.
+The test a customer cannot run on a bench at any price: cut power at a chosen
+instant during a firmware update, hundreds of times, each attempt risking a
+board.
+
+### What was built
+
+| | Where |
+|---|---|
+| `power_cut`, `power_restore` | `harness/verbs/`, class `power`, handlers in the compiler |
+| `expect_flash`, `expect_boots` | `harness/verbs/`, class `assert` |
+| The emulator-side half | `bench_power_cut`, `bench_power_restore`, `bench_expect_flash`, `bench_uart_expect_after` in `can_toolkit.py` |
+| The device | `projects/demo-ev/firmware/updater/` — installs an image into its own flash and validates it on every boot |
+| The defect | `projects/demo-ev/firmware/updater-broken/` — one change: the header is written **before** the payload it vouches for |
+| Its world | `network-ota.yml`, `catalog-ota.yml`, `scenarios-ota/`, board `ota_ecu` |
+| The shape | `patterns/power-lost-during-update.yml` |
+| The emulator, pinned | `scripts/check-flash-model.sh` |
+
+**No flash controller was written, and that is the finding rather than a gap** —
+see the correction below.
+
+### The spike, which ran first and earned it
+
+Every row measured on this machine before any verb code was written.
+
+| Question | Answer |
+|---|---|
+| Is there a flash controller for this chip? | **Yes** — `MTD.STM32H7_FlashController` @ `0x52002000`, already wired to both banks in the stock H743 platform |
+| Does `machine Reset` reboot from flash? | **No.** PC and SP go to `0`, then *"PC does not lay in memory… CPU was halted"* |
+| Can we make it? | **Yes** — re-apply `VectorTableOffset` after the reset. Two banners, booted from flash alone, nothing reloaded |
+| Does `machine Reset` wipe RAM? | **No.** RAM survives it |
+| Wipe RAM without touching flash? | **Yes** — `sysbus ZeroRange` |
+| Stop at an exact instruction? | **Yes** — `ExecutionMode SingleStep` + `Step 1000` → `ExecutedInstructions` exactly `0x3E8`, then `0x5DC` |
+| Is a brick detectable programmatically? | **Yes** — `IsHalted: True`, zero instructions, no banner |
+| Can Renode load a custom C# peripheral? | **Yes** — compiled at `include` time, read back `0xBEC0FFEE` |
+| Does Zephyr's flash driver work here? | **Yes** — real `flash_stm32h7`, 32-byte write blocks, 16 sectors of 128 KiB |
+| Does `machine Reset` keep the symbol table? | **No.** `GetSymbolAddress` fails on a symbol that resolved a moment earlier |
+
+Two of those changed the design. `machine Reset` not rebooting is why
+`power_restore` re-points the vector table. `machine Reset` not wiping RAM is
+why `power_cut` wipes explicitly — a cut built on `Reset` alone would have been
+`reset` wearing another verb's name.
+
+### The correction: no flash model was needed
+
+I reported that Renode's controller does not enforce NOR semantics, that we
+would have to build one, and that until then we would under-report bricking.
+**That was wrong, and the wrong part was the probe.** It used
+`sysbus WriteDoubleWord`, which is a debugger's backdoor into the memory behind
+the controller — it never touches the controller at all.
+
+The fair test is a write from **firmware, through the driver**:
+
+```
+probe: rewrite-without-erase rc=-5          EIO, the write was rejected
+probe: after-rewrite first=a0a1a2a3         the data did not change
+probe: NOR one-way-bits-enforced
+```
+
+Renode's model implements unlock, sector erase, programming **and**
+erase-before-write. Building our own would have duplicated a working shipped
+model. `scripts/check-flash-model.sh` pins the four properties instead, so an
+emulator upgrade that regressed one is caught rather than silently changing
+every OTA verdict:
+
+```
+  Renode 1.16.1, MTD.STM32H7_FlashController
+  ok       the flash device is present and the driver binds to it
+  ok       erase sets the sector to 0xFF
+  ok       a program lands and reads back
+  ok       erase-before-write is enforced, and the driver is told
+```
+
+### The fidelity limit
+
+In the model, a 32-byte flash word program and a 128 KiB sector erase are
+**atomic**; real hardware can lose power mid-word or mid-sector and leave cells
+in an indeterminate state. **Partial-ness in these results therefore comes from
+cutting between chunks, not within one.**
+
+**Direction of the inaccuracy: we under-report bricking** — the flattering
+direction. A partially-programmed flash word that would read back as garbage on
+real silicon reads here as either fully written or fully unwritten. A real
+second Zephyr image and byte-level interruption are a Phase 5 fidelity upgrade.
+
+### The two ways this verb could have lied
+
+Both would have passed a suite that only counted verdicts. Both are now tests in
+`harness/tests/test_power_verbs.py`.
+
+**Reloading the binary on restore.** Every corrupted image would heal itself and
+every cut point would report "recovered". The restore calls `LoadSymbolsFrom`,
+which restores the **host's** name table and writes nothing into the device —
+measured: a sentinel written into the update slot is still there, byte for byte,
+afterwards. A test asserts no loading call appears in the toolkit or in the
+handler.
+
+That test tripped on its own documentation at first: it searched for the bare
+word `LoadELF`, and the toolkit explains at length that it must never call it,
+so the prose describing the rule failed the rule. It now searches for the two
+call forms. A guard that cannot be written about is one nobody explains.
+
+**Resetting instead of cutting.** A test requires `ZeroRange` to appear before
+`Reset()` in the toolkit, requires the regions to come from the board file, and
+requires the refusal that fires when a board declares none — because a cut that
+wiped nothing would be a warm reset, and the scenario would still report PASS.
+
+### The false pass this feature actually had
+
+`expect_boots` was built on `bench_uart_expect`, whose documented and correct
+behaviour is that text printed **before** the arm still satisfies the wait. That
+is right for a first boot and catastrophic after a power cut: the banner from
+before the cut was still in the console tail, so the assertion was met at the
+very instant it armed.
+
+```
+406000 EXPECT_ARM t2 ... device boots after the cut
+406000 EXPECT_MET t2 406000
+```
+
+**A bricked device would have passed that check.** Found by reading the event log
+of a scenario whose verdict was PASS — the verdict was green and the assertion
+was empty.
+
+`bench_uart_expect_after` drops the matching buffer at arm time, so only a line
+the reboot itself produced can satisfy it. `bench_uart_expect` is deliberately
+untouched: changing it would change what every existing scenario asserts.
+
+```
+406000 EXPECT_ARM t2 ... device boots after the cut
+406000 STIM console_reset updater dropped=1392
+406207 EXPECT_MET t2 406207
+```
+
+207 µs after the arm, and 1392 bytes of a previous life discarded.
+
+### The demo
+
+Ten cut points across one update, plus the hand-written scenario. **11 of 11
+passed in 55 s** on four workers.
+
+| cut at | chunks written | boots | what the device said about its flash |
+|---|---|---|---|
+| 1 ms | 0 | yes | INVALID no-header, magic=`00000000` (erase not finished) |
+| 2 ms | 0 | yes | INVALID no-header, magic=`00000000` |
+| 3 ms | 9 | yes | INVALID no-header, magic=`ffffffff` (erased) |
+| 4 ms | 28 | yes | INVALID no-header |
+| 5 ms | 48 | yes | INVALID no-header |
+| 6 ms | 67 | yes | INVALID no-header |
+| 7 ms | 86 | yes | INVALID no-header |
+| 8 ms | 105 | yes | INVALID no-header |
+| 9 ms | 124 | yes | INVALID no-header |
+| 12 ms | 128 | yes | **VALID** length=4096 crc=`c2401773` |
+
+Ten of ten recovered — every one booted and told the truth about what it held.
+That is the correct answer for an updater that writes its header last, and the
+console shows the cut mid-sentence: `ota chunk 67/12` and then a fresh banner.
+
+Determinism: the same cut point run twice produced byte-identical event logs and
+identical results.
+
+### Why `expect_flash` exists, demonstrated rather than argued
+
+Run the same ten cut points against `updater-broken` and **it also passes 11 of
+11.** Both firmwares refuse the image at the next boot — one because there is no
+header, the other because the header's CRC cannot match a payload that is not
+all there:
+
+| cut at | GOOD updater | BROKEN updater |
+|---|---|---|
+| 5 ms | INVALID `no-header` magic=`ffffffff` | INVALID `crc-mismatch` stored=`c2401773` |
+| 9 ms | INVALID `no-header` magic=`ffffffff` | INVALID `crc-mismatch` stored=`c2401773` |
+
+**The boot verdict cannot tell them apart.** What differs is what is left in
+flash, and `expect_flash` is the verb that sees it. One scenario,
+`ota-header-written-last`, run against both binaries:
+
+```
+good    verdict=PASS    expect_flash PASS   expect_boots PASS
+broken  verdict=FAIL    expect_flash FAIL   expect_boots PASS
+```
+
+That is the whole argument for `expect_flash` shipping beside `expect_boots`
+rather than being implied by it.
+
+`expect_boots` has its own negative control: a scenario that cuts power and never
+restores it **fails** with *"nothing matched within the window"*, so the
+assertion is one that can fail.
+
+### Nothing that already existed changed
+
+The OTA work is a second (topology, contract, scenarios) triple beside the
+first, not an addition to it. Adding the updater to `network.yml` would have put
+a fourth machine into every existing test, and putting `ota_status` into
+`catalog.yml` would have broken that file's own rule that every sender is a node
+in the topology.
+
+All 90 existing tests compile **byte-for-byte identically** before and after
+this work (`scripts/compiled-snapshot.py`). 895 unit tests green.
+
+### What has NOT been run
+
+- **The full 90-test suite since this work.** Stage A shows the compiled scripts
+  are identical, which is a strong statement about the compiler and says nothing
+  about the judge; the suite has not been re-run to confirm the verdicts.
+- **`updater-broken` in the divergence gate.** It is exercised by a direct
+  comparison instead. The gate discovers defective builds as siblings of the
+  device under test's own directory, and the powertrain firmwares already occupy
+  that level — wiring this in beside them would offer `updater-broken` to the
+  BMS gate as a defective BMS.
+- **Instruction-exact cutting.** `Step N` was proven exact in the spike, and the
+  verbs cut on virtual time instead. An instruction-addressed cut is what §10.5's
+  `run_to_instruction` is for and it is not built.
+- **`reset`, `brownout`, `power_restore` without a preceding cut.** Three of
+  §10.5's five power verbs are not built; the two that unlock the wedge are.
+- **A sweep of the size the demo script quotes.** Ten cut points, not five
+  hundred. Nothing prevents five hundred except wall clock; the number in
+  PROJECT-V2 §1.6 is a target and this is not it.
+
 ## Known findings
 
 Open defects, observed rather than theorised. Each names what was seen, what it costs,

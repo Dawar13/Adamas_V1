@@ -39,6 +39,39 @@
 # The working target. Two machines demonstrably exchange CAN frames on it.
 # -----------------------------------------------------------------------------
 
+ota_ecu:
+  repl: platforms/boards/ota_ecu.repl
+  zephyr_board: nucleo_h743zi
+  can_peripheral: sysbus.fdcan1
+  uart_peripheral: sysbus.usart3
+  cpu_peripheral: sysbus.cpu
+  vector_table_symbol: null
+  # WHAT A POWER CUT TAKES WITH IT.
+  #
+  # Every volatile region on this part, from the chip's own memory map. The
+  # engine must not guess where a customer's RAM is: a guess that named the
+  # wrong region, or none, would wipe nothing, and power_cut would silently
+  # become a warm reset while the scenario still reported PASS.
+  #
+  # Flash is deliberately absent. That is the whole point of the verb.
+  ram_regions:
+    - { base: 0x24000000, size: 0x80000 }   # axiSram, this board's main SRAM
+    - { base: 0x20000000, size: 0x20000 }   # dtcm
+    - { base: 0x00000000, size: 0x10000 }   # itcm
+    - { base: 0x30000000, size: 0x48000 }   # sram1..3
+    - { base: 0x38000000, size: 0x10000 }   # sram4
+  # Where the core looks for its stack pointer and entry point when power comes
+  # back. An ordinary Cortex-M part reads them from the first two words of
+  # flash; parts that boot elsewhere say so here instead.
+  reset_vector_address: 0x08000000
+  can_bitrate: 500000
+  tier: modelled
+  notes: |
+    ST Nucleo-H743ZI, single Cortex-M7 -- the same die as bms_ecu, entered
+    separately because a board key is an ECU ROLE rather than a chip. This one
+    is the role that writes its own flash, and it is the only board so far that
+    declares what a power cut destroys.
+
 bms_ecu:
   repl: platforms/boards/bms_ecu.repl
   zephyr_board: nucleo_h743zi

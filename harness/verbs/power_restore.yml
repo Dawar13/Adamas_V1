@@ -1,0 +1,42 @@
+# power_restore -- PROJECT-V2 section 10.2. This file IS the verb: its
+# arguments, its refusals and their exact words, and its documentation.
+verb: power_restore
+class: power
+summary: Power comes back. Run from the reset vector as flash now stands
+args:
+  node:
+    type: node_ref
+    required: true
+    must_be: real
+    doc: the device powering up again
+bare_arg: node
+applies_to: [real]
+requires_capabilities: [power_control]
+emits: STIM
+handler: power_restore
+doc: |
+  The other half of power_cut. The core takes its stack pointer and its entry
+  point from the vector table as it now stands in flash, and runs.
+
+  Nothing is loaded and nothing is repaired. If the flash was left holding a
+  half-written image this is where that shows: the device either comes up on it
+  or it does not, and both are answers about the device rather than about the
+  host's copy of the binary.
+
+  The vector address comes from the board file. On an ordinary Cortex-M part it
+  is the start of flash; parts that boot elsewhere say so there.
+refusals:
+  - if: node_is_scripted
+    exit: 2
+    message: |-
+        node {node!r} is a frame player, so it has no power to restore. There is no core behind a player to start.
+  - if: board_names_no_core
+    exit: 2
+    message: |-
+        board {board!r} does not name the core, so there is nothing to start. Add   cpu_peripheral: <name>   to that board in {boards_file}.
+  - if: board_names_no_reset_vector
+    exit: 2
+    message: |-
+        board {board!r} does not say where its reset vector is, so this device cannot be told where to start.
+          Add   reset_vector_address: <hex>   to that board in {boards_file}.
+          On an ordinary Cortex-M part that is the start of flash. The engine must not guess: a guessed address that pointed at nothing would halt the core, and a halted core is indistinguishable from a device that was genuinely bricked -- which is the one thing this verb exists to measure.
