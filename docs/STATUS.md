@@ -2486,3 +2486,59 @@ reports a timeout as `incomplete` — never as a refusal, because a hang is not 
 That protects the tree; it does not fix `build-firmware.sh`, which still has no bound on
 the emulator. Worth a bound there too: §28.2 #14 is the same shape, a long job killed by
 the host and reported as something else.
+
+### KF-3 — one test in ninety-four moves its timestamps between runs of one binary
+
+**Observed** 2026-09-02, during §3.4a step 0. Found by accident: it was the single
+unexplained difference in a before-and-after comparison, and chasing it removed the
+firmware from the picture entirely.
+
+**Same binary, same inputs, two runs**, one shard of 23 tests:
+
+```
+scripts/compare-suites.py --a step0-clean/shard4 --b step0-repeat/shard4
+  22 agreed, 1 differed, 0 could not be compared
+
+  overvolt-sweep-92000-at-200ms
+    the event logs differ: line 45
+      A: 200008 TXN vcu 200 8 0000000002000000
+      B: 200000 TXN vcu 200 8 0000000002000000
+```
+
+No firmware variable, no engine variable, no scenario variable. It reproduced across
+three separate suite runs at a rate of roughly **one test in ninety-four**, landing on a
+different test each time -- `undervolt-sweep-61000` in one run,
+`overvolt-sweep-92000-at-200ms` in two others.
+
+**The shape of it, which is consistent every time.**
+
+| | |
+|---|---|
+| Size | 8 or 9 us, always LATE, never early |
+| Who moves | the VCU and the charger -- never the device under test |
+| When it starts | at an INJECTION instant, and not before |
+| How long it lasts | the rest of the run; every later frame from that node carries the offset |
+| Verdict effect | none observed. Both sides PASS, and the measured latencies are unchanged |
+
+For `overvolt-sweep-92000-at-200ms` the first divergence is at exactly 200 ms, which is
+that test's own injection instant; for `undervolt-sweep-61000` it is at 100 ms. That
+points at the pause-write-resume around a symbol injection resuming the other machines a
+few microseconds off, rather than at anything in the firmware being tested.
+
+**What it costs.** Verdicts are not known to be at risk and none has been seen to move.
+What is at risk is the EQUIVALENCE INSTRUMENT: `compare-suites.py` compares event logs
+byte-for-byte, so a clean "N agreed, 0 differed" across a full suite is now known to be
+partly luck. Every such result in this document was true when measured, and none of them
+can any longer be read as a guarantee that a repeat would agree. That is a statement
+about the instrument, not about any of the refactors it cleared.
+
+**Not fixed, and not scheduled here.** It was found inside §3.4a and is not that task's
+subject; folding a determinism fix into a task about pins would mean two changes and one
+measurement, which is the thing §3.4a step 0 exists to avoid. What it needs first is
+characterisation that this task did not do: whether it happens at N=1 workers, whether it
+is the injection path specifically, and whether a verdict can be made to move by putting
+an assertion boundary on the microsecond where the offset lands.
+
+**How to work around it meanwhile.** A single differing pair in a suite comparison is no
+longer automatically a real difference. Re-run the shard and compare again before
+concluding anything from one: that is exactly how the firmware in §3.4a was cleared.

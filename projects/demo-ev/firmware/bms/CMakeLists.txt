@@ -7,6 +7,7 @@ target_sources(app PRIVATE
 	src/main.c
 	src/safety.c
 	src/can_io.c
+	src/bms_pins.c
 )
 
 # Keep every injectable symbol in the ELF.
