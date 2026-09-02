@@ -2158,6 +2158,283 @@ check-divergence.sh                               gate held, 5 of 5, 0 warnings
 - **Sweeps.** Neither new scenario declares one; both assert a sequence the
   device produces on its own schedule, with no stimulus and no swept dimension.
 
+## Phase 3 §3.3b — the latch verb, and the defect nothing could see ✓
+
+2026-09-02, branch `v2-phase1`. PROJECT-V2 §10.5 ASSERT. The third verb §3.3
+gated, in the form that earns it — and a gap in the suite that only the
+divergence gate could have found.
+
+### The sentence the whole task rests on
+
+Every matcher in this engine carries a value fixed when the scenario was
+WRITTEN. `expect_latched` carries one observed at RUN TIME, from the firmware's
+own transmission. That buys exactly one thing: a latched status is whichever
+value the device raised first, and **which one that is may be decided by a
+priority order the contract does not state**. A scenario is written against the
+contract, so a scenario cannot know it — and an author who names one of the two
+values has written down a guess and called it a requirement.
+
+`firmware/bms-priority-swapped` makes that concrete: the shipping BMS with rule
+2 evaluated before rule 1 and nothing else changed. It is **not defective**, and
+an invariant naming `OVERTEMP` fails it.
+
+**That is measured, not argued.** `fault-code-latched` run against both
+conformant builds, same scenario, same window:
+
+```
+firmware/bms                    PASS   LATCH_SET 0100000000000000  (OVERTEMP)
+firmware/bms-priority-swapped   PASS   LATCH_SET 0200000000000000  (OVERVOLT)
+```
+
+Two correct builds, two different codes off the same tie, **both green**. An
+`expect_always{fault_code: OVERTEMP}` in that scenario would have reddened the
+second one — a conformant device failed for a choice the contract left open,
+which is the failure this verb exists to prevent, shown rather than asserted.
+
+### What was built
+
+| | Where |
+|---|---|
+| `expect_latched` | `harness/verbs/expect_latched.yml`, class `assert`, polarity `expect` |
+| The emulator-side half | `bench_expect_latched` / `bench_latch_resolve` in `can_toolkit.py` |
+| The anchor | `(data & mask)` captured from the first frame in the window; no signal decoder |
+| The scenarios | `scenarios/fault-code-latched.yml`, `scenarios/fault-code-not-overwritten.yml` |
+| The defects | `firmware/bms-broken-wrongcode`, and `firmware/bms-priority-swapped` as the conformant control |
+| The adversarial case | `scenarios/negative/forged-latch-verdict.yml`, and a fourth check in `scripts/check-negative.sh` |
+
+### The gap the gate found, which is the real result of this task
+
+`firmware/bms-broken-wrongcode` keeps evaluating the safety rules after a fault
+has latched, so a condition arising later overwrites the code the first fault
+raised. It was declared with an empty `diverging_tests:` — a declared gap, which
+the gate treats as a failure — and the gate answered:
+
+```
+GAP · 1 defective binary caught by NOTHING in this suite
+    bms-broken-wrongcode  safety rules keep running after the latch
+```
+
+**Caught by 0 of 93.** Not a near miss. Every test scored the defective binary
+exactly as it scored the good one.
+
+**Why nothing saw it.** The latch still HOLDS in that build: `fault_latched`
+stays set, the state machine stays in its terminal FAULT state, the contactor
+stays open, and the frame count on the bus is unchanged — the first build of it
+put 204 fault frames against the shipping BMS's 5, and that tell was removed on
+purpose so the binary would differ in one behaviour only. What moves is *which
+fault it says it has*, and a code can only be overwritten if some rule runs
+after the latch and finds a condition true. Every scenario in the suite either
+holds a fault's cause or removes it, so after the latch **no rule was ever
+true**, nothing was called, and nothing was overwritten. The defect was real and
+dormant in all 93.
+
+That is a statement about the suite, not about the binary: 93 tests over a
+pack's safety rules, complete coverage of every threshold, and not one of them
+asked whether the pack may re-diagnose itself after the fact.
+
+**What closed it.** `fault-code-not-overwritten` latches an over-temperature
+fault, withdraws its cause, then takes the pack over the VOLTAGE limit while it
+sits latched — a condition arising after the verdict rather than before it.
+
+```
+bms-broken-wrongcode   fault-code-not-overwritten  PASS -> FAIL
+    the code survives a condition that arose after the latch
+      -> ALWAYS_FAILED: at=650300 saw=0201000000000000 samples=3
+```
+
+`fault_code` 0x02 (OVERVOLT) where 0x01 (OVERTEMP) was required, 0.3 ms after
+the second condition, over 3 samples.
+
+### expect_latched was put on trial for that defect, and lost
+
+`bms-broken-wrongcode/src/safety.c` says it exists to justify `expect_latched`
+in its value-anchored form, and — to its credit — puts the claim **on trial
+rather than assuming it**:
+
+> THAT CLAIM IS ON TRIAL, NOT ASSUMED. A scenario that knows it injected
+> over-temperature can name OVERTEMP and catch this with an ordinary
+> expectation. The verb only earns its place where the first code is not
+> knowable when the test is written.
+
+The trial was held. The claim does not survive it, for two structural reasons:
+
+1. **The overwrite cannot be put inside the window.** `expect_latched` anchors
+   on the first frame in its window, and every whole-window verb calls
+   `_run_window()` — it runs the emulation for its own duration. A stimulus
+   written before the verb lands before the anchor, so the defective build has
+   already changed the code and the anchor is simply the NEW value, which then
+   holds. A stimulus written after it lands after the window closed. There is no
+   third place to put it.
+
+2. **No post-latch rule fires on a timeout**, so the effect cannot be made to
+   arrive late on its own. This was tried first, and it is the interesting
+   negative: `node_silence` on the VCU puts the stimulus outside the window and
+   its 300 ms effect inside it. Rule 4 is RUNNING-only and a latched pack is in
+   FAULT, so the rule is never reached. Of the five rules only over-temperature
+   and over-voltage are evaluated in FAULT at all, and both read a symbol that
+   changes the instant it is written.
+
+```
+the node_silence attempt, against bms-broken-wrongcode
+    PASS   LATCH_SET t4 0100000000000000 @1000300
+           LATCH_HELD t4 value=0100000000000000 after=2
+```
+
+A green verdict proving nothing — the outcome the whole gate exists to prevent,
+reached here by our own instrument. So the ordinary invariant catches this one,
+exactly as the firmware header predicted, and **`expect_latched` keeps only the
+ground it actually holds**: a priority tie the contract does not fix, which is
+`fault-code-latched` measured beside `firmware/bms-priority-swapped`.
+
+Naming `OVERTEMP` in `fault-code-not-overwritten` is not the guess the verb
+removes. That guess is about PRIORITY — which of two rules true in the SAME TICK
+wins. This file never creates the tie: exactly one rule is true when the fault
+is raised, and the second condition is introduced only after the first has
+latched and been observed, so it can never race it. Measured against the build
+that would expose the difference: `fault-code-not-overwritten` on
+`bms-priority-swapped` is **PASS, ALWAYS_HELD samples=2** — swapping the rule
+order changes nothing, because no tie is ever created.
+
+### What fault-code-latched adds, and what it does not
+
+It does not find a defect the other seventeen miss — they all catch
+`bms-broken-latch` already, and the honest count went 17 → 18. What it adds is
+the SHAPE of the failure:
+
+```
+fault-code-latched     LATCH_NEVER_SET  samples=0
+the other seventeen    nothing matched within the window
+```
+
+The difference between *the code I guessed was not there* and *the pack stopped
+restating any code*. Only the second is a statement about latching as such.
+
+### One test caught two builds, by opposite mechanisms
+
+`fault-code-not-overwritten` also reddens `bms-broken-latch`, taking it 18 → 19.
+The mechanism is the inverse, and the instant separates them:
+
+| Build | Mechanism | Broke at |
+|---|---|---|
+| `bms-broken-wrongcode` | latch holds; a later rule republishes over it | 650300 us |
+| `bms-broken-latch` | fault never latched; the later rule fills the space it left | 660400 us |
+
+Both end with `fault_code` reading OVERVOLT where OVERTEMP was required. One
+assertion with two distinct failure paths is not redundant with itself, and both
+markers say so.
+
+### The warning that was left standing
+
+```
+WARNING · 1 of 6 defective binaries is caught by exactly ONE test
+    bms-broken-wrongcode  rests entirely on fault-code-not-overwritten
+```
+
+Not silenced. Only two of the five rules are evaluated in the FAULT state at
+all, so the behaviour is genuinely narrow — but if that one file is deleted or
+its second condition dropped, the binary goes back to invisible and the suite
+returns a clean sweep over a defect it cannot see. This is the same single-file
+fragility §3.2 reported for `expect_flash` and §3.3 for the ordering verbs.
+
+### Equivalence
+
+**Stage A — the compiled scripts.** The 92 pre-existing tests, compiled before
+and after: **byte-for-byte identical**. Both snapshots taken from the same
+repository path with only the engine's CONTENT swapped, per the lesson recorded
+in §3.3 — a git worktree instead makes all of them differ on the line embedding
+the toolkit's own path.
+
+The two new tests are excluded and the reason is stated: the HEAD engine's
+vocabulary is not the before engine's, so comparing 94 against 92 would compare
+two tests against nothing.
+
+**The positive control on that swap**, because "identical" is worthless if the
+swap silently did nothing. With the 44e1679 content in place the engine names
+its 19 verbs and refuses the new one:
+
+```
+step 11: 'expect_latched' is not one of the verbs: can_send, expect_always,
+expect_boots, expect_can, expect_flash, expect_no_can, expect_order, ...
+```
+
+The two snapshots are from two genuinely different engines.
+
+**Stage B — the full suite, once, at the end.** Stage A proves the emulator is
+handed identical commands and can see no further; the judge, the event-log
+parser and the results writer all run after it, and this task changed all three.
+
+```
+before, at 44e1679    92 of 92 passed in 27m 52s
+after                 92 of 92 passed in 27m 50s
+```
+
+All 92 pairs compared by `scripts/compare-suites.py`:
+
+```
+  92 agreed, 0 differed, 0 could not be compared
+
+  SAME ANSWER: every event log byte-identical, every results.json
+  identical outside the entries named below.
+```
+
+**The one difference that had to be there, cut narrowly and printed.**
+`provenance.inputs_sha256` hashes the engine and the engine changed, so those
+entries MUST move — provenance that had not noticed would describe a run made by
+an engine that no longer exists (NN-4). Four entries moved, identically for all
+92:
+
+```
+harness/can_toolkit.py · harness/run_scenarios.py · harness/verb_registry.py
+harness/verbs/expect_latched.yml   (missing from A)
+```
+
+Three engine modules and one new manifest. Nothing else: every firmware binary,
+every platform file, the scenarios, the contract and the board file all held.
+
+**The negative control on that instrument**, because a flag that excused
+everything would pass every test above. The same two directories compared
+WITHOUT the exemption:
+
+```
+  0 agreed, 92 differed, 0 could not be compared
+```
+
+each naming exactly those four entries. The exemption is excusing something
+real, and only that.
+
+### Observed
+
+```
+harness/tests, every module                       953 tests   OK (3 skipped)
+scripts/verb-docs.py --check                      current, 20 verbs
+scripts/compiled-snapshot.py --diff before after  92 of 92 identical
+scripts/check-negative.sh                         4 of 4 adversarial cases correct
+scripts/compare-suites.py --engine-changed        92 agreed, 0 differed
+scripts/compare-suites.py (no exemption)          0 agreed, 92 differed
+check-divergence.sh                               gate held, 6 of 6, 1 warning
+```
+
+The gate is 7 arms over 94 tests — 658 suite runs, ~2h wall.
+
+### What has NOT been run
+
+- **`expect_within_range`.** Still named in `expect_always`'s manifest as the
+  verb for a bounds condition, and still not built: a range needs a signal
+  decoder inside the emulator, across an IronPython 2 process boundary.
+- **A second scenario for `expect_latched`.** It is exercised by exactly one
+  shipped test, `fault-code-latched`. The gate does not warn — `bms-broken-latch`
+  is caught by 19 tests — but only one names the priority claim.
+- **`firmware/bms-priority-swapped` under the WHOLE suite.** It is built and
+  committed and carries NO marker, so it is inert to the gate — it is a
+  CONFORMANT build and the gate's arms are defective ones. The two scenarios
+  that make a claim about it were run against it by hand and both PASS (above);
+  the other 92 have not been, so "it is conformant" is measured exactly where it
+  was asserted and nowhere else. A conformant-arm mode for the gate is the
+  honest fix and does not exist.
+- **`bms-broken-reclose`.** Still built, still markerless, still the evidence for
+  why the verb was gated in §3.3.
+- **Sweeps.** Neither new scenario declares one.
+
 ## Known findings
 
 Open defects, observed rather than theorised. Each names what was seen, what it costs,
