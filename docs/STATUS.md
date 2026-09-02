@@ -1308,6 +1308,11 @@ SAME ANSWER: every event log byte-identical, every results.json
 identical outside the entries named above.
 ```
 
+> **Read this with KF-3.** True when measured, and **not a guarantee a repeat would
+> agree**: one test in ninety-four moves its timestamps between two runs of one binary,
+> so byte-identical event logs across a whole suite hold partly by luck. The result
+> above is not withdrawn; the reading that it proves a rerun would match it is.
+
 ### The one difference that had to be there, cut narrowly and printed
 
 `provenance.inputs_sha256` hashes the engine, and the engine changed — so those
@@ -2113,6 +2118,11 @@ All 90 pairs compared by `scripts/compare-suites.py`:
   identical outside the entries named above.
 ```
 
+> **Read this with KF-3.** True when measured, and **not a guarantee a repeat would
+> agree**: one test in ninety-four moves its timestamps between two runs of one binary,
+> so byte-identical event logs across a whole suite hold partly by luck. The result
+> above is not withdrawn; the reading that it proves a rerun would match it is.
+
 **The one difference that had to be there, cut narrowly and printed.**
 `provenance.inputs_sha256` hashes the engine and the engine changed, so those
 entries MUST move — provenance that had not noticed would describe a run made by
@@ -2377,6 +2387,11 @@ All 92 pairs compared by `scripts/compare-suites.py`:
   identical outside the entries named below.
 ```
 
+> **Read this with KF-3.** True when measured, and **not a guarantee a repeat would
+> agree**: one test in ninety-four moves its timestamps between two runs of one binary,
+> so byte-identical event logs across a whole suite hold partly by luck. The result
+> above is not withdrawn; the reading that it proves a rerun would match it is.
+
 **The one difference that had to be there, cut narrowly and printed.**
 `provenance.inputs_sha256` hashes the engine and the engine changed, so those
 entries MUST move — provenance that had not noticed would describe a run made by
@@ -2525,19 +2540,60 @@ that test's own injection instant; for `undervolt-sweep-61000` it is at 100 ms. 
 points at the pause-write-resume around a symbol injection resuming the other machines a
 few microseconds off, rather than at anything in the firmware being tested.
 
-**What it costs.** Verdicts are not known to be at risk and none has been seen to move.
-What is at risk is the EQUIVALENCE INSTRUMENT: `compare-suites.py` compares event logs
-byte-for-byte, so a clean "N agreed, 0 differed" across a full suite is now known to be
-partly luck. Every such result in this document was true when measured, and none of them
-can any longer be read as a guarantee that a repeat would agree. That is a statement
-about the instrument, not about any of the refactors it cleared.
+**What it costs, stated at full scope.** Verdicts are not known to be at risk and none
+has been seen to move. What is at risk is the EQUIVALENCE INSTRUMENT:
+`compare-suites.py` compares event logs byte-for-byte, so a clean "N agreed, 0 differed"
+across a full suite is now known to be partly luck.
 
-**Not fixed, and not scheduled here.** It was found inside §3.4a and is not that task's
-subject; folding a determinism fix into a task about pins would mean two changes and one
-measurement, which is the thing §3.4a step 0 exists to avoid. What it needs first is
-characterisation that this task did not do: whether it happens at N=1 workers, whether it
-is the injection path specifically, and whether a verdict can be made to move by putting
-an assertion boundary on the microsecond where the offset lands.
+**Every "N agreed, 0 differed" in Phases 2 and 3, including 3.3b's Stage B, was true
+when measured and is not a guarantee a repeat would agree.** That is every positive
+suite-equivalence result in this document, by name:
+
+| Section | Claim as recorded |
+|---|---|
+| §2 equivalence | `90 agreed, 0 differed` |
+| §3.2 equivalence | `90 agreed, 0 differed` |
+| §3.3b Stage B | `92 agreed, 0 differed` |
+
+Each of those was a real measurement and none of them is withdrawn. What is withdrawn is
+the reading that they PROVE a repeat would agree: at roughly one test in ninety-four, a
+rerun of any of them could show a single differing pair for a reason that has nothing to
+do with the refactor it cleared. A reader arriving at those sections later must not read
+them as stronger than they are, and each now carries a pointer here.
+
+The NEGATIVE controls beside them are untouched by this. A result of the shape
+"0 agreed, 92 differed, each naming exactly these entries" does not depend on
+byte-identity holding by luck; it depends on a difference being present, and it was.
+
+**Not fixed here, and deliberately not a rider.** It was found inside §3.4a and is not
+that task's subject; folding a determinism fix into a task about pins would mean two
+changes and one measurement, which is the thing §3.4a step 0 exists to avoid.
+
+**It gets its own task, after Phase 3 closes.** Characterising an 8-9 us peer-node shift
+that begins at an injection instant is an investigation, not a patch. What that task
+needs to establish, none of which this one did:
+
+- whether it happens at N=1 workers, or only under parallel shards;
+- whether the injection path specifically is the cause, as the onset instants suggest;
+- whether a VERDICT can be made to move by placing an assertion boundary on the
+  microsecond where the offset lands -- the question that decides whether this is a
+  cosmetic artefact or a correctness defect;
+- why the offset is always LATE and always on a peer node, never on the device under
+  test.
+
+**A CLEAN RUN WOULD HAVE HIDDEN THIS.** The baseline that exposed it was contaminated,
+and by my own hand: a firmware build and an emulator spike were running on the same
+machine while the suite executed. That produced one unexplained differing pair, which
+looked at first like the §3.4a firmware change perturbing the pack. Chasing it -- old
+binary rebuilt and rerun in isolation, then the same binary run twice -- removed the
+firmware from the picture and left the harness holding the difference.
+
+Had the first baseline been run cleanly, the comparison would very likely have come back
+94 of 94 differing in exactly the two expected entries, the step would have been called
+green, and this would still be sitting in the suite unfound. The contaminated run is the
+only reason it surfaced. That is worth recording precisely because the instinct -- the
+correct instinct -- is to discard a contaminated measurement and rerun it: the discarding
+was right, and the chasing of its one anomaly BEFORE discarding it is what paid.
 
 **How to work around it meanwhile.** A single differing pair in a suite comparison is no
 longer automatically a real difference. Re-run the shard and compare again before
