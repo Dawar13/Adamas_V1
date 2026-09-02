@@ -1991,4 +1991,167 @@ def mc_bench_uart_expect_after(token, node, text, within_ms, label):
         tok, 0, _hex_of([ord(c) for c in want]), 0, within * 1000, _text(label)))
     _write(us, 'STIM', 'console_reset %s dropped=%d' % (name, dropped))
 
+
+# --- pins --------------------------------------------------------------------
+#
+# WHAT A PIN WATCH IS FOR, AND THE LIE IT EXISTS TO PREVENT
+# -----------------------------------------------------------------------------
+# Renode's GPIO hook is EDGE triggered: it fires on a transition and says
+# nothing about the level before the first one. A pin that no firmware ever
+# drives therefore sits at its reset level for the whole run and satisfies any
+# assertion for that level, forever, having done nothing. "The firmware drove
+# it low" and "it was born low" are the same observation to an edge log, and
+# only one of them is a statement about the firmware.
+#
+# So a watch records BOTH: the level at the instant it was installed, before a
+# single instruction of firmware has run, and every transition after it. With
+# those two facts an assertion can say which of the two it was met by, and
+# expect_pin reports it in every verdict rather than leaving it to be assumed.
+#
+# The watch is installed for every observable component at setup, not lazily at
+# the first assertion, because a level captured after the firmware has been
+# running is not an initial level -- it is just another reading.
+
+#: component id -> {'level': bool, 'edges': int, 'initial': bool, 'gpio': obj}
+_PINS = {}
+
+
+def _pin(component, what):
+    name = _s(component)
+    if name not in _PINS:
+        _fail(what, 'pin-not-watched:' + name)
+    return _PINS[name]
+
+
+def mc_bench_pin_watch(component, node, peripheral, index):
+    """bench_pin_watch "<component>" "<node>" "<peripheral>" "<index>"
+
+    Install the state-changed hook and record the level it started at.
+
+    The recorded level is read BEFORE the emulation has been run, so it is the
+    pin's reset level and not an early reading of firmware behaviour. Both the
+    install and every later edge go into the event log, so the host can tell an
+    asserted level that was driven from one that was merely never disturbed."""
+    what = 'pin_watch'
+    name = _s(component)
+    if name == '':
+        _fail(what, 'empty-component')
+    if name in _PINS:
+        _fail(what, 'component-reused:' + name)
+    mach = _node(node, what)['machine']
+    path = _s(peripheral)
+    try:
+        port = mach[path]
+    except Exception:
+        _fail(what, 'no-such-peripheral:%s.%s' % (_s(node), path))
+    idx = _int(index, 'index')
+    try:
+        conns = port.Connections
+        gpio = conns[idx]
+    except Exception:
+        _fail(what, 'no-such-pin:%s.%s#%d' % (_s(node), path, idx))
+    if gpio is None:
+        _fail(what, 'no-such-pin:%s.%s#%d' % (_s(node), path, idx))
+
+    level = bool(gpio.IsSet)
+    state = {'level': level, 'initial': level, 'edges': 0,
+             'node': _s(node), 'path': path, 'index': idx}
+    _PINS[name] = state
+
+    def _edge(new_state, _st=state, _name=name):
+        _st['level'] = bool(new_state)
+        _st['edges'] += 1
+        _write(_now_us(), 'PIN_EDGE', '%s %d %d' % (
+            _name, 1 if _st['level'] else 0, _st['edges']))
+        # Settle anything waiting on this pin, in ARMING order. Resolved here
+        # rather than by polling, so the recorded instant is the transition's
+        # own and not the next time somebody looked.
+        _pin_resolve(_name)
+
+    try:
+        gpio.AddStateChangedHook(_edge)
+    except Exception:
+        _fail(what, 'hook-refused:%s.%s#%d' % (_s(node), path, idx))
+
+    _write(_now_us(), 'PIN_WATCH', '%s %s %s %d %d' % (
+        name, _s(node), path, idx, 1 if level else 0))
+
+
+def mc_bench_expect_pin(token, component, level, within_ms, require_edge, label):
+    """bench_expect_pin "<tok>" "<component>" "<0|1>" "<within_ms>" "<0|1>" "<label>"
+
+    Point-in-time, like expect_symbol: it asks what the pin is doing now, and
+    if that is already the wanted level it is met at latency 0. Unlike
+    expect_symbol it can also WAIT, because a pin the firmware is about to
+    drive is the ordinary case, so an unmet expectation stays armed until its
+    deadline and the edge hook resolves it.
+
+    require_edge is the sharp end. With it set, an already-correct level does
+    NOT satisfy the expectation: only a transition INTO that level, observed
+    inside the window, does. That is the difference between "the coil is
+    deasserted" -- which is also true of a coil that was never connected -- and
+    "the firmware deasserted the coil"."""
+    what = 'expect_pin'
+    tok = _s(token)
+    if tok == '':
+        _fail(what, 'empty-token')
+    if tok in _EXPECTS:
+        _fail(what, 'token-reused:' + tok)
+    st = _pin(component, what)
+    want = _int(level, 'level') != 0
+    within = _int(within_ms, 'within_ms')
+    need_edge = _int(require_edge, 'require_edge') != 0
+    us = _now_us()
+
+    entry = {'id': -1, 'value': [], 'mask': [], 'pin': _s(component),
+             'want': want, 'need_edge': need_edge,
+             'edges_at_arm': st['edges'],
+             'armed_us': us, 'deadline': us + within * 1000, 'met_us': None}
+
+    # Already at the wanted level, and the caller did not demand a transition.
+    # Met now -- and the event log says WHICH of the two ways it was met, so a
+    # pass on an undriven pin is visible rather than indistinguishable.
+    met_now = (st['level'] == want) and not need_edge
+    if met_now:
+        entry['met_us'] = us
+        entry['met_by'] = 'level' if st['edges'] else 'initial_level'
+    _EXPECTS[tok] = entry
+    _EXPECT_ORDER.append(tok)
+
+    _write(us, 'EXPECT_ARM', '%s %x %s %s %d %s' % (
+        tok, 0, '01' if want else '00', 'ff', within * 1000, _text(label)))
+    _write(us, 'PIN_STATE', '%s %d %d %d %d' % (
+        _s(component), 1 if st['level'] else 0, st['edges'],
+        1 if st['initial'] else 0, 1 if need_edge else 0))
+    if met_now:
+        _write(us, 'EXPECT_MET', '%s %d' % (tok, us))
+        _write(us, 'MARK', 'expect_pin_met_by %s %s' % (tok, entry['met_by']))
+
+
+def _pin_resolve(name):
+    """Called from the edge hook path: settle any armed expectation on a pin.
+
+    Kept separate from the hook itself so that the hook stays the smallest
+    thing that can run inside the emulation, and so the resolution order is the
+    arming order rather than the hook registration order."""
+    st = _PINS.get(name)
+    if st is None:
+        return
+    us = _now_us()
+    for tok in _EXPECT_ORDER:
+        entry = _EXPECTS.get(tok)
+        if entry is None or entry.get('pin') != name:
+            continue
+        if entry['met_us'] is not None:
+            continue
+        if us > entry['deadline']:
+            continue
+        if st['level'] != entry['want']:
+            continue
+        entry['met_us'] = us
+        entry['met_by'] = 'edge'
+        _write(us, 'EXPECT_MET', '%s %d' % (tok, us))
+        _write(us, 'MARK', 'expect_pin_met_by %s edge' % tok)
+
+
 print 'can_toolkit loaded'

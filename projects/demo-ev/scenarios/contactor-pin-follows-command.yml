@@ -1,0 +1,125 @@
+# contactor-pin-follows-command — the coil, not the number the pack publishes about it.
+# =============================================================================
+# THIS FILE IS PROJECT DATA. The component name comes from components.yml, the
+# node name from network.yml, and every duration below is derived from a dwell
+# declared in the firmware's own header.
+#
+# WHAT THIS ASSERTS THAT NOTHING ELSE IN THE SUITE CAN
+# -----------------------------------------------------------------------------
+# `contactor_state` in 0x602 is a number the BMS publishes about itself,
+# computed by contactor_for() in main.c. precharge-order asserts on it and so
+# does every boundary test that mentions the contactor. All of them read ONE
+# value from ONE computation, so none of them can separate a pack that closed
+# the main contactor from a pack that decided to and never drove the coil.
+#
+# This file asserts on the coil. Everything downstream of the decision — the
+# GPIO driver, the port register write, the electrical level — is inside the
+# system under test here and is assumed by every other test in the suite.
+#
+# THE PRECHARGE CLAIM IS THE ONE THAT MATTERS
+# -----------------------------------------------------------------------------
+# Step 4 is the reason this file is worth its runtime. During the precharge
+# dwell the pack reports contactor_state = PRECHARGE and the current path is
+# through the precharge resistor: the MAIN contactor is still open, and closing
+# it early is how an inrush destroys a contactor and welds it shut. That claim
+# has never been checked against the hardware, only against the pack's own
+# description of itself.
+#
+# WHY THE LEVELS ARE `low` AND `high` AND NOT `energised`
+# -----------------------------------------------------------------------------
+# The level is electrical, because that is the one reading the emulator
+# actually observes and therefore the one that cannot be wrong. The board's
+# polarity lives in the firmware's own devicetree overlay (GPIO_ACTIVE_HIGH)
+# and is duplicated in components.yml for LABELLING only — see that file for
+# why a duplicate that cannot move a verdict is the only kind worth keeping.
+# The report renders these as "energised" and "deasserted".
+#
+# WHAT A FAILURE HERE MEANS
+# -----------------------------------------------------------------------------
+# The bus is still correct. 0x602 still reports the right contactor_state, the
+# state machine still runs, no fault is raised, and every other test in the
+# suite still passes. What moved is the wire — which on a vehicle is a
+# high-voltage system in a state nobody is reporting.
+# =============================================================================
+
+id: contactor-pin-follows-command
+title: The main contactor coil follows the contactor decision, and not before it
+description: >
+  Watch the physical coil through the whole startup: deasserted while standing
+  by, still deasserted for the entire precharge dwell, and energised only once
+  the pack has committed to CLOSED. Nothing is injected — the sequence is the
+  device's own, driven by the charger, and what is asserted is the pin rather
+  than the frame that describes it.
+
+steps:
+
+  # 1. Nothing is asserted until the device under test says it is up.
+  - wait_uart:
+      node: bms
+      text: "BMS ready"
+      timeout_ms: 500
+
+  - mark: "pack standing by, coil must be cold"
+
+  # 2. The coil is deasserted at boot.
+  #
+  #    This one is deliberately met by `initial_level`, and the report will say
+  #    so. The pin has not moved, because nothing has asked it to — and a coil
+  #    that is cold because the firmware has not touched it is exactly what a
+  #    standing-by pack should look like. No require_edge here: demanding a
+  #    transition would demand the firmware energise the contactor in order to
+  #    prove it had not.
+  #
+  #    It is still worth asserting. It establishes the level the later
+  #    transition is a transition FROM, and a pin found high here would mean
+  #    the coil came up energised, which is the worst startup a pack has.
+  - expect_pin:
+      component: main_contactor
+      level: low
+      label: "coil deasserted while the pack stands by"
+
+  # 3. Into the precharge dwell.
+  #
+  #    THE ARITHMETIC HERE DEPENDS ON A FACT THAT IS NOT OBVIOUS: wait_uart is
+  #    a whole-window verb, so it runs the emulation for its full timeout_ms
+  #    even when the text arrives in the first millisecond. The banner lands at
+  #    200 us and step 1 still leaves the clock at 500 ms. Getting this wrong
+  #    is what the first draft of this file did -- it ran 700 ms from 500 ms,
+  #    landed at 1200 ms with the coil long since energised, and failed both
+  #    later steps for a reason that had nothing to do with the firmware.
+  #
+  #    From 500 ms: STANDBY -> PRECHARGE is at 600 ms, driven by the charger's
+  #    own session request, and the dwell is BMS_PRECHARGE_DWELL_MS = 200 ms,
+  #    so PRECHARGE -> CHARGING is at 800 ms. 200 ms of run puts the next
+  #    assertion at 700 ms: the middle of the dwell, 100 ms clear of each edge.
+  - run_for: 200
+
+  - mark: "inside the precharge dwell: resistor in circuit, main contactor open"
+
+  # 4. THE CLAIM. Mid-dwell, with the pack reporting PRECHARGE on the bus, the
+  #    main contactor coil must still be cold. A firmware that energises here
+  #    has closed the main contactor onto an uncharged bus, and 0x602 would say
+  #    PRECHARGE throughout — correct, and describing something that did not
+  #    happen.
+  - expect_pin:
+      component: main_contactor
+      level: low
+      label: "main contactor still open DURING the precharge dwell"
+
+  # 5. The commit. PRECHARGE -> CHARGING lands at 800 ms and the coil follows
+  #    in the same tick; the assertion is armed at 700 ms, so 300 ms of window
+  #    covers it with 200 ms to spare.
+  #
+  #    require_edge is set, and this is the step it exists for. Without it the
+  #    expectation could be satisfied by a pin that was already high — which,
+  #    on a build that never drives the coil at all, it would never be; but on
+  #    a build that energises it at boot and leaves it there, it would be, and
+  #    that build would pass an assertion that the pack CLOSED the contactor
+  #    while having closed it 800 ms too early. Demanding the transition is
+  #    demanding that the firmware acted, here, now.
+  - expect_pin:
+      component: main_contactor
+      level: high
+      within_ms: 300
+      require_edge: true
+      label: "coil energised only once the pack commits to CLOSED"

@@ -287,6 +287,24 @@ void bms_handle_charge_lost(bms_t *c, bool lost);
 void bms_safety_run(bms_t *c);
 
 /* ---------------------------------------------------------------------------
+ * bms_pins.c - the contactor as a physical output, not only a CAN signal.
+ *
+ * contactor_state in 0x602 is what this node SAYS the contactor is doing, and
+ * expect_can and expect_symbol both read it from the same computation. The
+ * coil pin is the thing itself. See bms_pins.c for why that distinction is
+ * worth a driver, and for why driving it prints nothing.
+ * ------------------------------------------------------------------------ */
+
+/* Configure the coil output. Announces its own failure; never fails silently,
+ * because a pin that was never configured reads exactly like a contactor that
+ * is correctly open. */
+void bms_pins_init(void);
+
+/* Drive the coil from this tick's decision. Called after derive_outputs() and
+ * before the transmit stage, so the pin cannot lag the frame reporting it. */
+void bms_pins_update(const bms_t *c);
+
+/* ---------------------------------------------------------------------------
  * can_io.c
  * ------------------------------------------------------------------------ */
 int  bms_can_init(void);              /* device, both filters, can_start   */

@@ -1,0 +1,86 @@
+# components.yml -- the physical things attached to a node. PROJECT-V2 §9.4.
+# =============================================================================
+# THIS FILE IS PROJECT DATA. It names no Renode class and no peripheral: a
+# component says WHICH NODE it belongs to and WHICH BOARD PIN it sits on, and
+# boards.yml turns that pin name into a peripheral and an index. Three files,
+# one wire, and only the board file knows what the silicon calls it.
+#
+#   scenario         expect_pin: { component: main_contactor, ... }
+#   components.yml   main_contactor -> node bms, pin `coil`
+#   boards.yml       bms_ecu.pins.coil -> sysbus.gpioPortD index 4
+#
+# -----------------------------------------------------------------------------
+# WHY THIS FILE EXISTS AT ALL, WHEN A SCENARIO COULD JUST NAME A PIN
+# -----------------------------------------------------------------------------
+# Because a pin number is not a claim and a component is. `gpioPortD#4 is high`
+# says nothing a safety engineer can review; `the main contactor is energised`
+# is a sentence about the vehicle, and it is the sentence that has to survive
+# the board being rewired. A scenario that named the pin would have to be
+# edited when the coil moved, which is exactly the coupling boards.yml exists
+# to prevent for every other peripheral.
+#
+# -----------------------------------------------------------------------------
+# WHAT IS DELIBERATELY NOT HERE YET
+# -----------------------------------------------------------------------------
+# §9.4 also gives components `initial`, `units` and `range`, which exist for
+# MODELLED SENSORS -- so that set_component can take 60.0 degC rather than a
+# register value, and so that a range generates plausibility obligations. No
+# sensor is modelled yet, so those fields are absent rather than present and
+# unused. A field nobody reads is a promise nothing keeps.
+# =============================================================================
+
+components:
+
+  # ---------------------------------------------------------------------------
+  # The main contactor coil.
+  # ---------------------------------------------------------------------------
+  # The high-voltage contactor is the BMS's one physical output. Until §3.4a it
+  # existed only as `contactor_state` inside 0x602 -- a number the firmware
+  # publishes about itself, computed by the same function that decides it. Both
+  # expect_can and expect_symbol read that one value, so neither can separate a
+  # pack that closed the contactor from a pack that believes it did.
+  - id: main_contactor
+    node: bms
+    pin: coil
+    type: actuator.relay
+
+    # OUTPUT: the firmware drives it, the emulator observes it. expect_pin may
+    # assert on it; set_pin must REFUSE it, because writing a pin the firmware
+    # configured as an output is a write the next tick silently overwrites --
+    # an injection that reads as though it happened. The refusal is in the verb
+    # manifest and this line is what triggers it.
+    direction: output
+
+    # Whether expect_pin may assert on it at all (§9.4). A component that is
+    # not observable is still declared -- it is part of the system -- but no
+    # assertion may be written against it, so nobody can write a test whose
+    # subject the bench cannot see.
+    observable: true
+
+    # Drives obligations later (§9.4). Recorded now because it is true now, and
+    # because a safety-critical output that only became safety-critical when
+    # someone remembered to say so is the wrong default.
+    safety_critical: true
+
+    # POLARITY, AND WHY IT CANNOT CORRUPT A VERDICT.
+    #
+    # The board energises the coil by driving the pin HIGH, which the firmware's
+    # own overlay states as GPIO_ACTIVE_HIGH. That is a fact about the board,
+    # and there are now two independent statements of it -- the overlay and this
+    # line -- with nothing cross-checking them.
+    #
+    # So this field is NOT used to decide anything. expect_pin asserts on the
+    # ELECTRICAL level, `high` or `low`, because that is what the emulator
+    # actually observes and it is the one reading that cannot be wrong. This
+    # line is used only to RENDER the label -- "energised" beside "high" -- so
+    # that a report reads like a vehicle. If it ever disagreed with the overlay
+    # the label would read oddly and no verdict would move, which is the only
+    # safe place to put an unverifiable duplicate.
+    active: high
+    asserted_name: energised
+    deasserted_name: deasserted
+
+    description: >
+      The main high-voltage contactor coil. Energised only when the pack has
+      committed to CLOSED -- never during the precharge dwell, when the current
+      path is through the precharge resistor and the main contactor is open.

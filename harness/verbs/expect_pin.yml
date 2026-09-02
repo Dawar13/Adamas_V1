@@ -1,0 +1,83 @@
+# expect_pin -- PROJECT-V2 §10.2 and §9.4. This file IS the verb: its arguments,
+# its refusals and their exact words, and its documentation.
+verb: expect_pin
+class: assert
+polarity: expect
+summary: Demand that a component's pin is at an electrical level
+args:
+  component:    { type: component_ref, required: true }
+  # The ELECTRICAL level, `high` or `low`. Parsed by the handler, as every
+  # other verb's values are -- the registry checks that a type has a parser,
+  # not that a string is one of two words.
+  level:        { type: text, required: true }
+  # Omit it for the instantaneous question -- what is the pin doing now.
+  # An explicit 0 is refused, as it is for every other windowed verb: a
+  # window of no time observes nothing.
+  within_ms:    { type: window_ms }
+  require_edge: { type: boolean, default: false }
+  label:        { type: label }
+applies_to: [real]
+requires_capabilities: [pin_read]
+emits: EXPECT_ARM
+resolves: [EXPECT_MET]
+handler: expect_pin
+doc: |
+  Asserts on the thing itself rather than on what the firmware says about it.
+
+  Every other assertion this engine has about an output reads a value the
+  firmware computed: expect_can decodes a frame the firmware filled in, and
+  expect_symbol reads the variable the firmware wrote. Both are downstream of
+  one computation, so neither can separate a device that ACTED from a device
+  that merely decided to. A pin is the act.
+
+  The level is ELECTRICAL -- `high` or `low` -- because that is what the
+  emulator observes and it is the one reading that cannot be wrong. Polarity
+  lives in the board's own devicetree overlay and is duplicated, for labelling
+  only, in components.yml; see that file for why a duplicate that cannot move
+  a verdict is the only kind worth having.
+
+  With `within_ms` omitted this is instantaneous, like expect_symbol: a
+  statement about now. With a window it stays armed and is settled by the pin's
+  own transition, at the transition's instant rather than at the next poll.
+
+  REQUIRE_EDGE, AND THE FAILURE THIS VERB IS MOST EXPOSED TO. Renode's GPIO
+  hook is edge triggered. A pin nothing ever drives sits at its reset level for
+  the whole run and will satisfy an assertion for that level having done
+  nothing at all -- the same green as a firmware that drove it there
+  deliberately. Every verdict therefore records which of the two happened:
+
+      met_by: edge            a transition into the level, inside the window
+      met_by: level           already there, and the pin has moved before now
+      met_by: initial_level   already there, and the pin has NEVER moved
+
+  `initial_level` is not automatically wrong. "The coil is deasserted before
+  precharge" is a real claim about a pin that is legitimately undriven, and
+  refusing it would forbid a true assertion. So the engine reports rather than
+  refuses -- and `require_edge: true` is how a scenario demands the stronger
+  thing, that the FIRMWARE put the pin there. Use it wherever the point is that
+  the device acted.
+refusals:
+  - if: no_components_file
+    exit: 2
+    message: |-
+        this project declares no components, so {component!r} names nothing.
+        A component is declared in components.yml (PROJECT-V2 section 9.4)
+  - if: no_such_component
+    exit: 2
+    message: |-
+        components.yml declares no component {component!r}
+  - if: component_not_observable
+    exit: 2
+    message: |-
+        component {component!r} is not declared observable, so nothing may
+        assert on it. Set `observable: true` in components.yml if the bench
+        can really see it
+  - if: component_has_no_pin
+    exit: 2
+    message: |-
+        component {component!r} names no pin, so there is no level to read
+  - if: node_is_scripted
+    exit: 2
+    message: |-
+        component {component!r} belongs to node {node!r}, which has no firmware
+        behind it and therefore drives no pins

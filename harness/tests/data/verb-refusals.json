@@ -18,6 +18,13 @@
     "sequence_not_a_list": "test-scenario.yml: step 1: expect_order: 'sequence' is the ordered list of frames, so it must be a list. It is a mapping.\n  Write it as   sequence: [ { id: ..., signals: {...} }, { id: ..., signals: {...} } ]   with the entries in the order they must first appear.",
     "sequence_too_short": "test-scenario.yml: step 1: expect_order: 'sequence' has 1 entry, and an order needs at least two things to be in.\n  For a single frame, use   expect_can: { id: ..., within_ms: ... }   which is the verb for that."
   },
+  "expect_pin": {
+    "component_has_no_pin": "test-scenario.yml: step 1: component 'pinless_thing' names no pin, so there is no level to read",
+    "component_not_observable": "test-scenario.yml: step 1: component 'unwatched_thing' is not declared observable, so nothing may\nassert on it. Set `observable: true` in components.yml if the bench\ncan really see it",
+    "no_components_file": "test-scenario.yml: step 1: this project declares no components, so 'main_contactor' names nothing.\nA component is declared in components.yml (PROJECT-V2 section 9.4)",
+    "no_such_component": "test-scenario.yml: step 1: components.yml declares no component 'not_a_component'",
+    "node_is_scripted": "test-scenario.yml: step 1: component 'played_thing' belongs to node 'motor', which has no firmware\nbehind it and therefore drives no pins"
+  },
   "expect_symbol": {
     "node_is_scripted": "test-scenario.yml: step 1: node 'motor' has no firmware behind it, so it has no memory to read"
   },

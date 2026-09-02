@@ -55,6 +55,10 @@ PROJECT_ENV = "BENCH_PROJECT"
 NETWORK_FILE = "network.yml"
 CATALOG_FILE = "catalog.yml"
 BOARDS_FILE = "boards.yml"
+#: PROJECT-V2 section 9.4. OPTIONAL, and optional on purpose: a project that
+#: models no components is a complete project, and every verb that needs this
+#: file refuses by name when it is absent rather than inventing a default.
+COMPONENTS_FILE = "components.yml"
 PATTERN_DIR = "patterns"
 SCENARIO_DIR = "scenarios"
 RUNS_DIR = "runs"
@@ -105,6 +109,11 @@ def catalog_path(explicit=None, project=None) -> Path:
 
 def boards_path(explicit=None, project=None) -> Path:
     return Path(explicit) if explicit else project_root(project) / BOARDS_FILE
+
+
+def components_path(explicit=None, project=None) -> Path:
+    """Where components.yml would be. May not exist; see COMPONENTS_FILE."""
+    return Path(explicit) if explicit else project_root(project) / COMPONENTS_FILE
 
 
 def patterns_dir(explicit=None, project=None) -> Path:

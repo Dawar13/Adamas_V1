@@ -519,6 +519,93 @@ class BoardBook:
         return entry
 
 
+class ComponentBook:
+    """The physical things attached to nodes. PROJECT-V2 section 9.4.
+
+    OPTIONAL, and the optionality is the interesting part. A project that
+    models no components is a complete project, so this book can be EMPTY and
+    still valid -- but a scenario that names a component in a project with no
+    components.yml must be told exactly that, rather than "no such component",
+    which would send a reader looking for a typo in a file that does not exist.
+
+    A component names its node and a pin KEY. It never names a peripheral: the
+    key is resolved through that node's board entry, so the one place a
+    peripheral name may appear stays the one place it appears.
+    """
+
+    def __init__(self, data, source: Path, present: bool):
+        self.source = source
+        self.present = present
+        if data is None:
+            data = {}
+        if not isinstance(data, dict):
+            raise CompileError("%s: expected a mapping with `components:`" % source)
+        entries = data.get("components")
+        if entries is None:
+            entries = []
+        if not isinstance(entries, list):
+            raise CompileError(
+                "%s: `components:` must be a list of components" % source)
+        self._by_id = {}
+        for n, entry in enumerate(entries):
+            where = "%s: component %d" % (source, n + 1)
+            if not isinstance(entry, dict):
+                raise CompileError("%s is not a mapping" % where)
+            cid = entry.get("id")
+            if not cid:
+                raise CompileError(
+                    "%s has no `id`, so nothing can refer to it" % where)
+            cid = str(cid).strip()
+            if cid in self._by_id:
+                raise CompileError(
+                    "%s: component %r is declared twice. Two components with "
+                    "one name means an assertion cannot say which it meant"
+                    % (source, cid))
+            if not entry.get("node"):
+                raise CompileError(
+                    "%s (%r) names no `node`, so it is attached to nothing"
+                    % (where, cid))
+            self._by_id[cid] = entry
+
+    @classmethod
+    def load(cls, path: Path) -> "ComponentBook":
+        path = Path(path)
+        if not path.is_file():
+            # Absent is legal. The refusal for naming a component in a project
+            # that declares none belongs to the verb, which can say so in its
+            # own words.
+            return cls({}, path, present=False)
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise CompileError("cannot read the component file %s: %s" % (path, exc))
+        try:
+            data = yaml.load(text, Loader=StrictBoolLoader)
+        except yaml.YAMLError as exc:
+            raise CompileError("%s is not valid YAML: %s" % (path, exc))
+        return cls(data, path, present=True)
+
+    def keys(self):
+        return sorted(self._by_id)
+
+    def get(self, cid):
+        return self._by_id.get(str(cid).strip())
+
+    def observable(self):
+        """Every component the bench can see, in declaration-stable order.
+
+        Used to install the pin watches, which is why it is a list and not a
+        filter applied at the call site: what is watched must be decided in one
+        place, or a component could be assertable without being watched.
+        """
+        out = []
+        for cid in self.keys():
+            entry = self._by_id[cid]
+            if entry.get("observable") and entry.get("pin"):
+                out.append((cid, entry))
+        return out
+
+
 # ---------------------------------------------------------------------------
 # the scenario
 # ---------------------------------------------------------------------------
@@ -716,6 +803,11 @@ class Compilation:
         self.warnings = []
         self.tier = TIER_VERIFIED
         self.symbol_writes = []
+        #: Every component pin being watched, with the peripheral and index the
+        #: board resolved it to. Recorded so a run explains what it could SEE:
+        #: an empty list means no pin was observable, which a reader must be
+        #: able to tell from "no pin moved".
+        self.pins = []
         self.paths = {}
         #: Snapshot mode only: the script the RESTORE process runs. Empty in
         #: cold mode, so a caller cannot mistake one mode for the other.
@@ -729,7 +821,8 @@ class Compiler:
     """Turns the four input files into one emulator command script."""
 
     def __init__(self, net, cat, boards, scenario, out_dir, translate,
-                 trace_execution=False, project_root=None, registry=None):
+                 trace_execution=False, project_root=None, registry=None,
+                 components=None):
         # Where this project's binaries and platform files are. Resolved once,
         # here, rather than read from a global: two compilations in one process
         # may belong to two different projects.
@@ -737,6 +830,10 @@ class Compiler:
         self.net = net
         self.cat = cat
         self.boards = boards
+        # Optional (PROJECT-V2 section 9.4). An empty book is a valid project,
+        # not a missing input, so it is defaulted here rather than refused.
+        self.components = components if components is not None else ComponentBook(
+            {}, self.project_root / project.COMPONENTS_FILE, present=False)
         self.scenario = scenario
         self.out_dir = Path(out_dir)
         self.translate = translate
@@ -1032,6 +1129,16 @@ class Compiler:
                 % (entry["node"], entry["can_peripheral"], entry["uart_peripheral"])
             )
 
+        # PIN WATCHES. Installed for every observable component before the
+        # emulation has run a single instruction, so the level each one records
+        # is the pin's RESET level and not an early reading of firmware
+        # behaviour. Installed for all of them, not just the ones some
+        # assertion happens to name, because what is watched has to be decided
+        # in one place: a component that were assertable but unwatched would
+        # fail at run time in the middle of a scenario, and a component watched
+        # only when named could never report that it had never moved.
+        self._emit_pin_watches()
+
         dut = self.net.dut()
         primary = dut.id if dut.is_real() else ""
         if not primary:
@@ -1302,6 +1409,163 @@ class Compiler:
         self.result.symbol_writes.append(
             {"step": step.index + 1, "node": node.id, "symbol": symbol, "value": value}
         )
+
+    def _component(self, cid, step, where):
+        """Resolve a component reference, or refuse in the verb's own words.
+
+        Every failure here is a REFUSAL rather than an exception, because each
+        one is a different mistake with a different fix. A project that
+        declares nothing and a project that declares the wrong thing are not
+        the same error: telling the first that its component is unknown would
+        send a reader hunting for a typo in a file that is not there.
+        """
+        name = str(cid).strip()
+        if not self.components.present:
+            self._refuse(step, "no_components_file", component=name)
+        entry = self.components.get(name)
+        if entry is None:
+            self._refuse(step, "no_such_component", component=name)
+        if not entry.get("observable"):
+            self._refuse(step, "component_not_observable", component=name)
+        if not entry.get("pin"):
+            self._refuse(step, "component_has_no_pin", component=name)
+        node = self._node(entry["node"], where)
+        if not node.is_real():
+            self._refuse(step, "node_is_scripted",
+                         component=name, node=node.id)
+        return name, entry, node
+
+    def _pin_of(self, entry, node, where):
+        """Turn a component's pin KEY into a peripheral and an index.
+
+        The key is resolved through the node's own board entry, so a component
+        never names a peripheral and boards.yml stays the only file that does.
+        """
+        board = self.boards.board(node.board, where)
+        pins = board.get("pin_map") or {}
+        if not isinstance(pins, dict):
+            raise CompileError(
+                "%s: board %r has a `pin_map:` that is not a mapping"
+                % (where, node.board))
+        key = str(entry["pin"]).strip()
+        spec = pins.get(key)
+        if spec is None:
+            raise CompileError(
+                "%s: board %r declares no pin %r, so component %r is wired to "
+                "nothing this bench can find. Pins on that board: %s"
+                % (where, node.board, key, entry.get("id"),
+                   ", ".join(sorted(pins)) or "none"))
+        if (not isinstance(spec, dict)
+                or "pin_peripheral" not in spec
+                or "pin_index" not in spec):
+            raise CompileError(
+                "%s: board %r pin %r must name a `pin_peripheral` and a `pin_index`"
+                % (where, node.board, key))
+        return str(spec["pin_peripheral"]).strip(), _as_int(
+            spec["pin_index"],
+            "%s: board %r pin %r pin_index" % (where, node.board, key))
+
+    def _emit_pin_watches(self):
+        watched = []
+        for cid, entry in self.components.observable():
+            where = "%s: component %r" % (self.components.source, cid)
+            node_id = str(entry["node"]).strip()
+            # A NODE THIS TOPOLOGY DOES NOT HAVE IS NOT AN ERROR. components.yml
+            # is a project file and a project may hold more than one (topology,
+            # contract, scenarios) triple -- the OTA world in this very project
+            # is one. A component belonging to another triple is simply not
+            # ours to watch, and refusing to compile because of it would make
+            # one world's components break another world's runs.
+            #
+            # It is still recorded. A silent skip and a typo look identical
+            # from the outside, and the whole reason this file exists is that
+            # something unwatched must never be indistinguishable from
+            # something watched and quiet.
+            try:
+                node = self._node(node_id, where)
+            except CompileError:
+                self.result.warnings.append(
+                    "component %r names node %r, which is not in this "
+                    "topology, so its pin is not watched here" % (cid, node_id))
+                continue
+            if not node.is_real():
+                # A component on a PLAYED node has no firmware to drive it.
+                # That is legal -- the topology is allowed to say a node is a
+                # frame player -- but nothing is watched, and the compilation
+                # records why rather than leaving an absent watch to be
+                # discovered as a run-time refusal mid-scenario.
+                self.result.warnings.append(
+                    "component %r is on node %r, which runs no firmware, so "
+                    "its pin is not watched" % (cid, node_id))
+                continue
+            peripheral, index = self._pin_of(entry, node, where)
+            self._emit(
+                'bench_pin_watch "%s" "%s" "%s" "%d"'
+                % (_safe_name(cid, where), _safe_name(node.id, where),
+                   _safe_name(peripheral, where), index))
+            watched.append({
+                "component": cid,
+                "node": node.id,
+                "peripheral": peripheral,
+                "index": index,
+                "direction": entry.get("direction"),
+                "safety_critical": bool(entry.get("safety_critical")),
+            })
+        self.result.pins = watched
+
+    def _verb_expect_pin(self, step):
+        where = step.where
+        name, entry, node = self._component(step.need("component"), step, where)
+        raw = str(step.need("level")).strip().lower()
+        if raw not in ("high", "low"):
+            raise CompileError(
+                "%s: expect_pin level is %r; it must be `high` or `low`. The "
+                "level is ELECTRICAL, because that is what the emulator "
+                "observes; the board's polarity lives in its overlay and is "
+                "duplicated in components.yml for labelling only."
+                % (where, raw))
+        want = 1 if raw == "high" else 0
+        # OMITTED is not the same as zero. Omitting within_ms asks the
+        # instantaneous question -- what is the pin doing now -- which is
+        # expect_symbol's shape and a legitimate thing to ask. A window of 0 ms
+        # WRITTEN DOWN is a different mistake: it asks for an observation over
+        # no time at all, and _as_window_ms refuses it for every other verb. So
+        # the absent case never reaches that check, and an explicit 0 still
+        # gets the refusal it deserves.
+        raw_window = step.get("within_ms")
+        if raw_window is None:
+            window = 0
+        else:
+            window = _as_window_ms(raw_window, "%s: within_ms" % where)
+        require_edge = bool(step.get("require_edge", False))
+
+        # The human half of the label reads like the vehicle rather than like
+        # the silicon. If components.yml disagreed with the board about
+        # polarity this word would be wrong and the VERDICT would still be
+        # right, which is the only place an unverifiable duplicate belongs.
+        active_high = str(entry.get("active", "high")).strip().lower() != "low"
+        asserted = (want == 1) == active_high
+        word = entry.get("asserted_name" if asserted else "deasserted_name")
+        word = str(word).strip() if word else ("asserted" if asserted else "deasserted")
+        label = step.get("label") or ("%s %s (%s)" % (name, word, raw))
+
+        token = self._token()
+        self._emit(
+            'bench_expect_pin "%s" "%s" "%d" "%d" "%d" "%s"'
+            % (token, _safe_name(name, where), want, window,
+               1 if require_edge else 0,
+               self._text_arg(label, "%s: label" % where)))
+        self.result.tokens.append(
+            Token(token, step.verb, label, step.index, None, window,
+                  {"component": name, "node": node.id, "level": raw,
+                   "require_edge": require_edge}))
+        # A window is time the emulation actually spends, and it ALWAYS runs to
+        # its end -- never stopping early on a match -- for the reason
+        # _run_window states: a run whose length depends on its outcome makes
+        # every later step's timing outcome-dependent. With no window this
+        # emits nothing and the verb is the instantaneous question it was
+        # armed as.
+        self._run_window(window)
 
     def _verb_expect_symbol(self, step):
         where = step.where
@@ -3233,6 +3497,8 @@ def main(argv=None):
         cat = contract.load(project.catalog_path(args.contract, args.project))
         net.validate_against(cat)
         boards = BoardBook.load(project.boards_path(args.boards, args.project))
+        components = ComponentBook.load(
+            project.components_path(None, args.project))
         # Resolved here, beside the other strict switch, so a misspelt
         # $BENCH_CACHE refuses as usage rather than being read as "off".
         use_cache = cache_requested(args)
@@ -3289,7 +3555,8 @@ def main(argv=None):
                     if args.worker else Emulator(out_dir, args.wsl_distro))
         compiler = Compiler(net, cat, boards, scenario, out_dir,
                             emulator.behind_layer, coverage_requested(args),
-                            project_root=project_root, registry=registry)
+                            project_root=project_root, registry=registry,
+                            components=components)
         if args.snapshot:
             # Two scripts and two processes. The event log the judge reads is
             # assembled from both, and must come out byte-identical to a cold

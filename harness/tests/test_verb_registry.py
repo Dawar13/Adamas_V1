@@ -420,7 +420,15 @@ class TestHowManyVerbsAreAFileAndNothingElse(unittest.TestCase):
         # catching a defect at all -- an invariant naming the right value
         # catches that too, and was measured doing so -- but not FAILING
         # CORRECT FIRMWARE that resolves a contract-silent tie the other way.
-        self.assertEqual(len(REGISTRY), 20)
+        #
+        # 21 in 3.4a: expect_pin. It is the first assertion in this engine that
+        # does NOT read a value the firmware computed. expect_can decodes a
+        # frame the firmware filled in and expect_symbol reads the variable
+        # behind it -- one computation, two spellings -- so neither can
+        # separate a device that acted from a device that decided to. A pin is
+        # the act, and the defect it was built for (a contactor coil energised
+        # during the precharge dwell) leaves every frame on the bus correct.
+        self.assertEqual(len(REGISTRY), 21)
 
 
 if __name__ == "__main__":

@@ -22,6 +22,7 @@ operator sees are the words on this page.
 | [`expect_latched`](#expect-latched) | assert | real, scripted | yes | Demand that a signal never changed from the first value the firmware itself published |
 | [`expect_no_can`](#expect-no-can) | assert | real, scripted | yes | Demand the absence of a frame for a whole window |
 | [`expect_order`](#expect-order) | assert | real, scripted | yes | Demand that one frame was seen before another, over one window |
+| [`expect_pin`](#expect-pin) | assert | real | yes | Demand that a component's pin is at an electrical level |
 | [`expect_symbol`](#expect-symbol) | assert | real | yes | Demand that a variable holds a value |
 | [`flood`](#flood) | stimulus | real, scripted | yes | Put many frames on a bus in one tick, to load it or exhaust buffers |
 | [`mark`](#mark) | book | real, scripted | yes | A labelled point in the event log |
@@ -35,7 +36,7 @@ operator sees are the words on this page.
 | [`wait_uart`](#wait-uart) | observe | real | yes | Wait for text to appear on a node's console |
 | [`write_symbol`](#write-symbol) | stimulus | real | yes | Write a value into a running node's memory |
 
-20 verbs: 7 stimulus (make something happen), 2 power (cut, restore, reset), 1 time (let virtual time pass), 1 observe (wait for something), 8 assert (demand something, or forbid it), 1 book (record, annotate, checkpoint).
+21 verbs: 7 stimulus (make something happen), 2 power (cut, restore, reset), 1 time (let virtual time pass), 1 observe (wait for something), 9 assert (demand something, or forbid it), 1 book (record, annotate, checkpoint).
 
 ---
 
@@ -493,6 +494,102 @@ to be discovered.
 ```
 {verb}: 'sequence' has {count}, and an order needs at least two things to be in.
   For a single frame, use   expect_can: {{ id: ..., within_ms: ... }}   which is the verb for that.
+```
+
+---
+
+## expect_pin
+
+*Demand that a component's pin is at an electrical level*
+
+| | |
+|---|---|
+| class | `assert`, polarity `expect` |
+| applies to | real |
+| writes to the event log | `EXPECT_ARM` |
+| answered by | `EXPECT_MET` |
+| needs | `pin_read` |
+| compiled by | a handler, `_verb_expect_pin` |
+
+**Arguments**
+
+| Name | Type | Required | Notes |
+|---|---|---|---|
+| `component` | `component_ref` | yes |  |
+| `level` | `text` | yes |  |
+| `within_ms` | `window_ms` | no |  |
+| `require_edge` | `boolean` | no | defaults to `False` |
+| `label` | `label` | no |  |
+
+Asserts on the thing itself rather than on what the firmware says about it.
+
+Every other assertion this engine has about an output reads a value the
+firmware computed: expect_can decodes a frame the firmware filled in, and
+expect_symbol reads the variable the firmware wrote. Both are downstream of
+one computation, so neither can separate a device that ACTED from a device
+that merely decided to. A pin is the act.
+
+The level is ELECTRICAL -- `high` or `low` -- because that is what the
+emulator observes and it is the one reading that cannot be wrong. Polarity
+lives in the board's own devicetree overlay and is duplicated, for labelling
+only, in components.yml; see that file for why a duplicate that cannot move
+a verdict is the only kind worth having.
+
+With `within_ms` omitted this is instantaneous, like expect_symbol: a
+statement about now. With a window it stays armed and is settled by the pin's
+own transition, at the transition's instant rather than at the next poll.
+
+REQUIRE_EDGE, AND THE FAILURE THIS VERB IS MOST EXPOSED TO. Renode's GPIO
+hook is edge triggered. A pin nothing ever drives sits at its reset level for
+the whole run and will satisfy an assertion for that level having done
+nothing at all -- the same green as a firmware that drove it there
+deliberately. Every verdict therefore records which of the two happened:
+
+    met_by: edge            a transition into the level, inside the window
+    met_by: level           already there, and the pin has moved before now
+    met_by: initial_level   already there, and the pin has NEVER moved
+
+`initial_level` is not automatically wrong. "The coil is deasserted before
+precharge" is a real claim about a pin that is legitimately undriven, and
+refusing it would forbid a true assertion. So the engine reports rather than
+refuses -- and `require_edge: true` is how a scenario demands the stronger
+thing, that the FIRMWARE put the pin there. Use it wherever the point is that
+the device acted.
+
+**Refuses**
+
+`component_has_no_pin` — exit 2
+
+```
+component {component!r} names no pin, so there is no level to read
+```
+
+`component_not_observable` — exit 2
+
+```
+component {component!r} is not declared observable, so nothing may
+assert on it. Set `observable: true` in components.yml if the bench
+can really see it
+```
+
+`no_components_file` — exit 2
+
+```
+this project declares no components, so {component!r} names nothing.
+A component is declared in components.yml (PROJECT-V2 section 9.4)
+```
+
+`no_such_component` — exit 2
+
+```
+components.yml declares no component {component!r}
+```
+
+`node_is_scripted` — exit 2
+
+```
+component {component!r} belongs to node {node!r}, which has no firmware
+behind it and therefore drives no pins
 ```
 
 ---

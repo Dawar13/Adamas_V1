@@ -71,6 +71,16 @@ expect_exit 1 "$BENCH_PROJECT/scenarios/negative/forged-ordering-verdict.yml" 	"
 #     value comes off the bus rather than out of the compiler -- so a forgery
 #     can attack it in BOTH directions, and this case attacks in both.
 expect_exit 1 "$BENCH_PROJECT/scenarios/negative/forged-latch-verdict.yml" 	"a forged latch verdict must neither resolve nor redden a token"
+
+
+# 1 = the scenario ran and FAILED, for ONE of its two assertions. expect_pin
+#     adds PIN_WATCH, PIN_EDGE, PIN_STATE and the met_by MARK to the log, and
+#     the forgery that matters is not "make a red test green" in general -- it
+#     is forging the EDGE. A pin nothing drove satisfies an assertion for its
+#     reset level having done nothing, and met_by is the only thing separating
+#     that from a firmware that acted. A scenario able to write its own
+#     PIN_EDGE could turn initial_level into edge and claim the act.
+expect_exit 1 "$BENCH_PROJECT/scenarios/negative/forged-pin-verdict.yml" 	"a forged pin edge must not become an observation"
 # ---------------------------------------------------------------------------
 # The forgery deserves more than an exit code: prove nothing leaked through.
 # ---------------------------------------------------------------------------

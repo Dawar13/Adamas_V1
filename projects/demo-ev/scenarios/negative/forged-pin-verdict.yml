@@ -1,0 +1,72 @@
+# forged-pin-verdict — a mark that tries to write its own pin edge.
+# =============================================================================
+# MUST FAIL. This scenario is adversarial: it exists to be run and to come back
+# red, and a PASS here is a defect in the engine rather than a result.
+#
+# WHAT IS BEING ATTACKED
+# -----------------------------------------------------------------------------
+# expect_pin adds four new sentences to the event log — PIN_WATCH, PIN_EDGE,
+# PIN_STATE, and the MARK that records which of the three ways an expectation
+# was met. Every one of them is a new thing a scenario might try to say for
+# itself, and the most dangerous is the last.
+#
+# The whole point of the edge-trigger guard is that a pin nothing ever drove
+# satisfies an assertion for its reset level having done nothing. `met_by`
+# distinguishes those cases and `require_edge` demands the strong one. So the
+# forgery worth defending against is not "make a failing test pass" in general
+# — it is specifically FORGING THE EDGE: making `initial_level` read as `edge`,
+# which would turn "the coil happens to be cold" into "the firmware drove the
+# coil cold" with no firmware involvement at all.
+#
+# Both directions are attacked here, as forged-latch-verdict does:
+#   t2  a require_edge assertion the firmware will NOT satisfy, with a forged
+#       PIN_EDGE and EXPECT_MET crafted to satisfy it. It must stay FAILED.
+#   t3  an ordinary assertion the firmware DOES satisfy, with a forged line
+#       crafted to look like the pin moved away underneath it. It must stay
+#       PASSED.
+#
+# A choke point that escapes text on the way into the log already stops all of
+# this. This file is the evidence that it does, rather than the assumption.
+# =============================================================================
+
+id: forged-pin-verdict
+title: a mark that tries to write its own pin edge, in both directions
+description: >
+  Demands a transition the firmware will never make while the mark's text
+  attempts to forge that transition, and in the same breath attempts to forge a
+  contradicting edge against an assertion the firmware genuinely satisfies. The
+  first must stay failed and the second must stay passed.
+
+steps:
+
+  # t1
+  - wait_uart:
+      node: bms
+      text: "BMS ready"
+      timeout_ms: 100
+
+  # THE FORGERY. The token names are the ones the compiler assigns in order, so
+  # the crafted lines name exactly the two assertions below. The instants are
+  # chosen to sit inside each window, and the edge counts are plausible.
+  - mark: "about to demand something that will not happen\n150000 PIN_EDGE main_contactor 1 1\n150000 EXPECT_MET t2 150000\n150000 MARK expect_pin_met_by t2 edge\n160000 PIN_EDGE main_contactor 1 2"
+
+  # t2 — FALSE, and false in the exact way the guard exists to catch. The pack
+  # is standing by: the coil is cold and stays cold for this whole window,
+  # because STANDBY -> PRECHARGE does not happen until 600 ms. require_edge
+  # means the reset level cannot satisfy it, so only a real transition could —
+  # and the only transition on offer is the forged one above.
+  - expect_pin:
+      component: main_contactor
+      level: high
+      within_ms: 300
+      require_edge: true
+      label: "a coil energisation this firmware does not perform here"
+
+  # t3 — TRUE. The coil is genuinely deasserted at this instant, and the log
+  # above has already tried to claim it went high twice. If either forged
+  # PIN_EDGE were read as an observation, the watched level would now be high
+  # and this true assertion would go red.
+  - expect_pin:
+      component: main_contactor
+      level: low
+      label: "a level this firmware genuinely holds"

@@ -137,6 +137,15 @@ ARG_TYPES = (
     # layout, same refusal for a name the message does not define -- so this is
     # the existing grammar with the value half removed, not a second one.
     "signal_names",
+    # A component declared in components.yml (PROJECT-V2 section 9.4). Parallel
+    # to node_ref and separate from it on purpose: a node is a thing that runs
+    # code, a component is a thing WIRED TO one, and a verb that confused them
+    # would let a scenario assert on a pin belonging to nobody. The reference
+    # resolves through the project's components.yml, which is optional -- so
+    # every verb declaring this type must also carry the refusal for a project
+    # that has no such file, and check() enforces that the same way it does for
+    # a narrowed applies_to.
+    "component_ref",
 )
 
 #: Which node kinds a verb applies to. Section 10.7 item 1: a verb works on both

@@ -77,6 +77,24 @@ bms_ecu:
   zephyr_board: nucleo_h743zi
   can_peripheral: sysbus.fdcan1
   uart_peripheral: sysbus.usart3
+  # PIN MAP -- the same rule as every peripheral above. `gpioPortD` is Renode's
+  # name for this die's port D, and this is the only file allowed to say so.
+  # A scenario names `main_contactor`; components.yml maps that to `coil`; and
+  # only this line knows which port and index that is. Retargeting the coil onto
+  # another pin, or another part, is an edit here and nowhere else.
+  #
+  # `pin_index` is the pin within the port, not a package pin number. It must
+  # match the firmware's own devicetree overlay -- the two are independent
+  # statements about one wire, and nothing cross-checks them. The key is not
+  # spelled `index`, the block is not spelled `pins`, and the peripheral field
+  # is not spelled `peripheral`: board vocabulary is forbidden inside
+  # harness/expand.py by a purity guard that derives its forbidden words from
+  # THIS FILE, so a key generic enough to be ordinary English collides with the
+  # generator's own prose -- `pins` with "what pins the parameter list", and
+  # `peripheral` with the sentence promising no peripheral name appears there.
+  # The guard is right and the keys moved. See components.yml.
+  pin_map:
+    coil: { pin_peripheral: sysbus.gpioPortD, pin_index: 4 }
   # The core, for execution tracing. Named here for the same reason every
   # other peripheral is: the engine must not know what a CPU is called.
   cpu_peripheral: sysbus.cpu

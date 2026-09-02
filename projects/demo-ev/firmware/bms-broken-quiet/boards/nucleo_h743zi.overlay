@@ -59,3 +59,33 @@
 	bosch,mram-cfg = <0x0 8 0 3 1 0 5 6>;
 	status = "okay";
 };
+
+/*
+ * ---------------------------------------------------------------------------
+ * THE MAIN CONTACTOR, AS A PHYSICAL PIN
+ * ---------------------------------------------------------------------------
+ * Until now the contactor existed only as `contactor_state` inside 0x602 --
+ * a number this ECU publishes about itself. That is telemetry, not the
+ * actuator: a firmware that computes the right state and never drives the
+ * coil reports a perfectly healthy pack while the high-voltage system does
+ * the opposite of what the bus says. Nothing on a CAN-only bench can tell
+ * those two apart, because both are read from the same variable.
+ *
+ * PD4 is free on this board. PD0/PD1 are fdcan1 and PD8/PD9 are the console
+ * usart3, so port D is already in use by two peripherals through pinctrl --
+ * that does not collide with a plain GPIO on a different pin of the same
+ * port, which was confirmed on the emulator before this line was written.
+ *
+ * ACTIVE HIGH: the pin is asserted when the main contactor is commanded
+ * CLOSED. The polarity is declared here rather than assumed in the C, so a
+ * board that wires the coil driver the other way is an edit to this file.
+ */
+/ {
+	contactor {
+		compatible = "gpio-leds";
+		contactor_main: contactor_main {
+			gpios = <&gpiod 4 GPIO_ACTIVE_HIGH>;
+			label = "main contactor coil";
+		};
+	};
+};

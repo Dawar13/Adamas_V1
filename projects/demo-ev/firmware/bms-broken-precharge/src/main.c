@@ -456,6 +456,12 @@ int main(void)
 		printk("bms CAN unavailable, continuing without the bus\n");
 	}
 
+	/* The contactor coil. After CAN, for the same reason CAN is after the
+	 * banner: each subsystem announces its own failure in its own order,
+	 * and a scenario waiting on the banner is waiting on main() having
+	 * started, not on every peripheral having come up. */
+	bms_pins_init();
+
 	k_timer_start(&bms_tick_timer, K_MSEC(BMS_TICK_MS), K_MSEC(BMS_TICK_MS));
 
 	for (;;) {
@@ -487,6 +493,12 @@ int main(void)
 		/* 5, 6 — where we are, and what that means for the outputs. */
 		state_machine_run(&bms);
 		derive_outputs(&bms);
+
+		/* 6b - the contactor coil, driven from the value derive_outputs
+		 * just decided. Before the wire, so a frame reporting the
+		 * contactor can never leave this node ahead of the pin it is
+		 * reporting on. */
+		bms_pins_update(&bms);
 
 		/* 7 — the wire. */
 		bms_can_service_tx(&bms);
