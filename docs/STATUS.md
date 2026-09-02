@@ -2662,6 +2662,170 @@ unrelated to this task.
   not built.
 - **A sweep on the new scenario.** It declares none.
 
+## Phase 3 §3.4b — set_component (in progress)
+
+2026-09-02, branch `v2-phase1`. PROJECT-V2 §10.2 and §9.4. The spikes are done
+and they changed the design; the verb is not built yet.
+
+### The sentence the whole task rests on
+
+The BMS firmware says it in its own source, and has since Phase 1:
+
+> The harness writes these through the ELF symbol table, into the running
+> machine's memory, exactly as a sensor driver ISR would — so the firmware
+> cannot distinguish "the temperature sensor reported this" from "the test
+> wrote this". That is the whole injection mechanism: no sensor peripheral
+> models are needed, **and in exchange the sensor driver and its I2C/ADC
+> transaction are not exercised.**
+
+Every sensor input in this suite is `write_symbol`. `set_component` is the verb
+that pays that debt: a physical value, into a modelled sensor, read back by the
+firmware's own driver over a real I2C transaction. It is the same move §3.4a
+made for outputs — from the number the firmware computed to the thing that
+actually happened — applied to inputs.
+
+### The spikes, which ran first and changed the design
+
+`projects/demo-ev/spike-sensor` (throwaway, gitignored — which is why the
+measurements are recorded here rather than only there). Renode 1.16.1
+`Sensors.TMP108` at `i2c1 0x48`, Zephyr's own `ti,tmp108` driver, `i2c1`
+inherited from the stock `stm32h743.repl`.
+
+**F1 — the model stores ONE SIGNED BYTE of whole degrees.** Reading the
+temperature register over I2C the way a driver does:
+
+```
+set=  60.0000 prop=  60.0000  bytes=3C 02
+set=  59.9000 prop=  59.0000  bytes=3B 02
+set=  55.1000 prop=  55.0000  bytes=37 02
+set=  54.9000 prop=  54.0000  bytes=36 02
+set= -10.5000 prop= -10.0000  bytes=F6 02
+```
+
+Byte 0 is whole degrees; byte 1 is a constant `0x02`. **The quantum is 1 °C and
+it truncates TOWARD ZERO**, not rounds — `59.9 → 59`, `22.5 → 22`, `-27.5 →
+-27`. The 12-bit 0.0625 °C resolution a real TMP108 has does not exist in this
+model, and writing the register directly does not recover it: `0x3710` written
+for 55.0625 came back as 16.0, the last byte landing in the register as whole
+signed degrees. There is no finer path in.
+
+**F2 — the `.007812` everyone quotes is not quantisation.** It is byte 1. The
+driver reads the pair as Q8.8, so `0x3C02 = 15362`, and `15362 / 256 =
+60.0078125`. The constant `0x02` becomes a permanent fractional term of 2/256,
+and **every reading through this path is (whole degrees) + 0.0078125.**
+
+That was a prediction from F1's register dump, and it was tested rather than
+asserted — 25.0 and 54.9 set, and the firmware printed:
+
+```
+SPIKE sample 00 t=300 ms rc=0 val=25.007812
+SPIKE sample 05 t=800 ms rc=0 val=54.007812
+```
+
+`54.9` truncated to `54`, then `+0.0078125`. Confirmed.
+
+So a verb promising the firmware reads what the scenario set would be wrong
+twice: by up to a degree of truncation, and by a fixed offset no scenario can
+remove. **Never promise equality.**
+
+**F3 — negatives come back as +246, in the flattering direction.** Set −10.5;
+the model keeps −10.0, byte `0xF6`; the driver reads that byte **unsigned**:
+
+```
+SPIKE sample 09 t=1201 ms rc=0 val=246.007812
+```
+
+`0xF602 / 256 = 246.0078125`. Every sub-zero temperature reads as `256 + t`.
+This firmware has a temperature-based charge inhibit, so a cold-weather
+charging test — an ordinary thing to want — would set −10 °C, the firmware
+would see +246 °C, and the test would very likely PASS having "detected" a
+fault for entirely the wrong reason. That is §28.3's flattering direction, and
+it is why `set_component` must REFUSE a negative here rather than pass it on.
+
+**F4 — a mid-run set is picked up by the very next read.** Set at 800 ms and
+again at 1200 ms, on a firmware sampling every 100 ms:
+
+```
+sample 04 t= 700 ms val= 25.007812     before the 800 ms set
+sample 05 t= 800 ms val= 54.007812     the set landed
+sample 08 t=1101 ms val= 54.007812     before the 1200 ms set
+sample 09 t=1201 ms val=246.007812     the set landed
+```
+
+So this is a real mid-scenario verb, not a setup-only one.
+
+**F5 — the transaction count: one mechanism fails, one works.** The guard the
+whole verb rests on is that a `set_component` the firmware never reads is a
+silent no-op — the same failure class `expect_pin`'s `initial_level` exists to
+expose.
+
+`AddWatchpointHook` on the I2C data registers is **unusable**: it installs
+without complaint and then the emulation never advances — 400 ms of virtual
+time did not complete and the firmware never reached its first print. Measured
+against a control, the identical script with the hooks removed running to
+`SPIKE done`. Every register access crossing into IronPython is too expensive
+to leave installed.
+
+Hooking the controller's `EventInterrupt` GPIO works and is cheap — the same
+mechanism §3.4a leaves installed for a whole suite:
+
+```
+COUNT quiet-window-only  t=300ms  rx_events=3   edges=0, 0, 0
+COUNT after-six-samples  t=900ms  rx_events=15  edges=0,0,0,300,300,400,400,500
+```
+
+Three events at t=0, which are the driver's own CONF-register init writes, then
+**exactly two per sensor read**, and none at all during the 300 ms quiet window
+before the firmware's first read. Record the count when the verb fires, report
+how many transactions happened after it, and a set nobody read is visible
+rather than green.
+
+`RxNotEmpty` is not hookable — it is a plain bool, not a GPIO. Only
+`EventInterrupt` and `ErrorInterrupt` are GPIO lines on this model.
+
+**The stated limit of that count.** `EventInterrupt` belongs to the CONTROLLER,
+not to a device address. With one device on `i2c1` it is a count of traffic to
+that device and nothing else; the day a second device joins that controller it
+stops being that, and this line carries no address to filter on. Recorded while
+it is true rather than discovered when it stops being true.
+
+### What the spikes force on the verb
+
+1. `set_component` takes a physical value and must report what the sensor
+   actually KEPT — the two differ by up to 1 °C.
+2. It must refuse a value it cannot represent rather than silently truncate.
+   Silent truncation is an injection that reads as though it happened, which is
+   the failure class this repository has now found eight times.
+3. It must refuse negatives on this component outright (F3).
+4. Nothing downstream may promise equality. The honest tolerance floor is 1 °C
+   of truncation plus a fixed +0.0078125.
+5. The transaction count travels with the verdict.
+
+### Why the TMP108 is a SEPARATE temperature channel
+
+`g_cell_temp_dC` stays exactly as it is, and every existing test keeps driving
+it through `write_symbol`. That is not caution, it is forced by F1: this suite's
+overtemp boundaries are spaced 0.1 °C apart (`overtemp-sweep-549/550/551`, in
+deci-degrees) and a sensor with a 1 °C quantum **cannot express them**. A
+sensor-driven boundary at that resolution is not a test that would be less
+precise; it is a test that cannot be written.
+
+So the modelled sensor is a second channel alongside the injected one, and the
+rebuild that adds it must be measured the way §3.4a's step 0 was — an input
+added, no decision changed, and the suite differing only in the entries that
+must move.
+
+### What has NOT been run
+
+- **The verb.** `harness/verbs/set_component.yml` does not exist. Nothing in
+  this section is a claim about a verb; it is a claim about the model and the
+  driver, which is what the spikes measured.
+- **The firmware change.** No `bms` build reads the TMP108 yet.
+- **A defective build, a scenario, or a gate arm.** None exist.
+- **The second coil scenario for §3.4a.** Deliberately held, to be added in
+  this pass so one gate run closes both single-test fragilities rather than two
+  runs closing one each. The §3.4a warning stays unsilenced until then.
+
 ## Known findings
 
 Open defects, observed rather than theorised. Each names what was seen, what it costs,
