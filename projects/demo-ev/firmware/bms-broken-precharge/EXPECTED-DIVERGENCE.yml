@@ -21,8 +21,13 @@ variant_of: bms
 defect: the main contactor closes before the precharge resistor is engaged
 
 diverging_tests:
-  # The ordering assertion. The only test here whose failure NAMES this defect.
+  # The ordering assertion, and the coil. These two are the tests here whose
+  # failure NAMES this defect; the twenty below see it by accident.
   - precharge-order
+  # Added when expect_pin shipped, from the gate own report. See the last
+  # section of the rationale: a NEW instrument seeing an OLD defect, which is
+  # the one way this list may grow without the binary having changed.
+  - contactor-pin-follows-command
   # ...and every swept variant that witnesses the contactor mid-dwell before
   # injecting. Written as the 600 ms moment rather than as file names: what
   # diverges is the CLASS of variants that sample inside the dwell, and the
@@ -68,8 +73,32 @@ rationale: |
   dimension, and nineteen of these twenty stop catching this binary while
   precharge-order still does.
 
-  IF THE OBSERVED SET GROWS, the extra entry is the thing to investigate, not to
-  add. This defect lives entirely inside the precharge dwell, so a test that
+  THE SET GREW ONCE, AND THIS IS THE ENTRY. contactor-pin-follows-command was
+  added to the suite with expect_pin and it reddens this binary. That is not a
+  second defect and not a leak: it is a new instrument reading a signal nothing
+  could read before. Exactly ONE of that test three pin assertions moves --
+
+      main contactor still open DURING the precharge dwell
+
+  -- and only that one, which is precisely right for this defect. Mid-dwell, at
+  700 ms, this binary has the main contactor SHUT, so the coil is hot and the
+  assertion fails. The later assertion, which demands an EDGE into `high` inside
+  a 300 ms window from 700 ms, still passes: this build swaps the two halves of
+  the dwell rather than removing either, so the coil goes cold again at 700 ms
+  when the resistor is engaged and hot again at 800 ms on the real commit to
+  CLOSED. There is a genuine transition for require_edge to find. A defect that
+  merely reorders the dwell is therefore distinguishable, by which assertions
+  move, from bms-broken-contactor-pin, which energises the coil at 600 ms and
+  leaves it there -- and there both assertions fail.
+
+  THIS ENTRY IS THE ONLY KIND THAT DESCRIBES THE DEFECT CORRECTLY, alongside
+  precharge-order. The nineteen sweeps below fail on a PRECONDITION and report a
+  sweep that could not establish its starting state. This one reports a main
+  contactor that is shut during the precharge dwell, which is what is actually
+  wrong.
+
+  IF THE OBSERVED SET GROWS AGAIN, the extra entry is the thing to investigate,
+  not to add. This defect lives entirely inside the precharge dwell, so a test that
   never brings high voltage up cannot see it and a test that only inspects the
   steady state cannot either. Any further divergence would mean the binary
   acquired a second defect, or that a verdict moved for a reason that is not

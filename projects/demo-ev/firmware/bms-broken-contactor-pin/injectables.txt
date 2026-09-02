@@ -1,0 +1,17 @@
+# Symbols the harness may write into this node's running memory.
+#
+# Read twice from this one file:
+#   CMakeLists.txt          -> -Wl,--undefined=<sym>, so the linker cannot
+#                              garbage-collect a global nothing else roots
+#   scripts/build-firmware.sh -> asserts each name is present in the built ELF
+#
+# The firmware genuinely reads all four, every 10 ms tick, and every one of
+# them drives real logic -- see the comment block on their definitions in
+# src/main.c. A symbol listed here that the firmware never uses would be a
+# retained address with nothing behind it, which is only marginally better
+# than no symbol at all.
+
+g_cell_temp_dC
+g_pack_mv
+g_pack_ma
+g_tx_enable

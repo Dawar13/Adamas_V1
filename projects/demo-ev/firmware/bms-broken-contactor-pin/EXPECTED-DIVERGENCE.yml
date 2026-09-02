@@ -1,0 +1,87 @@
+# What this defective build is expected to change, and nothing else.
+# =============================================================================
+# Written from the divergence gate own report. The list below is OBSERVED,
+# never predicted: the gate ran the whole suite against this binary and against
+# the good one and recorded which verdicts moved.
+#
+# The gate fails if the observed set differs from this list in EITHER direction.
+# =============================================================================
+
+variant_of: bms
+
+defect: the main contactor coil is energised during the precharge dwell, 200 ms early
+
+diverging_tests:
+  # ONE test, and it is the new one. The whole suite was run against this
+  # binary -- 95 tests -- and this is the only verdict that moved.
+  - contactor-pin-follows-command
+
+rationale: |
+  THIS IS THE BINARY expect_pin WAS BUILT FOR, AND THE GATE AGREED WITH THE
+  CLAIM RATHER THAN QUALIFYING IT. That is the unusual outcome here; read what
+  it cost before quoting it.
+
+  THE DEFECT IS ONE OPERATOR. bms_pins.c asks `c->contactor != OPEN` where the
+  good firmware asks `c->contactor == CLOSED`. PRECHARGE is neither, so the good
+  build leaves the coil cold through the dwell and this one energises it the
+  instant the dwell begins -- 200 ms early, BMS_PRECHARGE_DWELL_MS, onto a bus
+  the precharge resistor has not finished charging. On a vehicle that is the
+  inrush the dwell exists to prevent, and a welded main contactor is a pack that
+  cannot be opened during a crash or a fire.
+
+  WHAT THE GATE MEASURED. 95 tests, one divergence. contactor_for() is
+  untouched, so 0x602 reports OPEN, PRECHARGE and CLOSED at exactly the instants
+  the good firmware reports them; the state machine is untouched, no fault is
+  raised, the console transcript is unchanged and the frame count on the bus is
+  unchanged. precharge-order asserts the three contactor_state values arrive in
+  order, and against this binary they do. Every boundary and sweep test that
+  mentions the contactor reads the same number from the same computation, and
+  every one of them stays green. The pack account of itself is accurate
+  throughout. What moved is the wire.
+
+  So the claim bms_pins.c put on trial -- that nothing already in this suite can
+  see this -- was answered by measurement and not by assertion, and it held.
+  Ninety-four tests are blind to a main contactor closing 200 ms early.
+
+  BOTH PIN ASSERTIONS MOVED, AND THE SECOND ONE IS require_edge EARNING ITS
+  PLACE. The report names two:
+
+      main contactor still open DURING the precharge dwell
+      coil energised only once the pack commits to CLOSED
+
+  The first is the direct reading: mid-dwell, at 700 ms, the coil is hot. The
+  second fails for a subtler reason and is the whole argument for require_edge.
+  That step arms at 700 ms and demands a transition into `high` within 300 ms.
+  On this binary the coil went high at 600 ms and simply stays there, so there
+  is no edge left to observe and the assertion is not met. WITHOUT
+  require_edge it would have PASSED -- the level is high, which is what a
+  scenario would naively ask for -- and a build that closed the main contactor
+  200 ms too early would have satisfied an assertion that the pack closed it on
+  time. That is the exact failure mode the manifest documents, on a real binary.
+
+  IT IS CAUGHT BY EXACTLY ONE TEST, AND THE GATE WARNS ABOUT THAT. The warning
+  is correct and is not to be silenced. One file carries this entire proof:
+  delete contactor-pin-follows-command, or let its 700 ms sampling instant drift
+  outside the 200 ms dwell, and this binary becomes invisible to the suite while
+  the suite stays green. The honest fix is a second scenario asserting on the
+  coil from a different direction, not a wider list here.
+
+  Note the asymmetry with the sweeps that catch bms-broken-precharge: those
+  nineteen see that binary by ACCIDENT, through a precondition about the state
+  at 600 ms, and describe it as a sweep that could not set up its starting
+  state. This test sees this binary on purpose and names it.
+
+  IF THE OBSERVED SET GROWS, the extra entry is the thing to investigate, not to
+  add. This defect changes no number the firmware publishes and no instant at
+  which it publishes one; it changes a GPIO level and nothing else. A test that
+  does not read the pin therefore cannot see it, so any further divergence would
+  mean the binary acquired a second defect, or that a verdict moved for a reason
+  that has nothing to do with the contactor -- which would mean something
+  non-deterministic is leaking into a run. Both are worse than a red gate.
+
+  IF IT SHRINKS TO NOTHING, that is the more alarming direction, and it is the
+  one to expect. It would mean the coil assertion stopped reading the coil --
+  a watch that failed to install, a component that quietly stopped being
+  observable, or a pin retargeted in boards.yml without the scenario noticing.
+  The gate reports a missing divergence and fails, rather than reporting a
+  clean suite.
