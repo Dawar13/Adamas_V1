@@ -2450,6 +2450,218 @@ The gate is 7 arms over 94 tests — 658 suite runs, ~2h wall.
   why the verb was gated in §3.3.
 - **Sweeps.** Neither new scenario declares one.
 
+## Phase 3 §3.4a — the pin verb, and the first assertion on an act ✓
+
+2026-09-02, branch `v2-phase1`. PROJECT-V2 §10.2 and §9.4. The first verb in
+this engine that reads something the firmware did not compute.
+
+### The sentence the whole task rests on
+
+Every assertion this engine had about an output read a value the firmware
+COMPUTED. `expect_can` decodes a frame the firmware filled in; `expect_symbol`
+reads the variable behind that frame. One computation, two spellings. Neither
+can separate a device that ACTED from a device that decided to and did nothing.
+
+A pin is the act. On a vehicle the two are not close to the same thing: the
+failure they hide is a pack whose telemetry reads CLOSED, whose fault log is
+clean, and whose high-voltage system is open — or the reverse.
+
+### What was built
+
+| | Where |
+|---|---|
+| `expect_pin` | `harness/verbs/expect_pin.yml`, class `assert`, polarity `expect`, capability `pin_read` |
+| The handler | `_verb_expect_pin` and `_emit_pin_watches` in `run_scenarios.py` |
+| The emulator-side half | `bench_pin_watch` / `bench_expect_pin` in `can_toolkit.py`; log kinds `PIN_WATCH`, `PIN_EDGE` |
+| The wire, in three files | scenario names `main_contactor` → `components.yml` maps it to pin key `coil` → only `boards.yml` knows `sysbus.gpioPortD#4` |
+| The output | `bms_pins.c` in `firmware/bms`, and in all eight defective builds |
+| The scenario | `scenarios/contactor-pin-follows-command.yml` |
+| The defect | `firmware/bms-broken-contactor-pin` |
+| The adversarial case | `scenarios/negative/forged-pin-verdict.yml`, and a fifth check in `check-negative.sh` |
+
+### Step 0 first: an output added, and nothing else moved
+
+The pin was added to the good firmware as its own commit, and measured before
+anything asserted on it. 94 tests before and after, same suite:
+
+```
+94 of 94 passed, both binaries
+94 of 94 differ in EXACTLY two entries, and no others:
+  provenance.inputs_sha256.firmware:bms
+  run.machines[0].binary_sha256
+```
+
+Both are the same bms ELF hash, which MUST move; charger and vcu hold. A
+rebuild that adds an output and changes no decision — so that when a verdict
+later moves, the pin is the only thing it can be attributed to.
+
+`bms_pins.c` prints nothing on a successful transition, deliberately. A console
+line saying the coil was energised is one more thing the firmware SAYS about
+itself, from the same computation that already says it in 0x602: it would
+rebuild the blind spot in the console. The failure paths still print.
+
+### The failure this verb is most exposed to, and what stops it
+
+Renode's GPIO hook is EDGE triggered. A pin nothing ever drives sits at its
+reset level for the whole run and satisfies an assertion for that level having
+done nothing at all — the same green as a firmware that drove it there on
+purpose. So a watch records the level at INSTALL, before an instruction has
+run, and every verdict says which of three ways it was met:
+
+```
+met_by: edge            a transition into the level, inside the window
+met_by: level           already there, and the pin has moved before now
+met_by: initial_level   already there, and the pin has NEVER moved
+```
+
+`initial_level` is not automatically wrong — "the coil is deasserted before
+precharge" is a true claim about a legitimately undriven pin — so the engine
+REPORTS rather than refuses, and `require_edge: true` is how a scenario demands
+that the firmware acted.
+
+### The gate, and the claim it upheld
+
+`bms-broken-contactor-pin` is one operator: `c->contactor != OPEN` where the
+good build asks `== CLOSED`. PRECHARGE is neither, so the coil is energised the
+instant the dwell begins — 200 ms early, onto a bus the precharge resistor has
+not finished charging.
+
+Its marker shipped EMPTY, which this gate treats as a declared gap and a
+failure, so the gate had to answer out loud rather than confirm a prediction.
+It answered:
+
+```
+bms-broken-contactor-pin   caught_by 1    observed: contactor-pin-follows-command
+```
+
+**1 of 95.** `contactor_for()` is untouched, so 0x602 reports OPEN, PRECHARGE
+and CLOSED at exactly the instants the good firmware reports them.
+`precharge-order` asserts those three values arrive in order, and against this
+binary they do. No fault is raised, the console transcript is unchanged, the
+frame count on the bus is unchanged. The pack's account of itself is accurate
+throughout. What moved is the wire, and only something reading the wire said so.
+
+### `require_edge` earned its place on a real binary, not in a test
+
+Both pin assertions moved, and the second is the one worth reading:
+
+```
+main contactor still open DURING the precharge dwell   -> nothing matched
+coil energised only once the pack commits to CLOSED    -> nothing matched
+```
+
+The second arms at 700 ms and demands a transition into `high` within 300 ms.
+This binary drove the coil high at 600 ms and leaves it there, so there is no
+edge left to observe. **Without `require_edge` it would have PASSED** — the
+level IS high, which is what a scenario naively asks for — and a build that
+closed the main contactor 200 ms early would have satisfied an assertion that
+the pack closed it on time.
+
+### The gate made an existing marker incomplete, which is the gate working
+
+`contactor-pin-follows-command` also reddens `bms-broken-precharge`, whose
+marker says in its own words that a growing set is to be investigated rather
+than added. It was investigated. It is a NEW instrument reading an OLD defect,
+not a second defect, and the shape of the failure proves it: exactly ONE of the
+three pin assertions moves there, the mid-dwell one. That build SWAPS the halves
+of the dwell rather than removing either, so the coil goes cold again at 700 ms
+and hot at 800 ms and there IS an edge for `require_edge` to find.
+
+```
+bms-broken-contactor-pin   both assertions fail   coil hot from 600 ms, no edge
+bms-broken-precharge       one assertion fails    coil hot 600-700, edge at 800
+```
+
+Two defects about the same contactor, told apart by WHICH assertions move.
+
+It is also the only entry in that marker that describes the defect correctly.
+The nineteen sweeps beside it fail on a PRECONDITION — "at 600ms the device
+reports PRECHARGE, which is the condition this variant injects into" — and
+report a sweep that could not establish its starting state. A true observation,
+attributed to the wrong thing. This one reports a main contactor shut during
+the precharge dwell.
+
+### Caught by exactly one test, and the warning is not silenced
+
+```
+WARNING · 2 of 7 defective binaries are caught by exactly ONE test
+    bms-broken-contactor-pin  rests entirely on contactor-pin-follows-command
+    bms-broken-wrongcode      rests entirely on fault-code-not-overwritten
+```
+
+One file carries this whole proof. Delete that scenario, or let its 700 ms
+sampling instant drift outside the 200 ms dwell, and this binary becomes
+invisible while the suite stays green. The honest fix is a second scenario
+asserting on the coil from another direction. A wider marker is not.
+
+### Three files, one wire — and the guard that renamed two keys
+
+A scenario names `main_contactor`; `components.yml` maps that to the pin key
+`coil`; only `boards.yml` knows it is `sysbus.gpioPortD#4`. Retargeting the coil
+is an edit in one file.
+
+The keys are `pin_map`, `pin_peripheral` and `pin_index` rather than the obvious
+spellings because `expand.py`'s purity guard derives its forbidden board
+vocabulary from `boards.yml` ITSELF, and `pins`/`peripheral` collided with the
+generator's own prose. The guard was right and the keys moved.
+
+### Polarity cannot corrupt a verdict
+
+The devicetree overlay and `components.yml` state the active level
+independently and nothing cross-checks them. So the assertion is on the
+ELECTRICAL level — the one reading that cannot be wrong — and
+`components.yml`'s `active`/`asserted_name` render the LABEL only. A
+disagreement makes a report read oddly and moves no verdict, which is the only
+safe place to keep an unverifiable duplicate.
+
+### Why `bms_pins.c` went into all eight defective builds
+
+A variant without the coil would diverge on `expect_pin` for the wrong reason —
+absence of a pin rather than misuse of it — and the gate cannot tell those
+apart.
+
+### The gate was run in shards, because it has never finished as one job
+
+760 runs, ~2 h. Three previous attempts were killed by an environment limit on
+long jobs, and a fourth by a laptop shutdown. It was run here as fifteen
+bounded chunks with `--reuse --no-expand`. That is safe because `--reuse` is
+per-TEST and asks one narrow question — does a stored `results.json` record
+this exact test hash and this exact binary hash — so it can only ever skip work
+that would have produced the same answer. Every stored result from before
+§3.4a was stale by binary hash anyway, `bms` having been rebuilt in step 0, so
+nothing pre-pin could leak in. The confirming run reused all 760 and executed
+nothing.
+
+### Observed
+
+```
+harness/tests, every module                       979 tests   OK (3 skipped)
+scripts/verb-docs.py --check                      current, 21 verbs
+scripts/check-negative.sh                         5 of 5 adversarial cases correct
+check-divergence.sh                               gate held, 7 of 7, 2 warnings
+```
+
+The gate is 8 arms over 95 tests — 760 suite runs.
+
+`scripts/verify-refusals.sh` fails on break 1c. That is KF-1, unchanged and
+unrelated to this task.
+
+### What has NOT been run
+
+- **A second scenario for `expect_pin`.** The gate's warning above is the
+  measurement of that gap, not a guess about it.
+- **`expect_pin` on any node but bms.** The verb is node-agnostic and the
+  wiring is generic; that is an argument, not a measurement.
+- **A contactor feedback INPUT.** The pin is an output only. `bms_pins.c` reads
+  nothing back, deliberately — feedback is what makes WELDED detectable and it
+  is a behaviour change with its own before-and-after.
+- **`bms-broken-reclose` and `bms-priority-swapped` under the whole suite.**
+  Both gained `bms_pins.c` and both are still markerless, so both are still
+  inert to the gate.
+- **`expect_within_range`.** Still named in `expect_always`'s manifest and still
+  not built.
+- **A sweep on the new scenario.** It declares none.
+
 ## Known findings
 
 Open defects, observed rather than theorised. Each names what was seen, what it costs,
